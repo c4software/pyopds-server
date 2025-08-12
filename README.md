@@ -1,4 +1,4 @@
-# OPDS Server for EPUB Library
+# PyOPDS Server - OPDS Server for EPUB Library
 
 This project is a lightweight OPDS (Open Publication Distribution System) server written in Python 3, designed to expose a library of EPUB files stored in a local directory, compatible with clients like Calibre, KoReader, or any other OPDS-compliant reader. It uses only Python's standard libraries and `ebooklib` to extract metadata from EPUB files.
 
@@ -84,6 +84,10 @@ services:
    - Add a new catalog with the URL: `http://<your-ip>:8080/opds`.
 2. Browse the book list at the `/opds/books` endpoint.
 3. Download books via the links provided in the OPDS feed.
+
+## Security Consideration
+
+This server is designed to be lightweight and does not include built-in authentication or HTTPS support. For production use, it is strongly recommended to place the server behind a reverse proxy (e.g., SWAG, Nginx, or Nginx Proxy Manager).
 
 ## License
 
