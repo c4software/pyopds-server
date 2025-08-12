@@ -7,7 +7,6 @@ This project is a lightweight OPDS (Open Publication Distribution System) server
 - **OPDS Catalog**: Exposes EPUB books via an OPDS feed accessible at the `/opds` endpoint.
 - **Subdirectory Support**: Scans EPUB files in the configured directory and its subdirectories up to a maximum depth defined by the `MAX_DEPTH` environment variable (default: 2).
 - **Sorted by Most Recent**: Books are listed in the OPDS feed sorted by modification date, with the most recently modified files appearing first.
-- **Secure Downloads**: Handles EPUB file downloads with protection against *path traversal* attacks.
 - **Metadata Extraction**: Extracts title and author from EPUB files for rich display in the catalog.
 - **Docker Deployment**: Includes a `Dockerfile` and `docker-compose.yml` for easy containerized deployment.
 
