@@ -134,6 +134,10 @@ class OPDSHandler(http.server.BaseHTTPRequestHandler):
         super().__init__(*args, **kwargs)
     
     def do_GET(self):
+        self.extra_xml_header = False
+        if self.path.startswith('/opds') or self.path.startswith('/download/'):
+            self.extra_xml_header = True
+
         if self.path == '/opds':
             self._handle_root_catalog()
         elif self.path == '/opds/books':
@@ -145,7 +149,7 @@ class OPDSHandler(http.server.BaseHTTPRequestHandler):
         elif self.path.startswith('/download/'):
             self._handle_download()
         else:
-            self.send_error(404, 'Not found')
+            self._send_error(404, 'Not found')
     
     def _handle_root_catalog(self):
         links = [
@@ -230,7 +234,7 @@ class OPDSHandler(http.server.BaseHTTPRequestHandler):
     
     def _validate_folder_access(self, folder_full_path):
         if not self.security.is_within_library_dir(folder_full_path) or not os.path.isdir(folder_full_path):
-            self.send_error(404, 'Folder not found')
+            self._send_error(404, 'Folder not found')
             return False
         return True
     
@@ -292,19 +296,19 @@ class OPDSHandler(http.server.BaseHTTPRequestHandler):
         
         # Check for path traversal attempts
         if self.security.has_path_traversal(filename):
-            self.send_error(403, 'Access denied: Invalid path')
+            self._send_error(403, 'Access denied: Invalid path')
             return
         
         file_path = os.path.join(LIBRARY_DIR, filename)
         
         if not self.security.is_within_library_dir(file_path):
-            self.send_error(403, 'Access denied: Path traversal detected')
+            self._send_error(403, 'Access denied: Path traversal detected')
             return
             
         if self._is_valid_epub_file(filename, file_path):
             self._serve_file(file_path, filename)
         else:
-            self.send_error(404, 'File not found')
+            self._send_error(404, 'File not found')
     
     def _is_valid_epub_file(self, filename, file_path):
         return filename.endswith('.epub') and os.path.exists(file_path)
@@ -321,8 +325,16 @@ class OPDSHandler(http.server.BaseHTTPRequestHandler):
     def _send_xml_response(self, xml, catalog_kind):
         self.send_response(200)
         self.send_header('Content-Type', f'application/atom+xml;profile=opds-catalog;kind={catalog_kind}')
+        self.send_header('Content-Type', 'application/xml')
         self.end_headers()
         self.wfile.write(xml.encode('utf-8'))
+
+    def _send_error(self, code, message):
+        self.send_response(code)
+        self.send_header('Content-Type', 'application/xml')
+        self.end_headers()
+        error_xml = f'<?xml version="1.0" encoding="UTF-8"?><error><code>{code}</code><message>{message}</message></error>'
+        self.wfile.write(error_xml.encode('utf-8'))
 
 
 def main():
