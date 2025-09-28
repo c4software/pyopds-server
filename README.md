@@ -28,33 +28,43 @@ If you browse your OPDS feed in a web browser, it will display a simple HTML rep
 ### With Docker
 
 1. Clone the repository:
+
    ```bash
    git clone https://github.com/your-username/your-repo.git
    cd your-repo
    ```
+
 2. Create a `books/` directory and place your EPUB files in it (e.g., `books/author1/book.epub`).
 3. Start the server with Docker Compose:
+
    ```bash
    docker-compose up --build
    ```
+
 4. Access the OPDS catalog at: `http://localhost:8080/opds`.
 
 ### Without Docker
 
 1. Clone the repository:
+
    ```bash
    git clone https://github.com/your-username/your-repo.git
    cd your-repo
    ```
+
 2. Set the environment variable for the books directory:
+
    ```bash
    export LIBRARY_DIR=/path/to/your/books
    export MAX_DEPTH=2
    ```
+
 3. Start the server:
+
    ```bash
    python server.py
    ```
+
 4. Access the OPDS catalog at: `http://localhost:8080/opds`.
 
 ## Configuration
@@ -66,6 +76,7 @@ The following environment variables can be set:
   - Example: With `MAX_DEPTH=2`, files in `books/author1/series1/book.epub` are excluded, but those in `books/author1/book.epub` are included.
 
 For Docker, modify these variables in the `docker-compose.yml` file:
+
 ```yaml
 services:
   opds-server:
