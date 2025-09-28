@@ -119,7 +119,7 @@
                 </style>
             </head>
             <body>
-                <div id="back-button" onclick="history.back()">&larr; Back</div>
+                <div id="back-button" onclick="history.back()">← Back</div>
                 <h1><xsl:value-of select="atom:title"/></h1>
                 <div class="bookshelf">
                     <xsl:apply-templates select="atom:entry"/>
