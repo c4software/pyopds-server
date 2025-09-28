@@ -209,7 +209,7 @@ class BookScanner:
         
         return paginated_entries, total_count
     
-    def scan_recent_books(self, directory_path, limit=10):
+    def scan_recent_books(self, directory_path, limit=25):
         """Fast recent books scan using file modification times without full directory traversal."""
         import time
         
@@ -408,8 +408,8 @@ class OPDSHandler(http.server.BaseHTTPRequestHandler):
             ('self', '/opds/recent', 'application/atom+xml;profile=opds-catalog;kind=acquisition'),
             ('start', '/opds', 'application/atom+xml;profile=opds-catalog;kind=navigation')
         ]
-        
-        file_list = self.book_scanner.scan_recent_books(LIBRARY_DIR, limit=10)
+
+        file_list = self.book_scanner.scan_recent_books(LIBRARY_DIR, limit=25)
         entries = self._create_book_entries(file_list)
         xml = self.feed_generator.generate_feed('Recent Books', 'urn:recent-books', links, entries)
         
