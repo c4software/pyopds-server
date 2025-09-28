@@ -95,6 +95,17 @@
                     .book-link:nth-child(6n+4) .book { background-color: #f9fbe7; } /* Lime */
                     .book-link:nth-child(6n+5) .book { background-color: #fff3e0; } /* Light Orange */
                     .book-link:nth-child(6n+6) .book { background-color: #fce4ec; } /* Light Pink */
+                    
+                    .collection {
+                        justify-content: center !important;
+                        text-align: center;
+                        border: 2px dashed #a1887f;
+                        background-color: #f5f5f5 !important; /* Override nth-child color */
+                    }
+                    .collection .book-author {
+                        font-style: italic;
+                        color: #888;
+                    }
                 </style>
             </head>
             <body>
@@ -106,21 +117,32 @@
         </html>
     </xsl:template>
 
-    <!-- Template for each book entry -->
     <xsl:template match="atom:entry">
-        <!-- Create a clickable link for each book -->
-        <a class="book-link">
-            <xsl:attribute name="href">
-                <xsl:value-of select="atom:link[@rel='http://opds-spec.org/acquisition/open-access']/@href"/>
-            </xsl:attribute>
+        <xsl:choose>
+            <xsl:when test="atom:link[@rel='subsection']">
+                <a class="book-link">
+                    <xsl:attribute name="href">
+                        <xsl:value-of select="atom:link[@rel='subsection']/@href"/>
+                    </xsl:attribute>
+                    <div class="book collection">
+                        <div class="book-title"><xsl:value-of select="atom:title"/></div>
+                        <div class="book-author">Collection</div>
+                    </div>
+                </a>
+            </xsl:when>
 
-            <!-- The visual representation of the book -->
-            <div class="book">
-                <div class="book-title"><xsl:value-of select="atom:title"/></div>
-                <div class="book-author"><xsl:value-of select="atom:author/atom:name"/></div>
-            </div>
-        </a>
+            <xsl:otherwise>
+                <a class="book-link">
+                    <xsl:attribute name="href">
+                        <xsl:value-of select="atom:link[@rel='http://opds-spec.org/acquisition/open-access']/@href"/>
+                    </xsl:attribute>
+                    <div class="book">
+                        <div class="book-title"><xsl:value-of select="atom:title"/></div>
+                        <div class="book-author"><xsl:value-of select="atom:author/atom:name"/></div>
+                    </div>
+                </a>
+            </xsl:otherwise>
+        </xsl:choose>
     </xsl:template>
 
 </xsl:stylesheet>
-
