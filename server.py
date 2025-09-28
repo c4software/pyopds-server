@@ -420,7 +420,7 @@ class OPDSHandler(http.server.BaseHTTPRequestHandler):
         
         # Use the new combined pagination method with single-level scan
         paginated_entries, total_count = self.book_scanner.get_folder_content_paginated(
-            folder_full_path, folder_path, page, size, base_path=LIBRARIES_DIR
+            folder_full_path, folder_path, page, size, base_path=LIBRARY_DIR
         )
         
         # Convert entries to the format expected by the feed generator
