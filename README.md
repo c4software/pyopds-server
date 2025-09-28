@@ -2,6 +2,8 @@
 
 This project is a lightweight OPDS (Open Publication Distribution System) server written in Python 3, designed to expose a library of EPUB files stored in a local directory, compatible with clients like Calibre, KoReader, or any other OPDS-compliant reader. It uses only Python's standard libraries.
 
+![Logo](./preview/ereader.jpeg)
+
 If you browse your OPDS feed in a web browser, it will display a simple HTML representation of the feed using XSLT transformation.
 
 ![Home](./preview/preview.png)
