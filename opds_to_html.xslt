@@ -30,15 +30,17 @@
                     }
                     .bookshelf {
                         padding: 30px;
-                        display: grid;
-                        grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+                        display: flex;
+                        flex-wrap: wrap;
+                        justify-content: center;
+                        align-items: flex-start;
                         gap: 35px;
-                        justify-items: center;
-                        align-items: start;
                         background-color: #855E42;
                         background-image: linear-gradient(45deg, rgba(255, 255, 255, .05) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, .05) 50%, rgba(255, 255, 255, .05) 75%, transparent 75%, transparent);
                         box-shadow: inset 0 8px 15px -5px rgba(0, 0, 0, 0.4);
                         min-height: 100vh;
+                        flex-direction: row;
+                        align-content: flex-start;
                     }
                     .book-link {
                         text-decoration: none;
