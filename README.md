@@ -56,7 +56,6 @@ If you browse your OPDS feed in a web browser, it will display a simple HTML rep
 
    ```bash
    export LIBRARY_DIR=/path/to/your/books
-   export MAX_DEPTH=2
    ```
 
 3. Start the server:
@@ -72,8 +71,6 @@ If you browse your OPDS feed in a web browser, it will display a simple HTML rep
 The following environment variables can be set:
 
 - **LIBRARY_DIR**: Path to the directory containing EPUB files (default: `books`).
-- **MAX_DEPTH**: Maximum subdirectory depth to scan for EPUB files (default: `2`).
-  - Example: With `MAX_DEPTH=2`, files in `books/author1/series1/book.epub` are excluded, but those in `books/author1/book.epub` are included.
 
 For Docker, modify these variables in the `docker-compose.yml` file:
 
@@ -87,7 +84,6 @@ services:
       - ./books:/books
     environment:
       - LIBRARY_DIR=/books
-      - MAX_DEPTH=2
 ```
 
 ## Usage with an OPDS Client
