@@ -77,7 +77,10 @@ class OPDSFeedGenerator:
             for rel, href, type_ in entry_data['links']:
                 ET.SubElement(entry, 'link', {'rel': rel, 'href': href, 'type': type_})
                 
-        return ET.tostring(feed, encoding='unicode', method='xml')
+        xml_string = ET.tostring(feed, encoding='unicode', method='xml')
+        # Add the processing instruction for client-side XSLT
+        processing_instruction = '<?xml-stylesheet type="text/xsl" href="/opds_to_html.xslt"?>\n'
+        return processing_instruction + xml_string
 
 
 class BookScanner:
@@ -134,10 +137,6 @@ class OPDSHandler(http.server.BaseHTTPRequestHandler):
         super().__init__(*args, **kwargs)
     
     def do_GET(self):
-        self.extra_xml_header = False
-        if self.path.startswith('/opds') or self.path.startswith('/download/'):
-            self.extra_xml_header = True
-
         if self.path == '/opds':
             self._handle_root_catalog()
         elif self.path == '/opds/books':
@@ -148,6 +147,8 @@ class OPDSHandler(http.server.BaseHTTPRequestHandler):
             self._handle_folder_catalog()
         elif self.path.startswith('/download/'):
             self._handle_download()
+        elif self.path == '/opds_to_html.xslt':
+            self._serve_xslt()
         else:
             self._send_error(404, 'Not found')
     
@@ -322,6 +323,21 @@ class OPDSHandler(http.server.BaseHTTPRequestHandler):
         with open(file_path, 'rb') as f:
             self.wfile.write(f.read())
     
+    def _serve_xslt(self):
+        try:
+            xslt_path = 'opds_to_html.xslt'
+            if not os.path.exists(xslt_path):
+                self._send_error(404, "XSLT file not found")
+                return
+
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/xml')
+            self.end_headers()
+            with open(xslt_path, 'rb') as f:
+                self.wfile.write(f.read())
+        except Exception as e:
+            self._send_error(500, f"Error serving XSLT file: {e}")
+
     def _send_xml_response(self, xml, catalog_kind):
         self.send_response(200)
         self.send_header('Content-Type', f'application/atom+xml;profile=opds-catalog;kind={catalog_kind}')
@@ -342,9 +358,10 @@ def main():
         os.makedirs(LIBRARY_DIR)
         
     with socketserver.TCPServer(("", PORT), OPDSHandler) as httpd:
-        print(f"Serveur OPDS démarré sur le port {PORT}")
+        print(f"OPDS server started on port {PORT}")
         httpd.serve_forever()
 
 
 if __name__ == '__main__':
     main()
+
