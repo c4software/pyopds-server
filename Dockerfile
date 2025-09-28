@@ -5,8 +5,6 @@ WORKDIR /app
 COPY server.py /app/server.py
 COPY opds_to_html.xslt /app/opds_to_html.xslt
 
-RUN pip install --no-cache-dir ebooklib
-
 ENV LIBRARY_DIR=/books
 
 EXPOSE 8080
