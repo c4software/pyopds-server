@@ -8,7 +8,7 @@ from urllib.parse import unquote, quote
 from ebooklib import epub
 
 LIBRARY_DIR = os.environ.get('LIBRARY_DIR', 'books')
-MAX_DEPTH = int(os.environ.get('MAX_DEPTH', '2'))
+MAX_DEPTH = int(os.environ.get('MAX_DEPTH', '3'))
 PORT = 8080
 
 
