@@ -5,7 +5,9 @@ import datetime
 import xml.etree.ElementTree as ET
 import hashlib
 from urllib.parse import unquote, quote, urlparse, parse_qs
-from ebooklib import epub
+import zipfile
+import heapq
+import time
 
 LIBRARY_DIR = os.environ.get('LIBRARY_DIR', 'books')
 PORT = 8080
@@ -16,10 +18,23 @@ class BookMetadata:
     @staticmethod
     def extract_epub_metadata(epub_path):
         try:
-            book = epub.read_epub(epub_path)
-            title = book.get_metadata('DC', 'title')[0][0] if book.get_metadata('DC', 'title') else None
-            author = book.get_metadata('DC', 'creator')[0][0] if book.get_metadata('DC', 'creator') else None
-            return title, author
+            with zipfile.ZipFile(epub_path) as zf:
+                # Read container.xml to find OPF path
+                container_xml = zf.read('META-INF/container.xml')
+                container_root = ET.fromstring(container_xml)
+                ns_container = {'ocf': 'urn:oasis:names:tc:opendocument:xmlns:container'}
+                opf_path = container_root.find(".//ocf:rootfile[@media-type='application/oebps-package+xml']", ns_container).get('full-path')
+                
+                # Read OPF file
+                opf_xml = zf.read(opf_path)
+                opf_root = ET.fromstring(opf_xml)
+                ns_dc = {'dc': 'http://purl.org/dc/elements/1.1/'}
+                
+                title = opf_root.find(".//dc:title", ns_dc).text if opf_root.find(".//dc:title", ns_dc) is not None else None
+                author_elem = opf_root.find(".//dc:creator", ns_dc)
+                author = author_elem.text if author_elem is not None else None
+                
+                return title, author
         except Exception:
             return None, None
 
@@ -85,25 +100,19 @@ class BookScanner:
     def __init__(self):
         self.metadata_extractor = BookMetadata()
         self.security = SecurityUtils()
-        self._all_books_cache = None
+        self._all_paths_cache = None
         self._recent_books_cache = None
         self._recent_books_cache_time = 0
         self.RECENT_CACHE_TTL = 300  # 5 minutes cache for recent books
     
-    def scan_directory(self, directory_path, base_path=None):
-        if base_path is None:
-            base_path = directory_path
-            
-        file_list = []
-        
-        for root, dirs, files in os.walk(directory_path):
+    def collect_all_epub_paths(self):
+        """Collect all .epub paths in the library."""
+        paths = []
+        for root, _, files in os.walk(LIBRARY_DIR):
             for file in files:
                 if file.endswith('.epub'):
-                    file_info = self._create_file_info(root, file, base_path)
-                    if file_info:
-                        file_list.append(file_info)
-                        
-        return sorted(file_list, key=lambda x: x['title'])
+                    paths.append(os.path.join(root, file))
+        return sorted(paths, key=lambda p: os.path.basename(p).lower())
     
     def scan_directory_single_level(self, directory_path, base_path=None):
         """Scans only the direct files in a directory (non-recursive)."""
@@ -123,41 +132,39 @@ class BookScanner:
         except OSError:
             pass
                         
-        return sorted(file_list, key=lambda x: x['title'])
-    
-    def scan_full_book_list(self):
-        """Scans the entire library and caches the result."""
-        if self._all_books_cache is None:
-            self._all_books_cache = self.scan_directory(LIBRARY_DIR)
-        return self._all_books_cache
+        return sorted(file_list, key=lambda x: x['title'].lower())
     
     def get_all_books_paginated(self, page, size):
         """Get paginated view of all books (no collections, just books)."""
-        if self._all_books_cache is None:
-            # Build cache of all books if it doesn't exist
-            self._all_books_cache = self.scan_directory(LIBRARY_DIR)
+        if self._all_paths_cache is None:
+            self._all_paths_cache = self.collect_all_epub_paths()
         
-        file_list = self._all_books_cache
-        total_count = len(file_list)
+        paths = self._all_paths_cache
+        total_count = len(paths)
         
         # Apply pagination
         start = (page - 1) * size
         end = start + size
-        paginated_books = file_list[start:end]
+        paginated_paths = paths[start:end]
+        
+        # Extract metadata only for paginated paths
+        paginated_books = []
+        for path in paginated_paths:
+            relative_path = os.path.relpath(path, LIBRARY_DIR)
+            if self.security.has_path_traversal(relative_path) or not self.security.is_within_library_dir(path):
+                continue
+            title, author = self.metadata_extractor.extract_epub_metadata(path)
+            title = title or os.path.basename(path)
+            author = author or 'Unknown'
+            paginated_books.append({
+                'path': path,
+                'relative_path': relative_path,
+                'title': title,
+                'author': author,
+                'mtime': os.path.getmtime(path)
+            })
         
         return paginated_books, total_count
-        
-    def get_paginated_books(self, directory_path, page, size, base_path=None, use_cache=False):
-        """Returns a subset of books for a given page."""
-        if use_cache:
-            file_list = self.scan_full_book_list()
-        else:
-            file_list = self.scan_directory(directory_path, base_path=base_path)
-
-        start = (page - 1) * size
-        end = start + size
-        
-        return file_list[start:end], len(file_list)
     
     def get_folder_content_paginated(self, folder_full_path, parent_folder_path, page, size, base_path=None):
         """Returns paginated folder content (subfolders + books combined)."""
@@ -183,8 +190,9 @@ class BookScanner:
                 'links': [('subsection', f'/opds/folder/{encoded_subfolder}?page=1', 'application/atom+xml;profile=opds-catalog;kind=acquisition')]
             })
         
-        # Get books
-        book_list = self.scan_directory(folder_full_path, base_path=base_path)
+        # Get direct books only
+        book_list = self.scan_directory_single_level(folder_full_path, base_path=base_path)
+        
         book_entries = []
         for file_info in book_list:
             book_id = f'urn:book:{hashlib.md5(file_info["relative_path"].encode()).hexdigest()}'
@@ -198,7 +206,7 @@ class BookScanner:
                 'links': [('http://opds-spec.org/acquisition/open-access', f'/download/{encoded_path}', 'application/epub+zip')]
             })
         
-        # Combine all entries
+        # Combine all entries (subfolders first, then books)
         all_entries = subfolder_entries + book_entries
         total_count = len(all_entries)
         
@@ -210,61 +218,46 @@ class BookScanner:
         return paginated_entries, total_count
     
     def scan_recent_books(self, directory_path, limit=25):
-        """Fast recent books scan using file modification times without full directory traversal."""
-        import time
-        
-        # Check cache first
+        """Fast recent books scan using file modification times with heap for top N."""
         current_time = time.time()
         if (self._recent_books_cache is not None and 
             current_time - self._recent_books_cache_time < self.RECENT_CACHE_TTL):
             return self._recent_books_cache[:limit]
         
-        recent_files = []
+        heap = []
         
-        def scan_for_recent_files(path, current_depth=0, max_depth=3):
-            """Recursively scan for recent files with depth limit."""
-            if current_depth > max_depth:
-                return
-                
+        def scan_for_recent_files(path):
             try:
-                entries = []
                 for entry in os.scandir(path):
                     if entry.is_file() and entry.name.endswith('.epub'):
                         try:
                             stat_info = entry.stat()
-                            entries.append((entry.path, stat_info.st_mtime, entry.name))
+                            mtime = stat_info.st_mtime
+                            if len(heap) < limit:
+                                heapq.heappush(heap, (mtime, entry.path))
+                            elif mtime > heap[0][0]:
+                                heapq.heapreplace(heap, (mtime, entry.path))
                         except OSError:
                             continue
                     elif entry.is_dir() and not entry.name.startswith('.'):
-                        scan_for_recent_files(entry.path, current_depth + 1, max_depth)
-                
-                # Sort by modification time and keep only the most recent files from this directory
-                entries.sort(key=lambda x: x[1], reverse=True)
-                recent_files.extend(entries[:limit * 2])  # Get more than needed for better selection
-                
+                        scan_for_recent_files(entry.path)
             except OSError:
                 pass
         
         scan_for_recent_files(directory_path)
         
-        # Sort all found files by modification time and take the top ones
-        recent_files.sort(key=lambda x: x[1], reverse=True)
-        recent_files = recent_files[:limit * 2]  # Get more candidates
+        # Get the top files sorted descending by mtime
+        recent_files = sorted(heap, key=lambda x: x[0], reverse=True)
         
-        # Convert to file_info objects
+        # Convert to file_info
         file_list = []
-        for file_path, mtime, filename in recent_files:
-            if len(file_list) >= limit:
-                break
-                
-            # Quick security check
+        for mtime, file_path in recent_files:
             relative_path = os.path.relpath(file_path, directory_path)
             if (not self.security.has_path_traversal(relative_path) and 
                 self.security.is_within_library_dir(file_path)):
                 
-                # Extract metadata for recent files
                 title, author = self.metadata_extractor.extract_epub_metadata(file_path)
-                title = title or filename
+                title = title or os.path.basename(file_path)
                 author = author or 'Unknown'
                 
                 file_list.append({
@@ -286,7 +279,7 @@ class BookScanner:
         relative_path = os.path.relpath(path, base_path)
         
         if self.security.has_path_traversal(relative_path) or not self.security.is_within_library_dir(path):
-             return None
+            return None
         
         title, author = self.metadata_extractor.extract_epub_metadata(path)
         title = title or filename
@@ -389,7 +382,7 @@ class OPDSHandler(http.server.BaseHTTPRequestHandler):
         page, size, parsed_url = self._parse_url_params()
         path_base = parsed_url.path
         
-        # Get all books (no collections)
+        # Get paginated books with metadata extraction only for the page
         paginated_books, total_count = self.book_scanner.get_all_books_paginated(page, size)
         
         links = self._get_pagination_links(path_base, page, size, total_count)
@@ -425,9 +418,9 @@ class OPDSHandler(http.server.BaseHTTPRequestHandler):
         if not self._validate_folder_access(folder_full_path):
             return
         
-        # Use the new combined pagination method
+        # Use the new combined pagination method with single-level scan
         paginated_entries, total_count = self.book_scanner.get_folder_content_paginated(
-            folder_full_path, folder_path, page, size, base_path=LIBRARY_DIR
+            folder_full_path, folder_path, page, size, base_path=LIBRARIES_DIR
         )
         
         # Convert entries to the format expected by the feed generator
