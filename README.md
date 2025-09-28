@@ -2,13 +2,20 @@
 
 This project is a lightweight OPDS (Open Publication Distribution System) server written in Python 3, designed to expose a library of EPUB files stored in a local directory, compatible with clients like Calibre, KoReader, or any other OPDS-compliant reader. It uses only Python's standard libraries.
 
+If you browse your OPDS feed in a web browser, it will display a simple HTML representation of the feed using XSLT transformation.
+
+![Home](./preview/preview.png)
+![Book list sample](./preview/preview2.png)
+![All books with pagination](./preview/preview3.png)
+
 ## Features
 
 - **OPDS Catalog**: Exposes EPUB books via an OPDS feed accessible at the `/opds` endpoint.
-- **Subdirectory Support**: Scans EPUB files in the configured directory and its subdirectories up to a maximum depth defined by the `MAX_DEPTH` environment variable (default: 2).
+- **Subdirectory Support**: Scans EPUB files in the configured directory and its subdirectories.
 - **Sorted by Most Recent**: Books are listed in the OPDS feed sorted by modification date, with the most recently modified files appearing first.
 - **Metadata Extraction**: Extracts title and author from EPUB files for rich display in the catalog.
 - **Docker Deployment**: Includes a `Dockerfile` and `docker-compose.yml` for easy containerized deployment.
+- **Visual HTML Representation**: Provides a simple HTML view of the OPDS feed for easy browsing in web browsers (using XSLT transformation).
 
 ## Prerequisites
 
