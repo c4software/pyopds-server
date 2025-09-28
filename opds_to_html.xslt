@@ -34,6 +34,7 @@
                         flex-wrap: wrap;
                         justify-content: center;
                         align-items: flex-start;
+                        align-content
                         padding: 50px 20px;
                         gap: 35px;
                         /* Simple wood background effect */
@@ -66,7 +67,7 @@
                         position: relative;
                         background-color: #fff;
                     }
-                    /* A subtle spine shadow effect */
+
                     .book::before {
                         content: '';
                         position: absolute;
@@ -89,7 +90,6 @@
                         align-self: flex-start;
                     }
 
-                    /* Add some color variation to the book covers */
                     .book-link:nth-child(6n+1) .book { background-color: #e0f2f1; } /* Teal */
                     .book-link:nth-child(6n+2) .book { background-color: #fbe9e7; } /* Peach */
                     .book-link:nth-child(6n+3) .book { background-color: #e8eaf6; } /* Lavender */
