@@ -6,7 +6,6 @@
 
     <xsl:output method="html" encoding="UTF-8" indent="yes"/>
 
-    <!-- Main template to create the HTML structure -->
     <xsl:template match="/atom:feed">
         <html>
             <head>
@@ -30,19 +29,18 @@
                         text-shadow: 1px 1px 1px #fff;
                     }
                     .bookshelf {
+                        padding-top: 30px;
                         display: flex;
                         flex-wrap: wrap;
                         justify-content: center;
                         align-items: flex-start;
-                        align-content
-                        padding: 50px 20px;
                         gap: 35px;
-                        /* Simple wood background effect */
-                        background-color: #855E42; /* A wood-like color */
+                        background-color: #855E42;
                         background-image: linear-gradient(45deg, rgba(255, 255, 255, .05) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, .05) 50%, rgba(255, 255, 255, .05) 75%, transparent 75%, transparent);
-                        border-top: 10px solid #5d4037;
-                        box-shadow: inset 0 8px 15px -5px rgba(0,0,0,0.4);
+                        box-shadow: inset 0 8px 15px -5px rgba(0, 0, 0, 0.4);
                         min-height: 100vh;
+                        flex-direction: row;
+                        align-content: flex-start;
                     }
                     .book-link {
                         text-decoration: none;
@@ -87,7 +85,8 @@
                     .book-author {
                         font-size: 0.9em;
                         color: #666;
-                        align-self: flex-start;
+                        text-align: center;
+                        font-weight: 200;
                     }
 
                     .book-link:nth-child(6n+1) .book { background-color: #e0f2f1; } /* Teal */
