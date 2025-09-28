@@ -120,6 +120,56 @@ class BookScanner:
         
         return file_list[start:end], len(file_list)
     
+    def get_folder_content_paginated(self, folder_full_path, parent_folder_path, page, size, base_path=None):
+        """Returns paginated folder content (subfolders + books combined)."""
+        # Get subfolders
+        subfolders = []
+        for item in os.listdir(folder_full_path):
+            item_path = os.path.join(folder_full_path, item)
+            if os.path.isdir(item_path) and not item.startswith('.'):
+                subfolders.append(item)
+        subfolders = sorted(subfolders)
+        
+        # Convert subfolders to entries
+        subfolder_entries = []
+        for subfolder in subfolders:
+            subfolder_relative = os.path.join(parent_folder_path, subfolder)
+            subfolder_id = f'urn:folder:{hashlib.md5(subfolder_relative.encode()).hexdigest()}'
+            encoded_subfolder = quote(subfolder_relative.replace(os.sep, '/'))
+            
+            subfolder_entries.append({
+                'title': subfolder,
+                'id': subfolder_id,
+                'type': 'folder',
+                'links': [('subsection', f'/opds/folder/{encoded_subfolder}?page=1', 'application/atom+xml;profile=opds-catalog;kind=acquisition')]
+            })
+        
+        # Get books
+        book_list = self.scan_directory(folder_full_path, base_path=base_path)
+        book_entries = []
+        for file_info in book_list:
+            book_id = f'urn:book:{hashlib.md5(file_info["relative_path"].encode()).hexdigest()}'
+            encoded_path = quote(file_info['relative_path'].replace(os.sep, '/'))
+            
+            book_entries.append({
+                'title': file_info['title'],
+                'id': book_id,
+                'type': 'book',
+                'author': file_info['author'],
+                'links': [('http://opds-spec.org/acquisition/open-access', f'/download/{encoded_path}', 'application/epub+zip')]
+            })
+        
+        # Combine all entries
+        all_entries = subfolder_entries + book_entries
+        total_count = len(all_entries)
+        
+        # Apply pagination
+        start = (page - 1) * size
+        end = start + size
+        paginated_entries = all_entries[start:end]
+        
+        return paginated_entries, total_count
+    
     def scan_recent_books(self, directory_path, limit=10):
         file_list = self.scan_directory(directory_path)
         return sorted(file_list, key=lambda x: x['mtime'], reverse=True)[:limit]
@@ -241,7 +291,7 @@ class OPDSHandler(http.server.BaseHTTPRequestHandler):
         
         entries = self._create_book_entries(paginated_list)
         
-        total_pages = self._get_total_pages(total_count)
+        total_pages = self._get_total_pages(total_count, size)
         title = f'All Books (Page {page} of {total_pages})'
         xml = self.feed_generator.generate_feed(title, 'urn:all-books', links, entries)
         
@@ -268,40 +318,54 @@ class OPDSHandler(http.server.BaseHTTPRequestHandler):
         
         if not self._validate_folder_access(folder_full_path):
             return
-            
-        subfolders = self._get_subfolders(folder_full_path)
-        subfolder_entries = self._create_subfolder_entries(folder_path, subfolders)
         
-        paginated_books, total_book_count = self.book_scanner.get_paginated_books(
-            folder_full_path, page, size, base_path=LIBRARY_DIR, use_cache=False
+        # Use the new combined pagination method
+        paginated_entries, total_count = self.book_scanner.get_folder_content_paginated(
+            folder_full_path, folder_path, page, size, base_path=LIBRARY_DIR
         )
-        book_entries = self._create_book_entries(paginated_books)
         
-        entries = subfolder_entries + book_entries
+        # Convert entries to the format expected by the feed generator
+        formatted_entries = []
+        for entry in paginated_entries:
+            if entry.get('type') == 'folder':
+                formatted_entries.append({
+                    'title': entry['title'],
+                    'id': entry['id'],
+                    'links': entry['links']
+                })
+            else:  # book
+                formatted_entries.append({
+                    'title': entry['title'],
+                    'id': entry['id'],
+                    'links': entry['links'],
+                    'author': entry['author']
+                })
         
-        links = self._get_pagination_links(path_base, page, size, total_book_count)
+        links = self._get_pagination_links(path_base, page, size, total_count)
         links.append(('start', '/opds', 'application/atom+xml;profile=opds-catalog;kind=navigation'))
         
         feed_id = f'urn:folder:{hashlib.md5(folder_path.encode()).hexdigest()}'
         title = os.path.basename(folder_path) or 'Library'
         
-        total_pages = self._get_total_pages(total_book_count)
+        total_pages = self._get_total_pages(total_count, size)
         if total_pages > 1:
             title = f'{title} (Page {page} of {total_pages})'
             
-        xml = self.feed_generator.generate_feed(title, feed_id, links, entries)
+        xml = self.feed_generator.generate_feed(title, feed_id, links, formatted_entries)
         
         self._send_xml_response(xml, 'acquisition')
 
-    def _get_total_pages(self, total_count):
+    def _get_total_pages(self, total_count, size=None):
         """Calculates the total number of pages."""
-        return max(1, (total_count + PAGE_SIZE - 1) // PAGE_SIZE)
+        if size is None:
+            size = PAGE_SIZE
+        return max(1, (total_count + size - 1) // size)
         
-    def _get_pagination_links(self, path_base, current_page, size, total_book_count):
+    def _get_pagination_links(self, path_base, current_page, size, total_count):
         """Generates all necessary OPDS paging links."""
         links = []
         
-        total_pages = self._get_total_pages(total_book_count)
+        total_pages = self._get_total_pages(total_count, size)
         
         links.append(('self', f'{path_base}?page={current_page}', 'application/atom+xml;profile=opds-catalog;kind=acquisition'))
 
@@ -324,29 +388,6 @@ class OPDSHandler(http.server.BaseHTTPRequestHandler):
             self._send_error(404, 'Folder not found or access denied')
             return False
         return True
-    
-    def _get_subfolders(self, folder_full_path):
-        subfolders = []
-        for item in os.listdir(folder_full_path):
-            item_path = os.path.join(folder_full_path, item)
-            if os.path.isdir(item_path) and not item.startswith('.'):
-                subfolders.append(item)
-        return sorted(subfolders)
-    
-    def _create_subfolder_entries(self, parent_folder_path, subfolders):
-        entries = []
-        for subfolder in subfolders:
-            subfolder_relative = os.path.join(parent_folder_path, subfolder)
-            subfolder_id = f'urn:folder:{hashlib.md5(subfolder_relative.encode()).hexdigest()}'
-            encoded_subfolder = quote(subfolder_relative.replace(os.sep, '/'))
-            
-            entries.append({
-                'title': subfolder,
-                'id': subfolder_id,
-                'links': [('subsection', f'/opds/folder/{encoded_subfolder}?page=1', 'application/atom+xml;profile=opds-catalog;kind=acquisition')]
-            })
-            
-        return entries
     
     def _create_book_entries(self, file_list):
         entries = []
