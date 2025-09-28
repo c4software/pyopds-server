@@ -171,6 +171,8 @@ class OPDSHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(302)
             self.send_header('Location', '/opds')
             self.end_headers()
+        elif self.path == '/opds_to_html.xslt':
+            self._serve_xslt()
         elif self.path.startswith('/opds'):
             path_base = urlparse(self.path).path
             if path_base == '/opds' or path_base == '/opds/':
@@ -185,8 +187,6 @@ class OPDSHandler(http.server.BaseHTTPRequestHandler):
                 self._send_error(404, 'OPDS Catalog Not found')
         elif self.path.startswith('/download/'):
             self._handle_download()
-        elif self.path == '/opds_to_html.xslt':
-            self._serve_xslt()
         else:
             self._send_error(404, 'Not found')
     
