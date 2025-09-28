@@ -55,6 +55,33 @@
                 <div class="p-4 sm:p-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 sm:gap-6">
                     <xsl:apply-templates select="atom:entry"/>
                 </div>
+
+                <xsl:if test="atom:link[@rel='first'] or atom:link[@rel='previous'] or atom:link[@rel='next'] or atom:link[@rel='last']">
+                    <div class="flex justify-center items-center space-x-2 p-4 sm:p-6">
+                        <xsl:if test="atom:link[@rel='first'] and atom:link[@rel='previous']">
+                            <a href="{atom:link[@rel='first']/@href}" class="p-2 rounded-md bg-white text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 shadow-sm" title="Première page">
+                                <i data-lucide="chevrons-left" class="w-5 h-5"></i>
+                            </a>
+                        </xsl:if>
+                        <xsl:if test="atom:link[@rel='previous']">
+                            <a href="{atom:link[@rel='previous']/@href}" class="p-2 rounded-md bg-white text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 shadow-sm" title="Page précédente">
+                                <i data-lucide="chevron-left" class="w-5 h-5"></i>
+                            </a>
+                        </xsl:if>
+
+                        <xsl:if test="atom:link[@rel='next']">
+                            <a href="{atom:link[@rel='next']/@href}" class="p-2 rounded-md bg-white text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 shadow-sm" title="Page suivante">
+                                <i data-lucide="chevron-right" class="w-5 h-5"></i>
+                            </a>
+                        </xsl:if>
+                        <xsl:if test="atom:link[@rel='last'] and atom:link[@rel='next']">
+                            <a href="{atom:link[@rel='last']/@href}" class="p-2 rounded-md bg-white text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 shadow-sm" title="Dernière page">
+                                <i data-lucide="chevrons-right" class="w-5 h-5"></i>
+                            </a>
+                        </xsl:if>
+                    </div>
+                </xsl:if>
+
                 <script>
                     // On page load or when changing themes, best to add inline in `head` to avoid FOUC
                     if (localStorage.getItem('color-theme') === 'dark' || (!('color-theme' in localStorage) &amp;&amp; window.matchMedia('(prefers-color-scheme: dark)').matches)) {
