@@ -28,6 +28,16 @@
                         border-bottom: 3px solid #a1887f;
                         text-shadow: 1px 1px 1px #fff;
                     }
+                    #back-button {
+                        position: absolute;
+                        top: 10px;
+                        left: 10px;
+                        font-size: 1.5em;
+                        color: #44352e;
+                        cursor: pointer;
+                        display: none;
+                        z-index: 10;
+                    }
                     .bookshelf {
                         padding: 30px;
                         display: flex;
@@ -109,10 +119,16 @@
                 </style>
             </head>
             <body>
+                <div id="back-button" onclick="history.back()">&larr; Back</div>
                 <h1><xsl:value-of select="atom:title"/></h1>
                 <div class="bookshelf">
                     <xsl:apply-templates select="atom:entry"/>
                 </div>
+                <script>
+                    if (history.length > 1) {
+                        document.getElementById('back-button').style.display = 'block';
+                    }
+                </script>
             </body>
         </html>
     </xsl:template>
