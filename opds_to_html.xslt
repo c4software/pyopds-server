@@ -11,97 +11,14 @@
             <head>
                 <title><xsl:value-of select="atom:title"/></title>
                 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+                <script src="https://cdn.tailwindcss.com"></script>
+                <script>
+                    tailwind.config = {
+                        darkMode: 'class'
+                    }
+                </script>
+                <script src="https://unpkg.com/lucide@latest"></script>
                 <style>
-                    body {
-                        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                        background-color: #f4f1ea;
-                        margin: 0;
-                        padding: 0;
-                    }
-                    .header {
-                        display: flex;
-                        align-items: center;
-                        background-color: #d7ccc8;
-                        border-bottom: 3px solid #a1887f;
-                        padding: 10px 20px;
-                    }
-                    h1 {
-                        flex: 1;
-                        text-align: center;
-                        font-weight: 300;
-                        color: #44352e;
-                        margin: 0;
-                        text-shadow: 1px 1px 1px #fff;
-                    }
-                    #back-button {
-                        font-size: 1.5em;
-                        color: #44352e;
-                        cursor: pointer;
-                        display: none;
-                        margin-right: 20px;
-                        min-width: 50px;
-                    }
-                    .bookshelf {
-                        padding: 30px;
-                        display: flex;
-                        flex-wrap: wrap;
-                        justify-content: center;
-                        align-items: flex-start;
-                        gap: 35px;
-                        background-color: #855E42;
-                        background-image: linear-gradient(45deg, rgba(255, 255, 255, .05) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, .05) 50%, rgba(255, 255, 255, .05) 75%, transparent 75%, transparent);
-                        box-shadow: inset 0 8px 15px -5px rgba(0, 0, 0, 0.4);
-                        min-height: 100vh;
-                        flex-direction: row;
-                        align-content: flex-start;
-                    }
-                    .book-link {
-                        text-decoration: none;
-                        color: inherit;
-                        display: block;
-                        transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
-                    }
-                    .book-link:hover {
-                        transform: translateY(-10px) scale(1.03);
-                        box-shadow: 0 15px 25px rgba(0,0,0,0.3);
-                    }
-                    .book {
-                        width: 170px;
-                        height: 250px;
-                        padding: 20px 15px;
-                        border-radius: 4px 6px 6px 4px;
-                        box-shadow: 5px 5px 12px rgba(0,0,0,0.25);
-                        display: flex;
-                        flex-direction: column;
-                        justify-content: space-between;
-                        overflow: hidden;
-                        position: relative;
-                        background-color: #fff;
-                    }
-
-                    .book::before {
-                        content: '';
-                        position: absolute;
-                        top: 0;
-                        left: 0;
-                        width: 10px;
-                        height: 100%;
-                        background: linear-gradient(to right, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0) 100%);
-                        border-right: 1px solid rgba(0,0,0,0.1);
-                        border-radius: 4px 0 0 4px;
-                    }
-                    .book-title {
-                        font-weight: bold;
-                        font-size: 1.1em;
-                        color: #333;
-                    }
-                    .book-author {
-                        font-size: 0.9em;
-                        color: #666;
-                        text-align: center;
-                        font-weight: 200;
-                    }
-
                     .book-link:nth-child(6n+1) .book { background-color: #e0f2f1; } /* Teal */
                     .book-link:nth-child(6n+2) .book { background-color: #fbe9e7; } /* Peach */
                     .book-link:nth-child(6n+3) .book { background-color: #e8eaf6; } /* Lavender */
@@ -109,43 +26,45 @@
                     .book-link:nth-child(6n+5) .book { background-color: #fff3e0; } /* Light Orange */
                     .book-link:nth-child(6n+6) .book { background-color: #fce4ec; } /* Light Pink */
                     
-                    .collection {
-                        justify-content: center !important;
-                        text-align: center;
-                        border: 2px dashed #a1887f;
-                        background-color: #f5f5f5 !important; /* Override nth-child color */
-                    }
-                    .collection .book-author {
-                        font-style: italic;
-                        color: #888;
-                    }
-                    #quick-links {
-                        min-width: 50px;
-                        text-align: right;
-                    }
-                    #quick-links a {
-                        color: #44352e;
-                        text-decoration: none;
-                        margin-left: 15px;
-                        font-weight: 500;
-                    }
-                    #quick-links a:hover {
-                        text-decoration: underline;
-                    }
+                    /* Dark mode colors for books */
+                    .dark .book-link:nth-child(6n+1) .book { background-color: #134e4a; } /* Dark Teal */
+                    .dark .book-link:nth-child(6n+2) .book { background-color: #7c2d12; } /* Dark Peach */
+                    .dark .book-link:nth-child(6n+3) .book { background-color: #312e81; } /* Dark Lavender */
+                    .dark .book-link:nth-child(6n+4) .book { background-color: #365314; } /* Dark Lime */
+                    .dark .book-link:nth-child(6n+5) .book { background-color: #9a3412; } /* Dark Orange */
+                    .dark .book-link:nth-child(6n+6) .book { background-color: #831843; } /* Dark Pink */
                 </style>
             </head>
-            <body>
-                <div class="header">
-                    <a id="back-button" style="display: none; text-decoration: none; color: #44352e; font-size: 1.5em; margin-right: 20px; min-width: 50px;">← Back</a>
-                    <h1><xsl:value-of select="atom:title"/></h1>
-                    <div id="quick-links">
-                        <a href="/opds">Home</a>
+            <body class="bg-slate-50 font-sans dark:bg-slate-900">
+                <div class="bg-white/80 backdrop-blur-sm sticky top-0 z-10 shadow-sm p-4 flex items-center justify-between dark:bg-slate-800/80 dark:shadow-slate-700">
+                    <a id="back-button" class="hidden items-center text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 gap-2" style="text-decoration: none;">
+                        <i data-lucide="arrow-left" class="w-5 h-5"></i>
+                        Retour
+                    </a>
+                    <h1 class="text-2xl font-light text-slate-800 text-center flex-grow truncate px-4 dark:text-slate-200"><xsl:value-of select="atom:title"/></h1>
+                    <div id="quick-links" class="min-w-max flex items-center gap-4">
+                        <a href="/opds" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center" title="Accueil">
+                            <i data-lucide="home" class="w-5 h-5"></i>
+                        </a>
+                        <button id="theme-toggle" type="button" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200">
+                            <i id="theme-toggle-dark-icon" class="hidden w-5 h-5" data-lucide="moon"></i>
+                            <i id="theme-toggle-light-icon" class="hidden w-5 h-5" data-lucide="sun"></i>
+                        </button>
                     </div>
                 </div>
-                <div class="bookshelf">
+                <div class="p-4 sm:p-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 sm:gap-6">
                     <xsl:apply-templates select="atom:entry"/>
                 </div>
                 <script>
+                    // On page load or when changing themes, best to add inline in `head` to avoid FOUC
+                    if (localStorage.getItem('color-theme') === 'dark' || (!('color-theme' in localStorage) &amp;&amp; window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                        document.documentElement.classList.add('dark');
+                    } else {
+                        document.documentElement.classList.remove('dark')
+                    }
+
+                    lucide.createIcons();
+
                     const backButton = document.getElementById('back-button');
                     const currentPath = window.location.pathname;
 
@@ -163,8 +82,46 @@
 
                     if (parentPath) {
                         backButton.href = parentPath;
-                        backButton.style.display = 'block';
+                        backButton.style.display = 'flex';
                     }
+
+                    var themeToggleDarkIcon = document.getElementById('theme-toggle-dark-icon');
+                    var themeToggleLightIcon = document.getElementById('theme-toggle-light-icon');
+
+                    // Change the icons inside the button based on previous settings
+                    if (localStorage.getItem('color-theme') === 'dark' || (!('color-theme' in localStorage) &amp;&amp; window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                        themeToggleLightIcon.classList.remove('hidden');
+                    } else {
+                        themeToggleDarkIcon.classList.remove('hidden');
+                    }
+
+                    var themeToggleBtn = document.getElementById('theme-toggle');
+
+                    themeToggleBtn.addEventListener('click', function() {
+                        // toggle icons inside button
+                        themeToggleDarkIcon.classList.toggle('hidden');
+                        themeToggleLightIcon.classList.toggle('hidden');
+
+                        // if set via local storage previously
+                        if (localStorage.getItem('color-theme')) {
+                            if (localStorage.getItem('color-theme') === 'light') {
+                                document.documentElement.classList.add('dark');
+                                localStorage.setItem('color-theme', 'dark');
+                            } else {
+                                document.documentElement.classList.remove('dark');
+                                localStorage.setItem('color-theme', 'light');
+                            }
+                        // if NOT set via local storage previously
+                        } else {
+                            if (document.documentElement.classList.contains('dark')) {
+                                document.documentElement.classList.remove('dark');
+                                localStorage.setItem('color-theme', 'light');
+                            } else {
+                                document.documentElement.classList.add('dark');
+                                localStorage.setItem('color-theme', 'dark');
+                            }
+                        }
+                    });
                 </script>
             </body>
         </html>
@@ -173,25 +130,29 @@
     <xsl:template match="atom:entry">
         <xsl:choose>
             <xsl:when test="atom:link[@rel='subsection']">
-                <a class="book-link">
+                <a class="block group rounded-lg overflow-hidden transition-all duration-300 transform hover:-translate-y-1 hover:shadow-xl">
                     <xsl:attribute name="href">
                         <xsl:value-of select="atom:link[@rel='subsection']/@href"/>
                     </xsl:attribute>
-                    <div class="book collection">
-                        <div class="book-title"><xsl:value-of select="atom:title"/></div>
-                        <div class="book-author">Collection</div>
+                    <div class="h-64 bg-slate-100 flex flex-col items-center justify-center p-4 text-center border border-slate-200 dark:bg-slate-800 dark:border-slate-700">
+                        <i data-lucide="folder" class="w-12 h-12 text-slate-400 mb-3 transition-colors group-hover:text-sky-500 dark:text-slate-500 dark:group-hover:text-sky-400"></i>
+                        <div class="font-semibold text-slate-700 transition-colors group-hover:text-sky-600 dark:text-slate-300 dark:group-hover:text-sky-400"><xsl:value-of select="atom:title"/></div>
+                        <div class="text-sm text-slate-500 mt-1 dark:text-slate-400">Collection</div>
                     </div>
                 </a>
             </xsl:when>
 
             <xsl:otherwise>
-                <a class="book-link">
+                <a class="book-link block group transition-all duration-300 transform hover:-translate-y-2">
                     <xsl:attribute name="href">
                         <xsl:value-of select="atom:link[@rel='http://opds-spec.org/acquisition/open-access']/@href"/>
                     </xsl:attribute>
-                    <div class="book">
-                        <div class="book-title"><xsl:value-of select="atom:title"/></div>
-                        <div class="book-author"><xsl:value-of select="atom:author/atom:name"/></div>
+                    <div class="book h-64 flex flex-col p-4 text-center relative rounded-r-md shadow-md group-hover:shadow-xl transition-shadow duration-300">
+                        <div class="absolute top-0 left-0 w-3 h-full bg-black/10 rounded-l-sm dark:bg-black/20" style="border-right: 1px solid rgba(0,0,0,0.1);"></div>
+                        <div class="flex-grow flex items-center justify-center px-2">
+                            <div class="font-bold text-base text-slate-800 dark:text-slate-100"><xsl:value-of select="atom:title"/></div>
+                        </div>
+                        <div class="text-sm text-slate-600 mt-2 truncate dark:text-slate-300"><xsl:value-of select="atom:author/atom:name"/></div>
                     </div>
                 </a>
             </xsl:otherwise>
