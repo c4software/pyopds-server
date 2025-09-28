@@ -132,40 +132,20 @@ class BookScanner:
         return self._all_books_cache
     
     def get_all_books_paginated(self, page, size):
-        """Get paginated view of all books with collections support."""
-        # Get root level content (collections and loose books)
-        collections = []
-        loose_books = []
+        """Get paginated view of all books (no collections, just books)."""
+        if self._all_books_cache is None:
+            # Build cache of all books if it doesn't exist
+            self._all_books_cache = self.scan_directory(LIBRARY_DIR)
         
-        try:
-            for item in sorted(os.listdir(LIBRARY_DIR)):
-                item_path = os.path.join(LIBRARY_DIR, item)
-                if os.path.isdir(item_path) and not item.startswith('.'):
-                    collections.append({
-                        'type': 'collection',
-                        'name': item,
-                        'path': item
-                    })
-                elif item.endswith('.epub') and os.path.isfile(item_path):
-                    file_info = self._create_file_info(LIBRARY_DIR, item, LIBRARY_DIR)
-                    if file_info:
-                        loose_books.append({
-                            'type': 'book',
-                            'info': file_info
-                        })
-        except OSError:
-            pass
-        
-        # Combine collections and loose books
-        all_items = collections + loose_books
-        total_count = len(all_items)
+        file_list = self._all_books_cache
+        total_count = len(file_list)
         
         # Apply pagination
         start = (page - 1) * size
         end = start + size
-        paginated_items = all_items[start:end]
+        paginated_books = file_list[start:end]
         
-        return paginated_items, total_count
+        return paginated_books, total_count
         
     def get_paginated_books(self, directory_path, page, size, base_path=None, use_cache=False):
         """Returns a subset of books for a given page."""
@@ -409,36 +389,13 @@ class OPDSHandler(http.server.BaseHTTPRequestHandler):
         page, size, parsed_url = self._parse_url_params()
         path_base = parsed_url.path
         
-        # Use the new efficient paginated method that supports collections
-        paginated_items, total_count = self.book_scanner.get_all_books_paginated(page, size)
+        # Get all books (no collections)
+        paginated_books, total_count = self.book_scanner.get_all_books_paginated(page, size)
         
         links = self._get_pagination_links(path_base, page, size, total_count)
         links.append(('start', '/opds', 'application/atom+xml;profile=opds-catalog;kind=navigation'))
         
-        # Convert items to entries
-        entries = []
-        for item in paginated_items:
-            if item['type'] == 'collection':
-                # Collection entry
-                collection_id = f'urn:collection:{hashlib.md5(item["name"].encode()).hexdigest()}'
-                encoded_name = quote(item['name'])
-                entries.append({
-                    'title': f"📁 {item['name']}",
-                    'id': collection_id,
-                    'links': [('subsection', f'/opds/folder/{encoded_name}?page=1', 'application/atom+xml;profile=opds-catalog;kind=acquisition')]
-                })
-            else:  # book
-                # Book entry
-                file_info = item['info']
-                book_id = f'urn:book:{hashlib.md5(file_info["relative_path"].encode()).hexdigest()}'
-                encoded_path = quote(file_info['relative_path'].replace(os.sep, '/'))
-                
-                entries.append({
-                    'title': file_info['title'],
-                    'id': book_id,
-                    'links': [('http://opds-spec.org/acquisition/open-access', f'/download/{encoded_path}', 'application/epub+zip')],
-                    'author': file_info['author']
-                })
+        entries = self._create_book_entries(paginated_books)
         
         total_pages = self._get_total_pages(total_count, size)
         title = f'All Books (Page {page} of {total_pages})'
