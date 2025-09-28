@@ -156,25 +156,44 @@
 
     <xsl:template match="atom:entry">
         <xsl:choose>
-            <xsl:when test="atom:link[@rel='subsection']">
-                <a class="block group rounded-lg overflow-hidden transition-all duration-300 transform hover:-translate-y-1 hover:shadow-xl">
+            <xsl:when test="atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books')">
+                <a class="block group rounded-lg overflow-hidden transition-all duration-300 transform hover:-translate-y-1 hover:shadow-xl aspect-[2/3]">
                     <xsl:attribute name="href">
                         <xsl:value-of select="atom:link[@rel='subsection']/@href"/>
                     </xsl:attribute>
-                    <div class="h-64 bg-slate-100 flex flex-col items-center justify-center p-4 text-center border border-slate-200 dark:bg-slate-800 dark:border-slate-700">
-                        <i data-lucide="folder" class="w-12 h-12 text-slate-400 mb-3 transition-colors group-hover:text-sky-500 dark:text-slate-500 dark:group-hover:text-sky-400"></i>
-                        <div class="font-semibold text-slate-700 transition-colors group-hover:text-sky-600 dark:text-slate-300 dark:group-hover:text-sky-400"><xsl:value-of select="atom:title"/></div>
+                    <div class="h-full bg-slate-100 flex flex-col items-center justify-center p-4 text-center border border-slate-200 dark:bg-slate-800 dark:border-slate-700">
+                        <xsl:choose>
+                            <xsl:when test="atom:id = 'urn:all-books'">
+                                <i data-lucide="library" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
+                            </xsl:when>
+                            <xsl:otherwise>
+                                <i data-lucide="clock" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
+                            </xsl:otherwise>
+                        </xsl:choose>
+                        <div class="font-semibold text-slate-700 transition-colors dark:text-slate-300"><xsl:value-of select="atom:title"/></div>
+                        <div class="text-sm text-slate-500 mt-1 dark:text-slate-400">System collection</div>
+                    </div>
+                </a>
+            </xsl:when>
+            <xsl:when test="atom:link[@rel='subsection']">
+                <a class="block group rounded-lg overflow-hidden transition-all duration-300 transform hover:-translate-y-1 hover:shadow-xl aspect-[2/3]">
+                    <xsl:attribute name="href">
+                        <xsl:value-of select="atom:link[@rel='subsection']/@href"/>
+                    </xsl:attribute>
+                    <div class="h-full bg-slate-100 flex flex-col items-center justify-center p-4 text-center border border-slate-200 dark:bg-slate-800 dark:border-slate-700">
+                        <i data-lucide="folder" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
+                        <div class="font-semibold text-slate-700 transition-colors dark:text-slate-300 "><xsl:value-of select="atom:title"/></div>
                         <div class="text-sm text-slate-500 mt-1 dark:text-slate-400">Collection</div>
                     </div>
                 </a>
             </xsl:when>
 
             <xsl:otherwise>
-                <a class="book-link block group transition-all duration-300 transform hover:-translate-y-2">
+                <a class="book-link block group transition-all duration-300 transform hover:-translate-y-2 aspect-[2/3]">
                     <xsl:attribute name="href">
                         <xsl:value-of select="atom:link[@rel='http://opds-spec.org/acquisition/open-access']/@href"/>
                     </xsl:attribute>
-                    <div class="book h-64 flex flex-col p-4 text-center relative rounded-r-md shadow-md group-hover:shadow-xl transition-shadow duration-300">
+                    <div class="book h-full flex flex-col p-4 text-center relative rounded-r-md shadow-md group-hover:shadow-xl transition-shadow duration-300">
                         <div class="absolute top-0 left-0 w-3 h-full bg-black/10 rounded-l-sm dark:bg-black/20" style="border-right: 1px solid rgba(0,0,0,0.1);"></div>
                         <div class="flex-grow flex items-center justify-center px-2">
                             <div class="font-bold text-base text-slate-800 dark:text-slate-100"><xsl:value-of select="atom:title"/></div>
