@@ -78,7 +78,7 @@ class OPDSFeedGenerator:
                 ET.SubElement(entry, 'link', {'rel': rel, 'href': href, 'type': type_})
                 
         xml_string = ET.tostring(feed, encoding='unicode', method='xml')
-        # Add the processing instruction for client-side XSLT
+
         processing_instruction = '<?xml-stylesheet type="text/xsl" href="/opds_to_html.xslt"?>\n'
         return processing_instruction + xml_string
 
@@ -340,8 +340,7 @@ class OPDSHandler(http.server.BaseHTTPRequestHandler):
 
     def _send_xml_response(self, xml, catalog_kind):
         self.send_response(200)
-        self.send_header('Content-Type', f'application/atom+xml;profile=opds-catalog;kind={catalog_kind}')
-        self.send_header('Content-Type', 'application/xml')
+        self.send_header('Content-Type', f'application/xml;profile=opds-catalog;kind={catalog_kind}')
         self.end_headers()
         self.wfile.write(xml.encode('utf-8'))
 

@@ -3,6 +3,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 COPY server.py /app/server.py
+COPY opds_to_html.xslt /app/opds_to_html.xslt
 
 RUN pip install --no-cache-dir ebooklib
 
