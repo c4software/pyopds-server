@@ -18,25 +18,28 @@
                         margin: 0;
                         padding: 0;
                     }
+                    .header {
+                        display: flex;
+                        align-items: center;
+                        background-color: #d7ccc8;
+                        border-bottom: 3px solid #a1887f;
+                        padding: 10px 20px;
+                    }
                     h1 {
+                        flex: 1;
                         text-align: center;
                         font-weight: 300;
                         color: #44352e;
-                        padding: 20px;
                         margin: 0;
-                        background-color: #d7ccc8;
-                        border-bottom: 3px solid #a1887f;
                         text-shadow: 1px 1px 1px #fff;
                     }
                     #back-button {
-                        position: absolute;
-                        top: 10px;
-                        left: 10px;
                         font-size: 1.5em;
                         color: #44352e;
                         cursor: pointer;
                         display: none;
-                        z-index: 10;
+                        margin-right: 20px;
+                        min-width: 50px;
                     }
                     .bookshelf {
                         padding: 30px;
@@ -116,17 +119,51 @@
                         font-style: italic;
                         color: #888;
                     }
+                    #quick-links {
+                        min-width: 50px;
+                        text-align: right;
+                    }
+                    #quick-links a {
+                        color: #44352e;
+                        text-decoration: none;
+                        margin-left: 15px;
+                        font-weight: 500;
+                    }
+                    #quick-links a:hover {
+                        text-decoration: underline;
+                    }
                 </style>
             </head>
             <body>
-                <div id="back-button" onclick="history.back()">← Back</div>
-                <h1><xsl:value-of select="atom:title"/></h1>
+                <div class="header">
+                    <a id="back-button" style="display: none; text-decoration: none; color: #44352e; font-size: 1.5em; margin-right: 20px; min-width: 50px;">← Back</a>
+                    <h1><xsl:value-of select="atom:title"/></h1>
+                    <div id="quick-links">
+                        <a href="/opds">Home</a>
+                    </div>
+                </div>
                 <div class="bookshelf">
                     <xsl:apply-templates select="atom:entry"/>
                 </div>
                 <script>
-                    if (history.length > 1) {
-                        document.getElementById('back-button').style.display = 'block';
+                    const backButton = document.getElementById('back-button');
+                    const currentPath = window.location.pathname;
+
+                    let parentPath = '';
+                    if (currentPath.startsWith('/opds/folder/')) {
+                        const pathParts = currentPath.substring('/opds/folder/'.length).split('/').filter(p => p);
+                        if (pathParts.length > 1) {
+                            parentPath = '/opds/folder/' + pathParts.slice(0, -1).join('/');
+                        } else {
+                            parentPath = '/opds';
+                        }
+                    } else if (currentPath === '/opds/books' || currentPath === '/opds/recent') {
+                        parentPath = '/opds';
+                    }
+
+                    if (parentPath) {
+                        backButton.href = parentPath;
+                        backButton.style.display = 'block';
                     }
                 </script>
             </body>
