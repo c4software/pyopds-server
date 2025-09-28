@@ -137,7 +137,11 @@ class OPDSHandler(http.server.BaseHTTPRequestHandler):
         super().__init__(*args, **kwargs)
     
     def do_GET(self):
-        if self.path == '/opds':
+        if self.path == '/':
+            self.send_response(302)
+            self.send_header('Location', '/opds')
+            self.end_headers()
+        if self.path == '/opds' or self.path == '/opds/':
             self._handle_root_catalog()
         elif self.path == '/opds/books':
             self._handle_all_books()
