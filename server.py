@@ -8,7 +8,7 @@ from urllib.parse import unquote, quote
 from ebooklib import epub
 
 LIBRARY_DIR = os.environ.get('LIBRARY_DIR', 'books')
-MAX_DEPTH = int(os.environ.get('MAX_DEPTH', '3'))
+MAX_DEPTH = int(os.environ.get('MAX_DEPTH', '2'))
 PORT = 8080
 
 
@@ -60,7 +60,7 @@ class OPDSFeedGenerator:
         
         ET.SubElement(feed, 'title').text = title
         ET.SubElement(feed, 'id').text = feed_id
-        ET.SubElement(feed, 'updated').text = datetime.datetime.utcnow().isoformat() + 'Z'
+        ET.SubElement(feed, 'updated').text = datetime.datetime.now(datetime.timezone.utc).isoformat() + 'Z'
         
         for rel, href, type_ in links:
             ET.SubElement(feed, 'link', {'rel': rel, 'href': href, 'type': type_})
