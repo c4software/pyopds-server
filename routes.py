@@ -17,7 +17,7 @@ class Route:
         Initialize a route.
         
         Args:
-            method: HTTP method ('GET', 'POST', etc.)
+            method: HTTP method ('GET', 'POST', 'PUT'.)
             pattern: URL pattern (string or regex)
             controller_action: Tuple of (controller_class, action_method_name)
             name: Optional name for the route
@@ -47,6 +47,11 @@ class Router:
         """Register a POST route."""
         self.routes.append(Route('POST', pattern, controller_action, name))
         return self
+    
+    def put(self, pattern, controller_action, name=None):
+        """Register a PUT route."""
+        self.routes.append(Route('PUT', pattern, controller_action, name))
+        return self
 
     def find_route(self, method, path):
         """Find matching route for given method and path."""
@@ -57,9 +62,6 @@ class Router:
 
 
 def register_routes(router):
-    # KoReader Auth Routes
-    """Register all application routes."""
-    
     # OPDS Catalog Routes
     router.get('/', (OPDSController, 'redirect_to_opds'), name='home')
     router.get('/opds', (OPDSController, 'show_root_catalog'), name='opds.root')
@@ -72,10 +74,10 @@ def register_routes(router):
     router.get(r'/cover/.*', (OPDSController, 'download_cover'), name='opds.cover')
 
     # KoReader Sync Routes
-    router.get('/koreader/sync', (KoReaderSyncController, 'get_sync_records'), name='koreader.sync.get')
-    router.post('/koreader/sync', (KoReaderSyncController, 'store_sync_records'), name='koreader.sync.store')
+    router.get('/koreader/sync/syncs/progress/.*', (KoReaderSyncController, 'get_sync_records'), name='koreader.sync.get')
+    router.put('/koreader/sync/syncs/progress', (KoReaderSyncController, 'store_sync_records'), name='koreader.sync.store')
     router.post('/koreader/sync/users/create', (KoReaderSyncController, 'register'), name='koreader.register')
-    router.post('/koreader/sync/users/auth', (KoReaderSyncController, 'login'), name='koreader.login')
+    router.get('/koreader/sync/users/auth', (KoReaderSyncController, 'login'), name='koreader.login')
 
     return router
 

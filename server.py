@@ -44,14 +44,7 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
             # Get controller and call action
             controller = self._get_controller(route.controller_class)
             action_method = getattr(controller, route.action)
-            
-            # Call the action
-            if route.controller_class == OPDSController:
-                # OPDS actions don't need parsed_url
-                action_method()
-            else:
-                # KoReader actions need parsed_url
-                action_method(parsed_url)
+            action_method()
         else:
             controller = self._get_controller(OPDSController)
             controller._send_error(404, 'Endpoint not found')
@@ -59,6 +52,10 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         """Handle GET requests through router."""
         self._handle_request('GET')
+
+    def do_PUT(self):
+        """Handle PUT requests through router."""
+        self._handle_request('PUT')
 
     def do_POST(self):
         """Handle POST requests through router."""

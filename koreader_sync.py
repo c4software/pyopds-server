@@ -5,6 +5,7 @@ import os
 import sqlite3
 from urllib.parse import parse_qs
 import base64
+import time
 
 KOREADER_SYNC_DB_PATH = os.environ.get('KOREADER_SYNC_DB_PATH', 'koreader_sync.db')
 
@@ -40,6 +41,7 @@ class KoReaderSyncStorage:
                 (username, password_md5)
             ).fetchone()
         return row is not None
+
     """SQLite-backed storage for KoReader sync progress."""
 
     def __init__(self, db_path=KOREADER_SYNC_DB_PATH):
@@ -57,109 +59,47 @@ class KoReaderSyncStorage:
                 """
                 CREATE TABLE IF NOT EXISTS sync_records (
                     user TEXT NOT NULL,
-                    device TEXT NOT NULL,
                     document TEXT NOT NULL,
-                    payload TEXT NOT NULL,
-                    updated_at REAL NOT NULL,
-                    PRIMARY KEY (user, device, document)
+                    percentage REAL,
+                    progress TEXT,
+                    device TEXT,
+                    device_id TEXT,
+                    timestamp REAL,
+                    PRIMARY KEY (user, document)
                 )
                 """
             )
 
-    def upsert_record(self, user, device, document, payload):
-        timestamp = datetime.datetime.now(datetime.timezone.utc).timestamp()
-        serialized_payload = json.dumps(payload, separators=(",", ":"))
-
+    def upsert_record(self, user, document, percentage, progress, device, device_id, timestamp):
         with self._get_connection() as conn:
             conn.execute(
                 """
-                INSERT INTO sync_records (user, device, document, payload, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(user, device, document) DO UPDATE SET
-                    payload=excluded.payload,
-                    updated_at=excluded.updated_at
+                INSERT OR REPLACE INTO sync_records (user, document, percentage, progress, device, device_id, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (user, device, document, serialized_payload, timestamp),
+                (user, document, percentage, progress, device, device_id, timestamp),
             )
 
-        return timestamp
-
-    def fetch_records(self, user=None, device=None, since=None, limit=None, offset=None):
-        query = "SELECT user, device, document, payload, updated_at FROM sync_records"
-        clauses = []
-        params = []
-
-        if user:
-            clauses.append("user = ?")
-            params.append(user)
-        if device:
-            clauses.append("device = ?")
-            params.append(device)
-        if since is not None:
-            clauses.append("updated_at > ?")
-            params.append(since)
-
-        if clauses:
-            query += " WHERE " + " AND ".join(clauses)
-
-        query += " ORDER BY updated_at ASC"
-
-        if limit is not None:
-            query += " LIMIT ?"
-            params.append(limit)
-        if offset is not None:
-            query += " OFFSET ?"
-            params.append(offset)
-
+    def fetch_records(self, user, document=None):
+        if document:
+            query = "SELECT * FROM sync_records WHERE user = ? AND document = ?"
+            params = (user, document)
+        else:
+            query = "SELECT * FROM sync_records WHERE user = ?"
+            params = (user,)
+        query += " ORDER BY timestamp ASC"
         with self._get_connection() as conn:
             rows = conn.execute(query, params).fetchall()
-
-        return [self._row_to_record(row) for row in rows]
-
-    def _row_to_record(self, row):
-        payload = json.loads(row["payload"])
-        return {
-            "user": row["user"],
-            "device": row["device"],
-            "document": row["document"],
-            "data": payload,
-            "updated_at": datetime.datetime.fromtimestamp(
-                row["updated_at"], datetime.timezone.utc
-            ).isoformat(),
-            "updated_at_epoch": row["updated_at"],
-        }
+        return [dict(row) for row in rows]
 
 
 class KoReaderSyncController:
-
-    def register(self, parsed_url):
-        payload = self._parse_json_body()
-        if payload is None:
-            return
-        username = payload.get('username')
-        password_md5 = payload.get('password')
-        if not username or not password_md5:
-            self._send_json_error(400, 'Missing "username" or "password" (MD5)')
-            return
-        if self.sync_storage.create_user(username, password_md5):
-            self._send_json_response({'status': 'ok', 'message': 'User registered'})
-        else:
-            self._send_json_error(409, 'User already exists')
-
-    def login(self, parsed_url):
-        payload = self._parse_json_body()
-        if payload is None:
-            return
-        username = payload.get('username')
-        password_md5 = payload.get('password')
-        if not username or not password_md5:
-            self._send_json_error(400, 'Missing "username" or "password" (MD5)')
-            return
-        if self.sync_storage.verify_user(username, password_md5):
-            self._send_json_response({'status': 'ok', 'message': 'Login successful'})
-        else:
-            self._send_json_error(401, 'Invalid credentials')
-    """Controller for KoReader sync operations."""
+    ERROR_NO_DATABASE = 1000
+    ERROR_INTERNAL = 2000
+    ERROR_UNAUTHORIZED_USER = 2001
+    ERROR_USER_EXISTS = 2002
+    ERROR_INVALID_FIELDS = 2003
+    ERROR_DOCUMENT_FIELD_MISSING = 2004
 
     _sync_storage_instance = None
 
@@ -169,154 +109,145 @@ class KoReaderSyncController:
         self.request = request_handler
         self.sync_storage = KoReaderSyncController._sync_storage_instance
 
-    def get_sync_records(self, parsed_url):
-        # Authentification par username/password (MD5) dans l'en-tête Authorization: Basic base64(username:password_md5)
-        user, password_md5 = self._extract_basic_auth(parsed_url)
-        if not user or not password_md5 or not self.sync_storage.verify_user(user, password_md5):
-            self._send_json_error(401, 'Unauthorized: invalid user or password')
-            return
+    def _is_valid_field(self, field):
+        """Check if field is a non-empty string."""
+        return isinstance(field, str) and len(field) > 0
 
-        params = parse_qs(parsed_url.query)
-        # user est déjà authentifié, mais on garde la logique pour la compatibilité
-        device = params.get('device', [None])[0]
-        since_param = params.get('since', [None])[0]
-        limit_param = params.get('limit', [None])[0]
-        offset_param = params.get('offset', [None])[0]
+    def _is_valid_key_field(self, field):
+        """Check if field is a non-empty string without colons."""
+        return self._is_valid_field(field) and ":" not in field
 
-        if not user:
-            self._send_json_error(400, 'Missing "user" (auth required)')
-            return
-
-        since = None
-        if since_param is not None:
-            try:
-                since = float(since_param)
-            except (TypeError, ValueError):
-                self._send_json_error(400, 'Invalid "since" parameter')
-                return
-
-        limit = None
-        if limit_param is not None:
-            try:
-                limit = int(limit_param)
-                if limit <= 0:
-                    raise ValueError
-            except (TypeError, ValueError):
-                self._send_json_error(400, 'Invalid "limit" parameter')
-                return
-
-        offset = None
-        if offset_param is not None:
-            try:
-                offset = int(offset_param)
-                if offset < 0:
-                    raise ValueError
-            except (TypeError, ValueError):
-                self._send_json_error(400, 'Invalid "offset" parameter')
-                return
-
-        records = self.sync_storage.fetch_records(
-            user=user,
-            device=device,
-            since=since,
-            limit=limit,
-            offset=offset,
-        )
-
-        response_timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
-
-        self._send_json_response({
-            'status': 'ok',
-            'timestamp': response_timestamp,
-            'user': user,
-            'device': device,
-            'count': len(records),
-            'records': records,
-        })
-
-    def store_sync_records(self, parsed_url):
-        # Authentification par username/password (MD5) dans l'en-tête Authorization: Basic base64(username:password_md5)
-        user, password_md5 = self._extract_basic_auth(parsed_url)
-        if not user or not password_md5 or not self.sync_storage.verify_user(user, password_md5):
-            self._send_json_error(401, 'Unauthorized: invalid user or password')
-            return
-
+    def register(self):
         payload = self._parse_json_body()
         if payload is None:
             return
 
-        # user du body doit correspondre à l'utilisateur authentifié
-        body_user = payload.get('user')
-        device = payload.get('device')
-        records = (
-            payload.get('records')
-            or payload.get('documents')
-            or payload.get('entries')
+        username = payload.get('username')
+        password_md5 = payload.get('password')
+        if not self._is_valid_key_field(username) or not self._is_valid_field(password_md5):
+            self._send_json_error(self.ERROR_INVALID_FIELDS, 'Invalid username or password')
+            return
+
+        if self.sync_storage.create_user(username, password_md5):
+            print("User created:", username)
+            self._send_json_response({'username': username}, status=201)
+        else:
+            self._send_json_error(self.ERROR_USER_EXISTS, 'User already exists')
+
+    def login(self):
+        user = self.request.headers.get('X-Auth-User')
+        password_md5 = self.request.headers.get('X-Auth-Key')
+        if not self._is_valid_key_field(user) or not self._is_valid_field(password_md5):
+            self._send_json_error(self.ERROR_INVALID_FIELDS, 'Invalid X-Auth-User or X-Auth-Key')
+            return
+
+        if self.sync_storage.verify_user(user, password_md5):
+            self._send_json_response({'authorized': "OK"})
+        else:
+            self._send_json_error(self.ERROR_UNAUTHORIZED_USER, 'Unauthorized: invalid user or password')
+
+    def get_sync_records(self):
+        user = self._authorize()
+        document = self.request.path.split('syncs/progress/')[1]
+
+        if not user:
+            self._send_json_error(self.ERROR_UNAUTHORIZED_USER, 'Unauthorized: invalid user or password')
+            return
+
+        if not document:
+            self._send_json_error(self.ERROR_DOCUMENT_FIELD_MISSING, 'Missing document parameter')
+            return
+
+        if not self._is_valid_key_field(document):
+            self._send_json_error(self.ERROR_DOCUMENT_FIELD_MISSING, 'Invalid document parameter')
+            return
+
+        records = self.sync_storage.fetch_records(
+            user=user,
+            document=document,
         )
 
-        if not body_user or not device or not isinstance(records, list):
-            self._send_json_error(400, 'Invalid payload: "user", "device", and record list required')
-            return
-        if body_user != user:
-            self._send_json_error(403, 'User in payload does not match authenticated user')
+        if not records:
+            self._send_json_response({})
             return
 
-        stored_documents = []
+        row = records[0]
+        res = {}
+        if row['percentage'] is not None:
+            res['percentage'] = row['percentage']
+        if row['progress'] is not None:
+            res['progress'] = row['progress']
+        if row['device'] is not None:
+            res['device'] = row['device']
+        if row['device_id'] is not None:
+            res['device_id'] = row['device_id']
+        if row['timestamp'] is not None:
+            res['timestamp'] = row['timestamp']
+        if res:
+            res['document'] = document
 
-        for record in records:
-            if not isinstance(record, dict):
-                continue
+        self._send_json_response(res)
 
-            document = record.get('document')
-            if not document:
-                continue
-
-            record_payload = dict(record)
-            record_payload['document'] = document
-            record_payload.setdefault('user', user)
-            record_payload.setdefault('device', device)
-
-            timestamp = self.sync_storage.upsert_record(user, device, document, record_payload)
-
-            stored_documents.append({
-                'user': user,
-                'device': device,
-                'document': document,
-                'updated_at_epoch': timestamp,
-                'updated_at': datetime.datetime.fromtimestamp(
-                    timestamp, datetime.timezone.utc
-                ).isoformat(),
-            })
-
-        if not stored_documents:
-            self._send_json_error(400, 'No valid records provided')
+    def store_sync_records(self):
+        user = self._authorize()
+        if not user:
+            self._send_json_error(self.ERROR_UNAUTHORIZED_USER, 'Unauthorized: invalid user or password')
             return
 
-        response_timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        payload = self._parse_json_body()
+
+        if payload is None:
+            return
+
+        document = payload.get('document')
+        percentage_str = payload.get('percentage')
+        progress = payload.get('progress')
+        device = payload.get('device')
+        device_id = payload.get('device_id')
+
+        if not self._is_valid_key_field(document) or not self._is_valid_field(progress) or not self._is_valid_field(device):
+            self._send_json_error(self.ERROR_INVALID_FIELDS, 'Invalid payload: document, progress, and device required')
+            return
+
+        try:
+            percentage = float(percentage_str)
+        except (TypeError, ValueError):
+            self._send_json_error(self.ERROR_INVALID_FIELDS, 'Invalid percentage')
+            return
+
+        timestamp = time.time()
+
+        self.sync_storage.upsert_record(user, document, percentage, progress, device, device_id, timestamp)
+
         self._send_json_response({
-            'status': 'ok',
-            'stored': len(stored_documents),
-            'documents': stored_documents,
-            'timestamp': response_timestamp,
+            'document': document,
+            'timestamp': timestamp,
         })
 
-    # Helper methods -------------------------------------------------------
+    def _authorize(self):
+        """Authorize user using X-Auth-User and X-Auth-Key headers."""
+        user = self.request.headers.get('X-Auth-User')
+        password_md5 = self.request.headers.get('X-Auth-Key')
+        if self._is_valid_key_field(user) and self._is_valid_field(password_md5):
+            if self.sync_storage.verify_user(user, password_md5):
+                return user
+        return None
 
     def _parse_json_body(self):
         """Parse JSON request body."""
         content_length = self.request.headers.get('Content-Length')
         if content_length is None:
-            self._send_json_error(411, 'Missing Content-Length header')
+            self._send_json_error(self.ERROR_INVALID_FIELDS, 'Missing Content-Length header')
             return None
 
         try:
             length = int(content_length)
         except ValueError:
-            self._send_json_error(400, 'Invalid Content-Length header')
+            self._send_json_error(self.ERROR_INVALID_FIELDS, 'Invalid Content-Length header')
             return None
 
         if length <= 0:
-            self._send_json_error(400, 'Empty request body')
+            self._send_json_error(self.ERROR_INVALID_FIELDS, 'Empty request body')
             return None
 
         body = self.request.rfile.read(length)
@@ -324,7 +255,7 @@ class KoReaderSyncController:
         try:
             return json.loads(body.decode('utf-8'))
         except json.JSONDecodeError:
-            self._send_json_error(400, 'Invalid JSON payload')
+            self._send_json_error(self.ERROR_INVALID_FIELDS, 'Invalid JSON payload')
             return None
 
     def _send_json_response(self, data, status=200):
@@ -337,15 +268,16 @@ class KoReaderSyncController:
         self.request.wfile.write(payload)
 
     def _send_json_error(self, code, message):
-        """Send JSON error response."""
+        """Send JSON error response with custom code."""
         response = {
             'status': 'error',
             'code': code,
             'error': message,
         }
-        self._send_json_response(response, status=code)
+        self._send_json_response(response, status=400 if code in [self.ERROR_INVALID_FIELDS, self.ERROR_DOCUMENT_FIELD_MISSING] else code // 1000 if code >= 2000 else code)
+
     def _extract_basic_auth(self, parsed_url=None):
-        # Retourne (username, password_md5) si Authorization: Basic est présent, sinon (None, None)
+        """Extract username and password from Authorization: Basic header."""
         auth_header = self.request.headers.get('Authorization')
         if auth_header and auth_header.lower().startswith('basic '):
             try:
@@ -361,17 +293,17 @@ class KoReaderSyncController:
 class KoReaderSyncHandlerMixin:
     """Mixin providing KoReader sync HTTP helpers (delegates to controller)."""
 
-    def setup_koreader_sync(self, auth_token=None):
+    def setup_koreader_sync(self):
         """Initialize KoReader sync controller."""
-        self.koreader_controller = KoReaderSyncController(self, auth_token)
+        self.koreader_controller = KoReaderSyncController(self)
 
-    def handle_koreader_sync_get(self, parsed_url):
+    def handle_koreader_sync_get(self):
         """Handle GET request for sync records."""
-        self.koreader_controller.get_sync_records(parsed_url)
+        self.koreader_controller.get_sync_records()
 
-    def handle_koreader_sync_post(self, parsed_url):
+    def handle_koreader_sync_post(self):
         """Handle POST request to store sync records."""
-        self.koreader_controller.store_sync_records(parsed_url)
+        self.koreader_controller.store_sync_records()
 
     def _send_json_error(self, code, message):
         """Send JSON error response (for compatibility)."""
