@@ -5,7 +5,7 @@ Defines routes and router inspired by Laravel routing.
 
 import re
 
-from koreader_sync import KoReaderSyncController
+from koreader_sync import KoReaderSyncController, KOREADER_SYNC_TOKEN
 from opds import OPDSController
 
 
@@ -69,10 +69,13 @@ def register_routes(router):
     router.get('/opds_to_html.xslt', (OPDSController, 'serve_xslt'), name='opds.xslt')
     router.get(r'/download/.*', (OPDSController, 'download_book'), name='opds.download')
     router.get(r'/cover/.*', (OPDSController, 'download_cover'), name='opds.cover')
-    
-    # KoReader Sync Routes
-    router.get('/koreader/sync', (KoReaderSyncController, 'get_sync_records'), name='koreader.sync.get')
-    router.post('/koreader/sync', (KoReaderSyncController, 'store_sync_records'), name='koreader.sync.store')
+
+    if KOREADER_SYNC_TOKEN:
+        # KoReader Sync Routes
+        router.get('/koreader/sync', (KoReaderSyncController, 'get_sync_records'), name='koreader.sync.get')
+        router.post('/koreader/sync', (KoReaderSyncController, 'store_sync_records'), name='koreader.sync.store')
+    else:
+        print("Warning: KOREADER_SYNC_TOKEN not set. KoReader sync routes are disabled.")
 
     return router
 

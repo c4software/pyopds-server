@@ -58,15 +58,8 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
                 # KoReader actions need parsed_url
                 action_method(parsed_url)
         else:
-            # No route found - 404
-            if path.startswith('/koreader/'):
-                # KoReader endpoint not found
-                controller = self._get_controller(KoReaderSyncController)
-                controller._send_json_error(404, 'Endpoint not found')
-            else:
-                # OPDS endpoint not found
-                controller = self._get_controller(OPDSController)
-                controller._send_error(404, 'Not found')
+            controller = self._get_controller(OPDSController)
+            controller._send_json_error(404, 'Endpoint not found')
 
     def do_GET(self):
         """Handle GET requests through router."""
@@ -82,14 +75,9 @@ def main():
     if not os.path.exists(LIBRARY_DIR):
         os.makedirs(LIBRARY_DIR)
 
-    # Print registered routes
-    print(f"OPDS server started on port {PORT}")
-    print(f"\nRegistered routes:")
-    for route in UnifiedHandler.router.routes:
-        print(f"  {route.method:6} {route.pattern.pattern:30} -> {route.controller_class.__name__}.{route.action}")
-    
     print(f"\nAccess the root catalog at http://127.0.0.1:{PORT}/opds")
-    print(f"KoReader sync available at http://127.0.0.1:{PORT}/koreader/sync\n")
+    if KOREADER_SYNC_TOKEN:
+        print(f"KoReader sync available at http://127.0.0.1:{PORT}/koreader/sync\n")
 
     with socketserver.TCPServer(("", PORT), UnifiedHandler) as httpd:
         httpd.serve_forever()
