@@ -1,2 +1,7 @@
 docker-compose.yml
 .DS_Store
+.venv
+koreader_sync.db
+books/
+__pycache__/
+.pytest_cache/
