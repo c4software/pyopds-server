@@ -68,6 +68,7 @@ def register_routes(router):
     router.get(r'/opds/folder/.*', (OPDSController, 'show_folder_catalog'), name='opds.folder')
     router.get('/opds_to_html.xslt', (OPDSController, 'serve_xslt'), name='opds.xslt')
     router.get(r'/download/.*', (OPDSController, 'download_book'), name='opds.download')
+    router.get(r'/cover/.*', (OPDSController, 'download_cover'), name='opds.cover')
     
     # KoReader Sync Routes
     router.get('/koreader/sync', (KoReaderSyncController, 'get_sync_records'), name='koreader.sync.get')

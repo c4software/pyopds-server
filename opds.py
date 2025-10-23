@@ -39,6 +39,85 @@ class BookMetadata:
         except Exception:
             return None, None
 
+    @staticmethod
+    def extract_epub_cover(epub_path):
+        """Extract cover image from EPUB file.
+        
+        Returns:
+            tuple: (cover_data, mime_type) or (None, None) if not found
+        """
+        try:
+            with zipfile.ZipFile(epub_path) as zf:
+                # Parse container.xml to find OPF file
+                container_xml = zf.read('META-INF/container.xml')
+                container_root = ET.fromstring(container_xml)
+                ns_container = {'ocf': 'urn:oasis:names:tc:opendocument:xmlns:container'}
+                opf_path = container_root.find(
+                    ".//ocf:rootfile[@media-type='application/oebps-package+xml']",
+                    ns_container,
+                ).get('full-path')
+
+                # Parse OPF file
+                opf_xml = zf.read(opf_path)
+                opf_root = ET.fromstring(opf_xml)
+                
+                # Get the directory containing the OPF file
+                opf_dir = os.path.dirname(opf_path)
+                
+                # Define namespaces
+                ns_opf = {'opf': 'http://www.idpf.org/2007/opf'}
+                
+                # Try to find cover using different methods
+                cover_id = None
+                cover_href = None
+                
+                # Method 1: Look for meta name="cover"
+                cover_meta = opf_root.find(".//opf:meta[@name='cover']", ns_opf)
+                if cover_meta is not None:
+                    cover_id = cover_meta.get('content')
+                
+                # Method 2: Look for item with properties="cover-image" (EPUB 3)
+                if not cover_id:
+                    cover_item = opf_root.find(".//opf:item[@properties='cover-image']", ns_opf)
+                    if cover_item is not None:
+                        cover_href = cover_item.get('href')
+                
+                # If we found a cover ID, get the href from manifest
+                if cover_id and not cover_href:
+                    cover_item = opf_root.find(f".//opf:item[@id='{cover_id}']", ns_opf)
+                    if cover_item is not None:
+                        cover_href = cover_item.get('href')
+                        mime_type = cover_item.get('media-type', 'image/jpeg')
+                
+                # If we found a cover href, extract it
+                if cover_href:
+                    # Resolve relative path
+                    if opf_dir:
+                        cover_path = os.path.join(opf_dir, cover_href).replace('\\', '/')
+                    else:
+                        cover_path = cover_href
+                    
+                    # Read cover image
+                    cover_data = zf.read(cover_path)
+                    
+                    # Determine MIME type from file extension if not already set
+                    if 'mime_type' not in locals():
+                        ext = os.path.splitext(cover_href)[1].lower()
+                        mime_types = {
+                            '.jpg': 'image/jpeg',
+                            '.jpeg': 'image/jpeg',
+                            '.png': 'image/png',
+                            '.gif': 'image/gif',
+                            '.webp': 'image/webp',
+                        }
+                        mime_type = mime_types.get(ext, 'image/jpeg')
+                    
+                    return cover_data, mime_type
+                
+                return None, None
+        except Exception:
+            return None, None
+
 
 class SecurityUtils:
     @staticmethod
@@ -363,6 +442,10 @@ class OPDSController:
         """Handle book download."""
         self._handle_download()
 
+    def download_cover(self):
+        """Handle cover image download."""
+        self._handle_cover_download()
+
     def _handle_root_catalog(self):
         links = [
             (
@@ -650,6 +733,38 @@ class OPDSController:
         with open(file_path, 'rb') as f:
             self.request.wfile.write(f.read())
 
+    def _handle_cover_download(self):
+        """Handle cover image download requests."""
+        filename = unquote(self.request.path.split('/cover/')[1])
+
+        if self.security.has_path_traversal(filename):
+            self._send_error(403, 'Access denied: Invalid path')
+            return
+
+        file_path = os.path.join(LIBRARY_DIR, filename)
+
+        if not self.security.is_within_library_dir(file_path):
+            self._send_error(403, 'Access denied: Path traversal detected')
+            return
+
+        if not filename.endswith('.epub') or not os.path.exists(file_path):
+            self._send_error(404, 'File not found')
+            return
+
+        # Extract cover from EPUB
+        cover_data, mime_type = BookMetadata.extract_epub_cover(file_path)
+
+        if cover_data is None:
+            self._send_error(404, 'Cover not found in EPUB')
+            return
+
+        # Serve the cover image
+        self.request.send_response(200)
+        self.request.send_header('Content-Type', mime_type)
+        self.request.send_header('Cache-Control', 'public, max-age=86400')
+        self.request.end_headers()
+        self.request.wfile.write(cover_data)
+
     def _serve_xslt(self):
         try:
             xslt_path = 'opds_to_html.xslt'
@@ -685,49 +800,10 @@ class OPDSController:
         self.request.wfile.write(error_xml.encode('utf-8'))
 
 
-class OPDSHandler(http.server.BaseHTTPRequestHandler):
-    """Legacy HTTP handler - kept for backward compatibility."""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def do_GET(self):
-        """Route GET requests through controller (legacy mode)."""
-        controller = OPDSController(self)
-        parsed_url = urlparse(self.path)
-        path = parsed_url.path
-
-        if path == '/':
-            controller.redirect_to_opds()
-        elif path == '/opds_to_html.xslt':
-            controller.serve_xslt()
-        elif path.startswith('/opds'):
-            if path == '/opds' or path == '/opds/':
-                controller.show_root_catalog()
-            elif path == '/opds/books':
-                controller.show_all_books()
-            elif path == '/opds/recent':
-                controller.show_recent_books()
-            elif path.startswith('/opds/folder/'):
-                controller.show_folder_catalog()
-            else:
-                controller._send_error(404, 'OPDS Catalog Not found')
-        elif path.startswith('/download/'):
-            controller.download_book()
-        else:
-            controller._send_error(404, 'Not found')
-
-    def do_POST(self):
-        """Handle POST requests."""
-        controller = OPDSController(self)
-        controller._send_error(404, 'Not found')
-
-
 __all__ = [
     'LIBRARY_DIR',
     'PAGE_SIZE',
     'OPDSController',
-    'OPDSHandler',
     'BookMetadata',
     'SecurityUtils',
     'OPDSFeedGenerator',

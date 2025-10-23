@@ -9,7 +9,7 @@ from koreader_sync import (
     KoReaderSyncController,
     KoReaderSyncStorage,
 )
-from opds import LIBRARY_DIR, OPDSController, OPDSHandler, PAGE_SIZE
+from opds import LIBRARY_DIR, OPDSController, PAGE_SIZE
 from routes import Router, register_routes
 
 PORT = int(os.environ.get('PORT', 8080))
@@ -103,7 +103,6 @@ __all__ = [
     'LIBRARY_DIR',
     'PAGE_SIZE',
     'OPDSController',
-    'OPDSHandler',
     'UnifiedHandler',
     'PORT',
     'main',

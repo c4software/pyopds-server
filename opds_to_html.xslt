@@ -33,6 +33,29 @@
                     .dark .book-link:nth-child(6n+4) .book { background-color: #365314; } /* Dark Lime */
                     .dark .book-link:nth-child(6n+5) .book { background-color: #9a3412; } /* Dark Orange */
                     .dark .book-link:nth-child(6n+6) .book { background-color: #831843; } /* Dark Pink */
+
+                    .book-cover {
+                        position: absolute;
+                        top: 0;
+                        left: 0;
+                        right: 0;
+                        bottom: 0;
+                        object-fit: cover;
+                        opacity: 0;
+                        transition: opacity 0.3s ease-in-out;
+                    }
+
+                    .book-cover.loaded {
+                        opacity: 1;
+                    }
+
+                    .book-cover-fallback {
+                        transition: opacity 0.3s ease-in-out;
+                    }
+
+                    .book-cover.loaded ~ .book-cover-fallback {
+                        opacity: 0;
+                    }
                 </style>
             </head>
             <body class="bg-slate-50 font-sans dark:bg-slate-900">
@@ -149,6 +172,61 @@
                             }
                         }
                     });
+
+                    // Load book covers asynchronously only for visible books
+                    function setupLazyCoverLoading() {
+                        const coverImages = document.querySelectorAll('img[data-cover-src]');
+                        
+                        // Options for the Intersection Observer
+                        const options = {
+                            root: null, // viewport
+                            rootMargin: '50px', // Start loading slightly before entering viewport
+                            threshold: 0.01 // Trigger when at least 1% is visible
+                        };
+                        
+                        // Callback function when an image enters the viewport
+                        function handleIntersection(entries, observer) {
+                            entries.forEach(function(entry) {
+                                if (entry.isIntersecting) {
+                                    const img = entry.target;
+                                    const coverSrc = img.getAttribute('data-cover-src');
+                                    
+                                    // Stop observing this image
+                                    observer.unobserve(img);
+                                    
+                                    // Create a new image to test if the cover exists
+                                    const testImg = new Image();
+                                    
+                                    testImg.onload = function() {
+                                        img.src = coverSrc;
+                                        img.classList.add('loaded');
+                                    };
+                                    
+                                    testImg.onerror = function() {
+                                        // Cover not found or error loading, keep the fallback visible
+                                        img.remove();
+                                    };
+                                    
+                                    testImg.src = coverSrc;
+                                }
+                            });
+                        }
+                        
+                        // Create the observer
+                        const observer = new IntersectionObserver(handleIntersection, options);
+                        
+                        // Observe all cover images
+                        coverImages.forEach(function(img) {
+                            observer.observe(img);
+                        });
+                    }
+
+                    // Setup lazy loading when DOM is ready
+                    if (document.readyState === 'loading') {
+                        document.addEventListener('DOMContentLoaded', setupLazyCoverLoading);
+                    } else {
+                        setupLazyCoverLoading();
+                    }
                 </script>
             </body>
         </html>
@@ -193,12 +271,26 @@
                     <xsl:attribute name="href">
                         <xsl:value-of select="atom:link[@rel='http://opds-spec.org/acquisition/open-access']/@href"/>
                     </xsl:attribute>
-                    <div class="book h-full flex flex-col p-4 text-center relative rounded-r-md shadow-md group-hover:shadow-xl transition-shadow duration-300">
-                        <div class="absolute top-0 left-0 w-3 h-full bg-black/10 rounded-l-sm dark:bg-black/20" style="border-right: 1px solid rgba(0,0,0,0.1);"></div>
-                        <div class="flex-grow flex items-center justify-center px-2">
-                            <div class="font-bold text-base text-slate-800 dark:text-slate-100"><xsl:value-of select="atom:title"/></div>
+                    <div class="book h-full flex flex-col p-4 text-center relative rounded-r-md shadow-md group-hover:shadow-xl transition-shadow duration-300 overflow-hidden">
+                        <xsl:variable name="downloadHref" select="atom:link[@rel='http://opds-spec.org/acquisition/open-access']/@href"/>
+                        <xsl:variable name="coverPath" select="concat('/cover/', substring-after($downloadHref, '/download/'))"/>
+                        
+                        <img class="book-cover rounded-r-md" loading="lazy">
+                            <xsl:attribute name="data-cover-src">
+                                <xsl:value-of select="$coverPath"/>
+                            </xsl:attribute>
+                            <xsl:attribute name="alt">
+                                <xsl:value-of select="atom:title"/>
+                            </xsl:attribute>
+                        </img>
+                        
+                        <div class="book-cover-fallback absolute inset-0 flex flex-col">
+                            <div class="absolute top-0 left-0 w-3 h-full bg-black/10 rounded-l-sm dark:bg-black/20" style="border-right: 1px solid rgba(0,0,0,0.1);"></div>
+                            <div class="flex-grow flex items-center justify-center px-2">
+                                <div class="font-bold text-base text-slate-800 dark:text-slate-100"><xsl:value-of select="atom:title"/></div>
+                            </div>
+                            <div class="text-sm text-slate-600 mt-2 truncate dark:text-slate-300"><xsl:value-of select="atom:author/atom:name"/></div>
                         </div>
-                        <div class="text-sm text-slate-600 mt-2 truncate dark:text-slate-300"><xsl:value-of select="atom:author/atom:name"/></div>
                     </div>
                 </a>
             </xsl:otherwise>
