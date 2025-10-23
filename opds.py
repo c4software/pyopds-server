@@ -2,7 +2,6 @@
 import datetime
 import hashlib
 import heapq
-import http.server
 import os
 import time
 import xml.etree.ElementTree as ET
@@ -15,21 +14,37 @@ PAGE_SIZE = int(os.environ.get('PAGE_SIZE', 25))
 
 class BookMetadata:
     @staticmethod
+    def _parse_opf_from_epub(zf):
+        """Internal: parse container.xml and OPF, return (opf_root, opf_dir)."""
+        try:
+            container_xml = zf.read('META-INF/container.xml')
+            container_root = ET.fromstring(container_xml)
+            ns_container = {'ocf': 'urn:oasis:names:tc:opendocument:xmlns:container'}
+            rootfile = container_root.find(
+                ".//ocf:rootfile[@media-type='application/oebps-package+xml']",
+                ns_container,
+            )
+            if rootfile is None:
+                return None, None
+            opf_path = rootfile.get('full-path')
+            if not opf_path:
+                return None, None
+            opf_xml = zf.read(opf_path)
+            opf_root = ET.fromstring(opf_xml)
+            opf_dir = os.path.dirname(opf_path)
+            return opf_root, opf_dir
+        except Exception:
+            return None, None
+
+    @staticmethod
     def extract_epub_metadata(epub_path):
         try:
             with zipfile.ZipFile(epub_path) as zf:
-                container_xml = zf.read('META-INF/container.xml')
-                container_root = ET.fromstring(container_xml)
-                ns_container = {'ocf': 'urn:oasis:names:tc:opendocument:xmlns:container'}
-                opf_path = container_root.find(
-                    ".//ocf:rootfile[@media-type='application/oebps-package+xml']",
-                    ns_container,
-                ).get('full-path')
+                opf_root, _ = BookMetadata._parse_opf_from_epub(zf)
+                if opf_root is None:
+                    return None, None
 
-                opf_xml = zf.read(opf_path)
-                opf_root = ET.fromstring(opf_xml)
                 ns_dc = {'dc': 'http://purl.org/dc/elements/1.1/'}
-
                 title_elem = opf_root.find(".//dc:title", ns_dc)
                 title = title_elem.text if title_elem is not None else None
                 author_elem = opf_root.find(".//dc:creator", ns_dc)
@@ -48,29 +63,16 @@ class BookMetadata:
         """
         try:
             with zipfile.ZipFile(epub_path) as zf:
-                # Parse container.xml to find OPF file
-                container_xml = zf.read('META-INF/container.xml')
-                container_root = ET.fromstring(container_xml)
-                ns_container = {'ocf': 'urn:oasis:names:tc:opendocument:xmlns:container'}
-                opf_path = container_root.find(
-                    ".//ocf:rootfile[@media-type='application/oebps-package+xml']",
-                    ns_container,
-                ).get('full-path')
+                opf_root, opf_dir = BookMetadata._parse_opf_from_epub(zf)
+                if opf_root is None:
+                    return None, None
 
-                # Parse OPF file
-                opf_xml = zf.read(opf_path)
-                opf_root = ET.fromstring(opf_xml)
-                
-                # Get the directory containing the OPF file
-                opf_dir = os.path.dirname(opf_path)
-                
                 # Define namespaces
                 ns_opf = {'opf': 'http://www.idpf.org/2007/opf'}
                 
                 # Try to find cover using different methods
                 cover_id = None
                 cover_href = None
-                
                 # Method 1: Look for meta name="cover"
                 cover_meta = opf_root.find(".//opf:meta[@name='cover']", ns_opf)
                 if cover_meta is not None:

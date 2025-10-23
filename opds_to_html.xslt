@@ -43,6 +43,7 @@
                         object-fit: cover;
                         opacity: 0;
                         transition: opacity 0.3s ease-in-out;
+                        height: 100%;
                     }
 
                     .book-cover.loaded {
