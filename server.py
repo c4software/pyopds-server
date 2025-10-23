@@ -59,7 +59,7 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
                 action_method(parsed_url)
         else:
             controller = self._get_controller(OPDSController)
-            controller._send_json_error(404, 'Endpoint not found')
+            controller._send_error(404, 'Endpoint not found')
 
     def do_GET(self):
         """Handle GET requests through router."""
@@ -76,26 +76,10 @@ def main():
         os.makedirs(LIBRARY_DIR)
 
     print(f"\nAccess the root catalog at http://127.0.0.1:{PORT}/opds")
-    if KOREADER_SYNC_TOKEN:
-        print(f"KoReader sync available at http://127.0.0.1:{PORT}/koreader/sync\n")
+    print(f"KoReader sync available at http://127.0.0.1:{PORT}/koreader/sync\n")
 
     with socketserver.TCPServer(("", PORT), UnifiedHandler) as httpd:
         httpd.serve_forever()
-
-
-__all__ = [
-    'KOREADER_SYNC_DB_PATH',
-    'KOREADER_SYNC_TOKEN',
-    'KoReaderSyncStorage',
-    'KoReaderSyncController',
-    'LIBRARY_DIR',
-    'PAGE_SIZE',
-    'OPDSController',
-    'UnifiedHandler',
-    'PORT',
-    'main',
-]
-
 
 if __name__ == '__main__':
     main()

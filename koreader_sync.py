@@ -4,12 +4,42 @@ import json
 import os
 import sqlite3
 from urllib.parse import parse_qs
+import base64
 
 KOREADER_SYNC_DB_PATH = os.environ.get('KOREADER_SYNC_DB_PATH', 'koreader_sync.db')
-KOREADER_SYNC_TOKEN = os.environ.get('KOREADER_SYNC_TOKEN')
-
 
 class KoReaderSyncStorage:
+    def _ensure_user_table(self):
+        with self._get_connection() as conn:
+            conn.execute(
+                '''
+                CREATE TABLE IF NOT EXISTS users (
+                    username TEXT PRIMARY KEY,
+                    password_md5 TEXT NOT NULL
+                )
+                '''
+            )
+
+    def create_user(self, username, password_md5):
+        self._ensure_user_table()
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    'INSERT INTO users (username, password_md5) VALUES (?, ?)',
+                    (username, password_md5)
+                )
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+    def verify_user(self, username, password_md5):
+        self._ensure_user_table()
+        with self._get_connection() as conn:
+            row = conn.execute(
+                'SELECT 1 FROM users WHERE username = ? AND password_md5 = ?',
+                (username, password_md5)
+            ).fetchone()
+        return row is not None
     """SQLite-backed storage for KoReader sync progress."""
 
     def __init__(self, db_path=KOREADER_SYNC_DB_PATH):
@@ -101,39 +131,60 @@ class KoReaderSyncStorage:
 
 
 class KoReaderSyncController:
+
+    def register(self, parsed_url):
+        payload = self._parse_json_body()
+        if payload is None:
+            return
+        username = payload.get('username')
+        password_md5 = payload.get('password')
+        if not username or not password_md5:
+            self._send_json_error(400, 'Missing "username" or "password" (MD5)')
+            return
+        if self.sync_storage.create_user(username, password_md5):
+            self._send_json_response({'status': 'ok', 'message': 'User registered'})
+        else:
+            self._send_json_error(409, 'User already exists')
+
+    def login(self, parsed_url):
+        payload = self._parse_json_body()
+        if payload is None:
+            return
+        username = payload.get('username')
+        password_md5 = payload.get('password')
+        if not username or not password_md5:
+            self._send_json_error(400, 'Missing "username" or "password" (MD5)')
+            return
+        if self.sync_storage.verify_user(username, password_md5):
+            self._send_json_response({'status': 'ok', 'message': 'Login successful'})
+        else:
+            self._send_json_error(401, 'Invalid credentials')
     """Controller for KoReader sync operations."""
 
     _sync_storage_instance = None
 
-    def __init__(self, request_handler, auth_token=None):
-        """
-        Initialize KoReader sync controller.
-        
-        Args:
-            request_handler: HTTP request handler instance
-            auth_token: Optional authentication token (uses env var if not provided)
-        """
+    def __init__(self, request_handler):
         if KoReaderSyncController._sync_storage_instance is None:
             KoReaderSyncController._sync_storage_instance = KoReaderSyncStorage()
-
         self.request = request_handler
         self.sync_storage = KoReaderSyncController._sync_storage_instance
-        self.auth_token = auth_token if auth_token is not None else KOREADER_SYNC_TOKEN
 
     def get_sync_records(self, parsed_url):
-        """Retrieve sync records for a user."""
-        if not self._authenticate_request(parsed_url):
+        # Authentification par username/password (MD5) dans l'en-tête Authorization: Basic base64(username:password_md5)
+        user, password_md5 = self._extract_basic_auth(parsed_url)
+        if not user or not password_md5 or not self.sync_storage.verify_user(user, password_md5):
+            self._send_json_error(401, 'Unauthorized: invalid user or password')
             return
 
         params = parse_qs(parsed_url.query)
-        user = params.get('user', [None])[0]
+        # user est déjà authentifié, mais on garde la logique pour la compatibilité
         device = params.get('device', [None])[0]
         since_param = params.get('since', [None])[0]
         limit_param = params.get('limit', [None])[0]
         offset_param = params.get('offset', [None])[0]
 
         if not user:
-            self._send_json_error(400, 'Missing "user" query parameter')
+            self._send_json_error(400, 'Missing "user" (auth required)')
             return
 
         since = None
@@ -184,15 +235,18 @@ class KoReaderSyncController:
         })
 
     def store_sync_records(self, parsed_url):
-        """Store sync records from a user."""
-        if not self._authenticate_request(parsed_url):
+        # Authentification par username/password (MD5) dans l'en-tête Authorization: Basic base64(username:password_md5)
+        user, password_md5 = self._extract_basic_auth(parsed_url)
+        if not user or not password_md5 or not self.sync_storage.verify_user(user, password_md5):
+            self._send_json_error(401, 'Unauthorized: invalid user or password')
             return
 
         payload = self._parse_json_body()
         if payload is None:
             return
 
-        user = payload.get('user')
+        # user du body doit correspondre à l'utilisateur authentifié
+        body_user = payload.get('user')
         device = payload.get('device')
         records = (
             payload.get('records')
@@ -200,8 +254,11 @@ class KoReaderSyncController:
             or payload.get('entries')
         )
 
-        if not user or not device or not isinstance(records, list):
+        if not body_user or not device or not isinstance(records, list):
             self._send_json_error(400, 'Invalid payload: "user", "device", and record list required')
+            return
+        if body_user != user:
+            self._send_json_error(403, 'User in payload does not match authenticated user')
             return
 
         stored_documents = []
@@ -287,32 +344,18 @@ class KoReaderSyncController:
             'error': message,
         }
         self._send_json_response(response, status=code)
-
-    def _authenticate_request(self, parsed_url=None):
-        """Verify authentication token if required."""
-        if not self.auth_token:
-            return True
-
-        token = None
+    def _extract_basic_auth(self, parsed_url=None):
+        # Retourne (username, password_md5) si Authorization: Basic est présent, sinon (None, None)
         auth_header = self.request.headers.get('Authorization')
-        if auth_header:
-            if auth_header.lower().startswith('bearer '):
-                token = auth_header.split(' ', 1)[1].strip()
-            else:
-                token = auth_header.strip()
-
-        if not token:
-            token = self.request.headers.get('X-Auth-Token')
-
-        if not token and parsed_url is not None:
-            params = parse_qs(parsed_url.query)
-            token = params.get('token', [None])[0]
-
-        if token == self.auth_token:
-            return True
-
-        self._send_json_error(401, 'Unauthorized')
-        return False
+        if auth_header and auth_header.lower().startswith('basic '):
+            try:
+                b64 = auth_header.split(' ', 1)[1].strip()
+                decoded = base64.b64decode(b64).decode('utf-8')
+                username, password_md5 = decoded.split(':', 1)
+                return username, password_md5
+            except Exception:
+                return None, None
+        return None, None
 
 
 class KoReaderSyncHandlerMixin:
@@ -350,7 +393,6 @@ class KoReaderSyncHandlerMixin:
 
 __all__ = [
     'KOREADER_SYNC_DB_PATH',
-    'KOREADER_SYNC_TOKEN',
     'KoReaderSyncController',
     'KoReaderSyncHandlerMixin',
     'KoReaderSyncStorage',
