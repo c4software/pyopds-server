@@ -769,7 +769,7 @@ class OPDSController:
 
     def _serve_xslt(self):
         try:
-            xslt_path = 'opds_to_html.xslt'
+            xslt_path = os.path.join('static', 'opds_to_html.xslt')
             if not os.path.exists(xslt_path):
                 self._send_error(404, "XSLT file not found")
                 return

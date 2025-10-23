@@ -5,8 +5,8 @@ Defines routes and router inspired by Laravel routing.
 
 import re
 
-from koreader_sync import KoReaderSyncController
-from opds import OPDSController
+from controllers.koreader_sync import KoReaderSyncController
+from controllers.opds import OPDSController
 
 
 class Route:

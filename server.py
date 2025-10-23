@@ -3,8 +3,8 @@ import os
 import socketserver
 from urllib.parse import urlparse
 
-from koreader_sync import KoReaderSyncController
-from opds import LIBRARY_DIR, OPDSController, PAGE_SIZE
+from controllers.koreader_sync import KoReaderSyncController
+from controllers.opds import LIBRARY_DIR, OPDSController, PAGE_SIZE
 from routes import Router, register_routes
 
 PORT = int(os.environ.get('PORT', 8080))
