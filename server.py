@@ -3,12 +3,7 @@ import os
 import socketserver
 from urllib.parse import urlparse
 
-from koreader_sync import (
-    KOREADER_SYNC_DB_PATH,
-    KOREADER_SYNC_TOKEN,
-    KoReaderSyncController,
-    KoReaderSyncStorage,
-)
+from koreader_sync import KoReaderSyncController
 from opds import LIBRARY_DIR, OPDSController, PAGE_SIZE
 from routes import Router, register_routes
 

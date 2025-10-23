@@ -14,8 +14,6 @@ import unittest
 TEMP_DB = tempfile.NamedTemporaryFile(delete=False)
 TEMP_DB.close()
 os.environ['KOREADER_SYNC_DB_PATH'] = TEMP_DB.name
-# Legacy variable no longer used by auth, but kept to avoid route gating in older code paths
-os.environ['KOREADER_SYNC_TOKEN'] = 'test-token'
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if PROJECT_ROOT not in sys.path:
