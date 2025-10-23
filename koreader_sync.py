@@ -1,4 +1,4 @@
-"""KoReader sync storage and HTTP handler helpers."""
+"""KoReader sync storage and HTTP controller."""
 import datetime
 import json
 import os
@@ -100,146 +100,28 @@ class KoReaderSyncStorage:
         }
 
 
-class KoReaderSyncHandlerMixin:
-    """Mixin providing KoReader sync HTTP helpers."""
+class KoReaderSyncController:
+    """Controller for KoReader sync operations."""
 
     _sync_storage_instance = None
 
-    def setup_koreader_sync(self, auth_token=None):
-        if KoReaderSyncHandlerMixin._sync_storage_instance is None:
-            KoReaderSyncHandlerMixin._sync_storage_instance = KoReaderSyncStorage()
+    def __init__(self, request_handler, auth_token=None):
+        """
+        Initialize KoReader sync controller.
+        
+        Args:
+            request_handler: HTTP request handler instance
+            auth_token: Optional authentication token (uses env var if not provided)
+        """
+        if KoReaderSyncController._sync_storage_instance is None:
+            KoReaderSyncController._sync_storage_instance = KoReaderSyncStorage()
 
-        self.sync_storage = KoReaderSyncHandlerMixin._sync_storage_instance
+        self.request = request_handler
+        self.sync_storage = KoReaderSyncController._sync_storage_instance
         self.auth_token = auth_token if auth_token is not None else KOREADER_SYNC_TOKEN
 
-    # JSON helpers -----------------------------------------------------
-    def _parse_json_body(self):
-        content_length = self.headers.get('Content-Length')
-        if content_length is None:
-            self._send_json_error(411, 'Missing Content-Length header')
-            return None
-
-        try:
-            length = int(content_length)
-        except ValueError:
-            self._send_json_error(400, 'Invalid Content-Length header')
-            return None
-
-        if length <= 0:
-            self._send_json_error(400, 'Empty request body')
-            return None
-
-        body = self.rfile.read(length)
-
-        try:
-            return json.loads(body.decode('utf-8'))
-        except json.JSONDecodeError:
-            self._send_json_error(400, 'Invalid JSON payload')
-            return None
-
-    def _send_json_response(self, data, status=200):
-        payload = json.dumps(data, ensure_ascii=False).encode('utf-8')
-        self.send_response(status)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Content-Length', str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
-    def _send_json_error(self, code, message):
-        response = {
-            'status': 'error',
-            'code': code,
-            'error': message,
-        }
-        self._send_json_response(response, status=code)
-
-    # Authentication ---------------------------------------------------
-    def _authenticate_request(self, parsed_url=None):
-        if not self.auth_token:
-            return True
-
-        token = None
-        auth_header = self.headers.get('Authorization')
-        if auth_header:
-            if auth_header.lower().startswith('bearer '):
-                token = auth_header.split(' ', 1)[1].strip()
-            else:
-                token = auth_header.strip()
-
-        if not token:
-            token = self.headers.get('X-Auth-Token')
-
-        if not token and parsed_url is not None:
-            params = parse_qs(parsed_url.query)
-            token = params.get('token', [None])[0]
-
-        if token == self.auth_token:
-            return True
-
-        self._send_json_error(401, 'Unauthorized')
-        return False
-
-    # Endpoint handlers ------------------------------------------------
-    def handle_koreader_sync_post(self, parsed_url):
-        if not self._authenticate_request(parsed_url):
-            return
-
-        payload = self._parse_json_body()
-        if payload is None:
-            return
-
-        user = payload.get('user')
-        device = payload.get('device')
-        records = (
-            payload.get('records')
-            or payload.get('documents')
-            or payload.get('entries')
-        )
-
-        if not user or not device or not isinstance(records, list):
-            self._send_json_error(400, 'Invalid payload: "user", "device", and record list required')
-            return
-
-        stored_documents = []
-
-        for record in records:
-            if not isinstance(record, dict):
-                continue
-
-            document = record.get('document')
-            if not document:
-                continue
-
-            record_payload = dict(record)
-            record_payload['document'] = document
-            record_payload.setdefault('user', user)
-            record_payload.setdefault('device', device)
-
-            timestamp = self.sync_storage.upsert_record(user, device, document, record_payload)
-
-            stored_documents.append({
-                'user': user,
-                'device': device,
-                'document': document,
-                'updated_at_epoch': timestamp,
-                'updated_at': datetime.datetime.fromtimestamp(
-                    timestamp, datetime.timezone.utc
-                ).isoformat(),
-            })
-
-        if not stored_documents:
-            self._send_json_error(400, 'No valid records provided')
-            return
-
-        response_timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        self._send_json_response({
-            'status': 'ok',
-            'stored': len(stored_documents),
-            'documents': stored_documents,
-            'timestamp': response_timestamp,
-        })
-
-    def handle_koreader_sync_get(self, parsed_url):
+    def get_sync_records(self, parsed_url):
+        """Retrieve sync records for a user."""
         if not self._authenticate_request(parsed_url):
             return
 
@@ -301,10 +183,175 @@ class KoReaderSyncHandlerMixin:
             'records': records,
         })
 
+    def store_sync_records(self, parsed_url):
+        """Store sync records from a user."""
+        if not self._authenticate_request(parsed_url):
+            return
+
+        payload = self._parse_json_body()
+        if payload is None:
+            return
+
+        user = payload.get('user')
+        device = payload.get('device')
+        records = (
+            payload.get('records')
+            or payload.get('documents')
+            or payload.get('entries')
+        )
+
+        if not user or not device or not isinstance(records, list):
+            self._send_json_error(400, 'Invalid payload: "user", "device", and record list required')
+            return
+
+        stored_documents = []
+
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+
+            document = record.get('document')
+            if not document:
+                continue
+
+            record_payload = dict(record)
+            record_payload['document'] = document
+            record_payload.setdefault('user', user)
+            record_payload.setdefault('device', device)
+
+            timestamp = self.sync_storage.upsert_record(user, device, document, record_payload)
+
+            stored_documents.append({
+                'user': user,
+                'device': device,
+                'document': document,
+                'updated_at_epoch': timestamp,
+                'updated_at': datetime.datetime.fromtimestamp(
+                    timestamp, datetime.timezone.utc
+                ).isoformat(),
+            })
+
+        if not stored_documents:
+            self._send_json_error(400, 'No valid records provided')
+            return
+
+        response_timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        self._send_json_response({
+            'status': 'ok',
+            'stored': len(stored_documents),
+            'documents': stored_documents,
+            'timestamp': response_timestamp,
+        })
+
+    # Helper methods -------------------------------------------------------
+
+    def _parse_json_body(self):
+        """Parse JSON request body."""
+        content_length = self.request.headers.get('Content-Length')
+        if content_length is None:
+            self._send_json_error(411, 'Missing Content-Length header')
+            return None
+
+        try:
+            length = int(content_length)
+        except ValueError:
+            self._send_json_error(400, 'Invalid Content-Length header')
+            return None
+
+        if length <= 0:
+            self._send_json_error(400, 'Empty request body')
+            return None
+
+        body = self.request.rfile.read(length)
+
+        try:
+            return json.loads(body.decode('utf-8'))
+        except json.JSONDecodeError:
+            self._send_json_error(400, 'Invalid JSON payload')
+            return None
+
+    def _send_json_response(self, data, status=200):
+        """Send JSON response."""
+        payload = json.dumps(data, ensure_ascii=False).encode('utf-8')
+        self.request.send_response(status)
+        self.request.send_header('Content-Type', 'application/json')
+        self.request.send_header('Content-Length', str(len(payload)))
+        self.request.end_headers()
+        self.request.wfile.write(payload)
+
+    def _send_json_error(self, code, message):
+        """Send JSON error response."""
+        response = {
+            'status': 'error',
+            'code': code,
+            'error': message,
+        }
+        self._send_json_response(response, status=code)
+
+    def _authenticate_request(self, parsed_url=None):
+        """Verify authentication token if required."""
+        if not self.auth_token:
+            return True
+
+        token = None
+        auth_header = self.request.headers.get('Authorization')
+        if auth_header:
+            if auth_header.lower().startswith('bearer '):
+                token = auth_header.split(' ', 1)[1].strip()
+            else:
+                token = auth_header.strip()
+
+        if not token:
+            token = self.request.headers.get('X-Auth-Token')
+
+        if not token and parsed_url is not None:
+            params = parse_qs(parsed_url.query)
+            token = params.get('token', [None])[0]
+
+        if token == self.auth_token:
+            return True
+
+        self._send_json_error(401, 'Unauthorized')
+        return False
+
+
+class KoReaderSyncHandlerMixin:
+    """Mixin providing KoReader sync HTTP helpers (delegates to controller)."""
+
+    def setup_koreader_sync(self, auth_token=None):
+        """Initialize KoReader sync controller."""
+        self.koreader_controller = KoReaderSyncController(self, auth_token)
+
+    def handle_koreader_sync_get(self, parsed_url):
+        """Handle GET request for sync records."""
+        self.koreader_controller.get_sync_records(parsed_url)
+
+    def handle_koreader_sync_post(self, parsed_url):
+        """Handle POST request to store sync records."""
+        self.koreader_controller.store_sync_records(parsed_url)
+
+    def _send_json_error(self, code, message):
+        """Send JSON error response (for compatibility)."""
+        if hasattr(self, 'koreader_controller'):
+            self.koreader_controller._send_json_error(code, message)
+        else:
+            response = {
+                'status': 'error',
+                'code': code,
+                'error': message,
+            }
+            payload = json.dumps(response, ensure_ascii=False).encode('utf-8')
+            self.send_response(code)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
 
 __all__ = [
     'KOREADER_SYNC_DB_PATH',
     'KOREADER_SYNC_TOKEN',
+    'KoReaderSyncController',
     'KoReaderSyncHandlerMixin',
     'KoReaderSyncStorage',
 ]

@@ -9,8 +9,6 @@ import xml.etree.ElementTree as ET
 import zipfile
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from koreader_sync import KoReaderSyncHandlerMixin
-
 LIBRARY_DIR = os.environ.get('LIBRARY_DIR', 'books')
 PAGE_SIZE = int(os.environ.get('PAGE_SIZE', 25))
 
@@ -311,16 +309,18 @@ class BookScanner:
         }
 
 
-class OPDSHandler(KoReaderSyncHandlerMixin, http.server.BaseHTTPRequestHandler):
-    def __init__(self, *args, **kwargs):
+class OPDSController:
+    """Controller for OPDS catalog operations."""
+
+    def __init__(self, request_handler):
+        self.request = request_handler
         self.feed_generator = OPDSFeedGenerator()
         self.book_scanner = BookScanner()
         self.security = SecurityUtils()
-        self.setup_koreader_sync()
-        super().__init__(*args, **kwargs)
 
     def _parse_url_params(self):
-        parsed_url = urlparse(self.path)
+        """Parse URL parameters for pagination."""
+        parsed_url = urlparse(self.request.path)
         query_params = parse_qs(parsed_url.query)
 
         try:
@@ -333,47 +333,35 @@ class OPDSHandler(KoReaderSyncHandlerMixin, http.server.BaseHTTPRequestHandler):
 
         return page, size, parsed_url
 
-    def do_GET(self):
-        parsed_url = urlparse(self.path)
-        path = parsed_url.path
+    def redirect_to_opds(self):
+        """Redirect root to OPDS catalog."""
+        self.request.send_response(302)
+        self.request.send_header('Location', '/opds')
+        self.request.end_headers()
 
-        if path == '/koreader/sync':
-            self.handle_koreader_sync_get(parsed_url)
-            return
+    def serve_xslt(self):
+        """Serve XSLT stylesheet for OPDS catalog."""
+        self._serve_xslt()
 
-        if path == '/':
-            self.send_response(302)
-            self.send_header('Location', '/opds')
-            self.end_headers()
-        elif path == '/opds_to_html.xslt':
-            self._serve_xslt()
-        elif path.startswith('/opds'):
-            path_base = path
-            if path_base == '/opds' or path_base == '/opds/':
-                self._handle_root_catalog()
-            elif path_base == '/opds/books':
-                self._handle_all_books()
-            elif path_base == '/opds/recent':
-                self._handle_recent_books()
-            elif path_base.startswith('/opds/folder/'):
-                self._handle_folder_catalog()
-            else:
-                self._send_error(404, 'OPDS Catalog Not found')
-        elif path.startswith('/download/'):
-            self._handle_download()
-        else:
-            self._send_error(404, 'Not found')
+    def show_root_catalog(self):
+        """Display root OPDS catalog."""
+        self._handle_root_catalog()
 
-    def do_POST(self):
-        parsed_url = urlparse(self.path)
-        path = parsed_url.path
+    def show_all_books(self):
+        """Display all books with pagination."""
+        self._handle_all_books()
 
-        if path == '/koreader/sync':
-            self.handle_koreader_sync_post(parsed_url)
-        elif path.startswith('/koreader/'):
-            self._send_json_error(404, 'Endpoint not found')
-        else:
-            self._send_error(404, 'Not found')
+    def show_recent_books(self):
+        """Display recently added books."""
+        self._handle_recent_books()
+
+    def show_folder_catalog(self):
+        """Display folder contents."""
+        self._handle_folder_catalog()
+
+    def download_book(self):
+        """Handle book download."""
+        self._handle_download()
 
     def _handle_root_catalog(self):
         links = [
@@ -630,7 +618,7 @@ class OPDSHandler(KoReaderSyncHandlerMixin, http.server.BaseHTTPRequestHandler):
         return entries
 
     def _handle_download(self):
-        filename = unquote(self.path.split('/download/')[1])
+        filename = unquote(self.request.path.split('/download/')[1])
 
         if self.security.has_path_traversal(filename):
             self._send_error(403, 'Access denied: Invalid path')
@@ -651,16 +639,16 @@ class OPDSHandler(KoReaderSyncHandlerMixin, http.server.BaseHTTPRequestHandler):
         return filename.endswith('.epub') and os.path.exists(file_path)
 
     def _serve_file(self, file_path, filename):
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/epub+zip')
-        self.send_header(
+        self.request.send_response(200)
+        self.request.send_header('Content-Type', 'application/epub+zip')
+        self.request.send_header(
             'Content-Disposition',
             f'attachment; filename="{os.path.basename(filename)}"',
         )
-        self.end_headers()
+        self.request.end_headers()
 
         with open(file_path, 'rb') as f:
-            self.wfile.write(f.read())
+            self.request.wfile.write(f.read())
 
     def _serve_xslt(self):
         try:
@@ -669,37 +657,76 @@ class OPDSHandler(KoReaderSyncHandlerMixin, http.server.BaseHTTPRequestHandler):
                 self._send_error(404, "XSLT file not found")
                 return
 
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/xml')
-            self.end_headers()
+            self.request.send_response(200)
+            self.request.send_header('Content-Type', 'application/xml')
+            self.request.end_headers()
             with open(xslt_path, 'rb') as f:
-                self.wfile.write(f.read())
+                self.request.wfile.write(f.read())
         except Exception as exc:
             self._send_error(500, f"Error serving XSLT file: {exc}")
 
     def _send_xml_response(self, xml, catalog_kind):
-        self.send_response(200)
-        self.send_header(
+        self.request.send_response(200)
+        self.request.send_header(
             'Content-Type',
             f'application/xml;profile=opds-catalog;kind={catalog_kind}',
         )
-        self.end_headers()
-        self.wfile.write(xml.encode('utf-8'))
+        self.request.end_headers()
+        self.request.wfile.write(xml.encode('utf-8'))
 
     def _send_error(self, code, message):
-        self.send_response(code)
-        self.send_header('Content-Type', 'application/xml')
-        self.end_headers()
+        self.request.send_response(code)
+        self.request.send_header('Content-Type', 'application/xml')
+        self.request.end_headers()
         error_xml = (
             '<?xml version="1.0" encoding="UTF-8"?><error><code>'
             f'{code}</code><message>{message}</message></error>'
         )
-        self.wfile.write(error_xml.encode('utf-8'))
+        self.request.wfile.write(error_xml.encode('utf-8'))
+
+
+class OPDSHandler(http.server.BaseHTTPRequestHandler):
+    """Legacy HTTP handler - kept for backward compatibility."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def do_GET(self):
+        """Route GET requests through controller (legacy mode)."""
+        controller = OPDSController(self)
+        parsed_url = urlparse(self.path)
+        path = parsed_url.path
+
+        if path == '/':
+            controller.redirect_to_opds()
+        elif path == '/opds_to_html.xslt':
+            controller.serve_xslt()
+        elif path.startswith('/opds'):
+            if path == '/opds' or path == '/opds/':
+                controller.show_root_catalog()
+            elif path == '/opds/books':
+                controller.show_all_books()
+            elif path == '/opds/recent':
+                controller.show_recent_books()
+            elif path.startswith('/opds/folder/'):
+                controller.show_folder_catalog()
+            else:
+                controller._send_error(404, 'OPDS Catalog Not found')
+        elif path.startswith('/download/'):
+            controller.download_book()
+        else:
+            controller._send_error(404, 'Not found')
+
+    def do_POST(self):
+        """Handle POST requests."""
+        controller = OPDSController(self)
+        controller._send_error(404, 'Not found')
 
 
 __all__ = [
     'LIBRARY_DIR',
     'PAGE_SIZE',
+    'OPDSController',
     'OPDSHandler',
     'BookMetadata',
     'SecurityUtils',

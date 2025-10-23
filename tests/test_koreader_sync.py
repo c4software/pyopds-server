@@ -29,7 +29,7 @@ class TestKoReaderSync(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.token = os.environ['KOREADER_SYNC_TOKEN']
-        cls.httpd = ThreadedTCPServer(('localhost', 0), server.OPDSHandler)
+        cls.httpd = ThreadedTCPServer(('localhost', 0), server.UnifiedHandler)
         cls.port = cls.httpd.server_address[1]
         cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
         cls.thread.start()
