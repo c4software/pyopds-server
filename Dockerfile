@@ -4,9 +4,8 @@ WORKDIR /app
 
 COPY routes.py /app/routes.py
 COPY server.py /app/server.py
-COPY opds.py /app/opds.py
-COPY koreader_sync.py /app/koreader_sync.py
-COPY opds_to_html.xslt /app/opds_to_html.xslt
+COPY controllers/ /app/controllers/
+COPY static/ /app/static/
 
 ENV LIBRARY_DIR=/books
 
