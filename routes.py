@@ -74,8 +74,8 @@ def register_routes(router):
     # KoReader Sync Routes
     router.get('/koreader/sync', (KoReaderSyncController, 'get_sync_records'), name='koreader.sync.get')
     router.post('/koreader/sync', (KoReaderSyncController, 'store_sync_records'), name='koreader.sync.store')
-    router.post('/koreader/register', (KoReaderSyncController, 'register'), name='koreader.register')
-    router.post('/koreader/login', (KoReaderSyncController, 'login'), name='koreader.login')
+    router.post('/koreader/sync/users/create', (KoReaderSyncController, 'register'), name='koreader.register')
+    router.post('/koreader/sync/users/auth', (KoReaderSyncController, 'login'), name='koreader.login')
 
     return router
 
