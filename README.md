@@ -75,7 +75,7 @@ The following environment variables can be set:
 
 - **LIBRARY_DIR**: Path to the directory containing EPUB files (default: `books`).
 - **KOREADER_SYNC_DB_PATH**: Path to the SQLite database file used by the KoReader sync helper (default: `koreader_sync.db`).
-- **KOREADER_SYNC_TOKEN**: Shared secret token required for accessing `/koreader/sync`. If unset, the sync endpoints accept requests without authentication.
+- **KOREADER_SYNC_TOKEN**: Shared secret token required for accessing `/koreader/sync`. If not set, the KoReader sync endpoints will be disabled.
 
 For Docker, modify these variables in the `docker-compose.yml` file:
 
@@ -87,8 +87,11 @@ services:
       - "8080:8080"
     volumes:
       - ./books:/books
+      - ./config:/config
     environment:
       - LIBRARY_DIR=/books
+      - KOREADER_SYNC_DB_PATH=/config/koreader_sync.db
+      - KOREADER_SYNC_TOKEN=your_secret_token
 ```
 
 ## Usage with an OPDS Client
