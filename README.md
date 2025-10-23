@@ -16,6 +16,7 @@ If you browse your OPDS feed in a web browser, it will display a simple HTML rep
 - **Subdirectory Support**: Scans EPUB files in the configured directory and its subdirectories.
 - **Sorted by Most Recent**: Books are listed in the OPDS feed sorted by modification date, with the most recently modified files appearing first.
 - **Metadata Extraction**: Extracts title and author from EPUB files for rich display in the catalog.
+- **KoReader Sync API**: Optional JSON endpoints that store and replay reading progress shared by KoReader devices.
 - **Docker Deployment**: Includes a `Dockerfile` and `docker-compose.yml` for easy containerized deployment.
 - **Visual HTML Representation**: Provides a simple HTML view of the OPDS feed for easy browsing in web browsers (using XSLT transformation).
 
@@ -73,6 +74,8 @@ If you browse your OPDS feed in a web browser, it will display a simple HTML rep
 The following environment variables can be set:
 
 - **LIBRARY_DIR**: Path to the directory containing EPUB files (default: `books`).
+- **KOREADER_SYNC_DB_PATH**: Path to the SQLite database file used by the KoReader sync helper (default: `koreader_sync.db`).
+- **KOREADER_SYNC_TOKEN**: Shared secret token required for accessing `/koreader/sync`. If unset, the sync endpoints accept requests without authentication.
 
 For Docker, modify these variables in the `docker-compose.yml` file:
 
@@ -94,6 +97,29 @@ services:
    - Add a new catalog with the URL: `http://<your-ip>:8080/opds`.
 2. Browse the book list at the `/opds/books` endpoint.
 3. Download books via the links provided in the OPDS feed.
+
+## KoReader Sync API
+
+The server exposes lightweight sync endpoints that allow KoReader clients to upload and download reading progress.
+
+### Authentication
+
+Set the `KOREADER_SYNC_TOKEN` environment variable and provide the same value from KoReader using an `Authorization: Bearer <token>` header (or `X-Auth-Token`/`?token=` query parameter). Requests without the correct token are rejected with `401 Unauthorized`.
+
+### Endpoints
+
+- `POST /koreader/sync`
+  - **Body**: JSON object with `user`, `device`, and a list of progress entries under `records` (also accepts `documents` or `entries`). Each entry must contain a `document` identifier and any additional progress metadata.
+  - **Response**: JSON summary of the stored documents together with the server timestamp.
+- `GET /koreader/sync`
+  - **Query Parameters**:
+    - `user` (required): User identifier whose records should be returned.
+    - `device` (optional): Restrict results to a specific device.
+    - `since` (optional): Unix timestamp (float) to return updates newer than the provided value.
+    - `limit` / `offset` (optional): Pagination controls.
+  - **Response**: JSON payload containing the stored records, their timestamps, and metadata needed for KoReader to merge updates.
+
+Data is stored in a local SQLite database (`KOREADER_SYNC_DB_PATH`) and deduplicated by the combination of user, device, and document identifier.
 
 ## Security Consideration
 
