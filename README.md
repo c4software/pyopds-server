@@ -105,16 +105,8 @@ The server exposes lightweight sync endpoints that allow KoReader clients to upl
 
 ### Endpoints
 
-- `POST /koreader/sync`
-  - **Body**: JSON object with `user`, `device`, and a list of progress entries under `records` (also accepts `documents` or `entries`). Each entry must contain a `document` identifier and any additional progress metadata.
-  - **Response**: JSON summary of the stored documents together with the server timestamp.
-- `GET /koreader/sync`
-  - **Query Parameters**:
-    - `user` (required): User identifier whose records should be returned.
-    - `device` (optional): Restrict results to a specific device.
-    - `since` (optional): Unix timestamp (float) to return updates newer than the provided value.
-    - `limit` / `offset` (optional): Pagination controls.
-  - **Response**: JSON payload containing the stored records, their timestamps, and metadata needed for KoReader to merge updates.
+- `PUT /koreader/sync/syncs/progress`: Accepts JSON payloads containing reading progress data from KoReader devices.
+- `GET /koreader/sync/syncs/progress/{book_id}`: Retrieves stored progress data for a specific book.
 
 Data is stored in a local SQLite database (`KOREADER_SYNC_DB_PATH`) and deduplicated by the combination of user, device, and document identifier.
 
