@@ -726,10 +726,26 @@ class OPDSController:
     def _serve_file(self, file_path, filename):
         self.request.send_response(200)
         self.request.send_header('Content-Type', 'application/epub+zip')
-        self.request.send_header(
-            'Content-Disposition',
-            f'attachment; filename="{os.path.basename(filename)}"',
-        )
+        
+        # Handle Unicode filenames per RFC 5987
+        basename = os.path.basename(filename)
+        try:
+            # Try ASCII encoding first (simple case)
+            basename.encode('ascii')
+            self.request.send_header(
+                'Content-Disposition',
+                f'attachment; filename="{basename}"',
+            )
+        except UnicodeEncodeError:
+            # Use RFC 5987 encoding for non-ASCII filenames
+            # Provide ASCII fallback + UTF-8 encoded version
+            ascii_name = basename.encode('ascii', 'replace').decode('ascii').replace('?', '_')
+            encoded_name = quote(basename, safe='')
+            self.request.send_header(
+                'Content-Disposition',
+                f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded_name}",
+            )
+        
         self.request.end_headers()
 
         with open(file_path, 'rb') as f:
