@@ -269,12 +269,23 @@ class KoReaderSyncController:
 
     def _send_json_error(self, code, message):
         """Send JSON error response with custom code."""
+        # Mapping explicite des codes d'erreur vers les codes HTTP standards
+        http_status_map = {
+            self.ERROR_NO_DATABASE: 500,
+            self.ERROR_INTERNAL: 500,
+            self.ERROR_UNAUTHORIZED_USER: 401,
+            self.ERROR_USER_EXISTS: 409,
+            self.ERROR_INVALID_FIELDS: 400,
+            self.ERROR_DOCUMENT_FIELD_MISSING: 400,
+        }
+        http_status = http_status_map.get(code, 500)
+        
         response = {
             'status': 'error',
             'code': code,
             'error': message,
         }
-        self._send_json_response(response, status=400 if code in [self.ERROR_INVALID_FIELDS, self.ERROR_DOCUMENT_FIELD_MISSING] else code // 1000 if code >= 2000 else code)
+        self._send_json_response(response, status=http_status)
 
     def _extract_basic_auth(self, parsed_url=None):
         """Extract username and password from Authorization: Basic header."""
@@ -290,42 +301,9 @@ class KoReaderSyncController:
         return None, None
 
 
-class KoReaderSyncHandlerMixin:
-    """Mixin providing KoReader sync HTTP helpers (delegates to controller)."""
-
-    def setup_koreader_sync(self):
-        """Initialize KoReader sync controller."""
-        self.koreader_controller = KoReaderSyncController(self)
-
-    def handle_koreader_sync_get(self):
-        """Handle GET request for sync records."""
-        self.koreader_controller.get_sync_records()
-
-    def handle_koreader_sync_post(self):
-        """Handle POST request to store sync records."""
-        self.koreader_controller.store_sync_records()
-
-    def _send_json_error(self, code, message):
-        """Send JSON error response (for compatibility)."""
-        if hasattr(self, 'koreader_controller'):
-            self.koreader_controller._send_json_error(code, message)
-        else:
-            response = {
-                'status': 'error',
-                'code': code,
-                'error': message,
-            }
-            payload = json.dumps(response, ensure_ascii=False).encode('utf-8')
-            self.send_response(code)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Content-Length', str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
-
-
 __all__ = [
     'KOREADER_SYNC_DB_PATH',
     'KoReaderSyncController',
-    'KoReaderSyncHandlerMixin',
     'KoReaderSyncStorage',
 ]
+

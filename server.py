@@ -71,7 +71,12 @@ def main():
     print(f"KoReader sync available at http://127.0.0.1:{PORT}/koreader/sync\n")
 
     with socketserver.TCPServer(("", PORT), UnifiedHandler) as httpd:
-        httpd.serve_forever()
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            print("\nShutting down server...")
+            httpd.shutdown()
 
 if __name__ == '__main__':
     main()
+

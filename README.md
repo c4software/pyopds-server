@@ -90,6 +90,12 @@ services:
     environment:
       - LIBRARY_DIR=/books
       - KOREADER_SYNC_DB_PATH=/config/koreader_sync.db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
 ```
 
 ## Usage with an OPDS Client

@@ -64,6 +64,7 @@ class Router:
 def register_routes(router):
     # OPDS Catalog Routes
     router.get('/', (OPDSController, 'redirect_to_opds'), name='home')
+    router.get('/health', (OPDSController, 'health_check'), name='health')
     router.get('/opds', (OPDSController, 'show_root_catalog'), name='opds.root')
     router.get('/opds/', (OPDSController, 'show_root_catalog'), name='opds.root.slash')
     router.get('/opds/books', (OPDSController, 'show_all_books'), name='opds.books')

@@ -5,6 +5,7 @@ import heapq
 import os
 import time
 import xml.etree.ElementTree as ET
+from xml.sax.saxutils import escape as xml_escape
 import zipfile
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
@@ -73,6 +74,8 @@ class BookMetadata:
                 # Try to find cover using different methods
                 cover_id = None
                 cover_href = None
+                mime_type = None
+                
                 # Method 1: Look for meta name="cover"
                 cover_meta = opf_root.find(".//opf:meta[@name='cover']", ns_opf)
                 if cover_meta is not None:
@@ -83,6 +86,7 @@ class BookMetadata:
                     cover_item = opf_root.find(".//opf:item[@properties='cover-image']", ns_opf)
                     if cover_item is not None:
                         cover_href = cover_item.get('href')
+                        mime_type = cover_item.get('media-type')
                 
                 # If we found a cover ID, get the href from manifest
                 if cover_id and not cover_href:
@@ -103,7 +107,7 @@ class BookMetadata:
                     cover_data = zf.read(cover_path)
                     
                     # Determine MIME type from file extension if not already set
-                    if 'mime_type' not in locals():
+                    if mime_type is None:
                         ext = os.path.splitext(cover_href)[1].lower()
                         mime_types = {
                             '.jpg': 'image/jpeg',
@@ -447,6 +451,15 @@ class OPDSController:
     def download_cover(self):
         """Handle cover image download."""
         self._handle_cover_download()
+
+    def health_check(self):
+        """Simple health check endpoint for monitoring."""
+        self.request.send_response(200)
+        self.request.send_header('Content-Type', 'application/json')
+        body = b'{"status":"ok"}'
+        self.request.send_header('Content-Length', str(len(body)))
+        self.request.end_headers()
+        self.request.wfile.write(body)
 
     def _handle_root_catalog(self):
         links = [
@@ -799,21 +812,24 @@ class OPDSController:
             self._send_error(500, f"Error serving XSLT file: {exc}")
 
     def _send_xml_response(self, xml, catalog_kind):
+        body = xml.encode('utf-8')
         self.request.send_response(200)
         self.request.send_header(
             'Content-Type',
             f'application/xml;profile=opds-catalog;kind={catalog_kind}',
         )
+        self.request.send_header('Content-Length', str(len(body)))
         self.request.end_headers()
-        self.request.wfile.write(xml.encode('utf-8'))
+        self.request.wfile.write(body)
 
     def _send_error(self, code, message):
         self.request.send_response(code)
         self.request.send_header('Content-Type', 'application/xml')
         self.request.end_headers()
+        safe_message = xml_escape(str(message))
         error_xml = (
             '<?xml version="1.0" encoding="UTF-8"?><error><code>'
-            f'{code}</code><message>{message}</message></error>'
+            f'{code}</code><message>{safe_message}</message></error>'
         )
         self.request.wfile.write(error_xml.encode('utf-8'))
 
