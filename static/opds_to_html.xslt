@@ -107,41 +107,64 @@
                     </div>
                 </xsl:if>
 
-                <!-- Letter Navigation for Author pages -->
-                <xsl:if test="atom:link[starts-with(@rel, 'http://opds-spec.org/facet#')]">
-                    <div class="flex flex-wrap justify-center items-center gap-2 p-4 sm:p-6 bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700">
-                        <xsl:for-each select="atom:link[starts-with(@rel, 'http://opds-spec.org/facet#')]">
-                            <xsl:variable name="letter" select="substring-after(@rel, 'http://opds-spec.org/facet#')"/>
-                            <a href="{@href}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 shadow-sm">
-                                <xsl:value-of select="$letter"/>
-                            </a>
-                        </xsl:for-each>
-                    </div>
-                </xsl:if>
+                <!-- Unified Navigation: Letter Navigation + Pagination -->
+                <xsl:if test="atom:link[starts-with(@rel, 'http://opds-spec.org/facet#')] or atom:link[@rel='first'] or atom:link[@rel='previous'] or atom:link[@rel='next'] or atom:link[@rel='last']">
+                    <div class="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700">
+                        <div class="p-4 sm:p-6">
+                            <!-- Letter Navigation (for author pages) -->
+                            <xsl:if test="atom:link[starts-with(@rel, 'http://opds-spec.org/facet#')]">
+                                <div class="flex flex-wrap justify-center items-center gap-2 mb-4">
+                                    <xsl:for-each select="atom:link[starts-with(@rel, 'http://opds-spec.org/facet#')]">
+                                        <xsl:variable name="letter" select="substring-after(@rel, 'http://opds-spec.org/facet#')"/>
+                                        <a href="{@href}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 shadow-sm">
+                                            <xsl:value-of select="$letter"/>
+                                        </a>
+                                    </xsl:for-each>
+                                </div>
+                            </xsl:if>
 
-                <xsl:if test="atom:link[@rel='first'] or atom:link[@rel='previous'] or atom:link[@rel='next'] or atom:link[@rel='last']">
-                    <div class="flex justify-center items-center space-x-2 p-4 sm:p-6">
-                        <xsl:if test="atom:link[@rel='first'] and atom:link[@rel='previous']">
-                            <a href="{atom:link[@rel='first']/@href}" class="p-2 rounded-md bg-white text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 shadow-sm" title="Première page">
-                                <i data-lucide="chevrons-left" class="w-5 h-5"></i>
-                            </a>
-                        </xsl:if>
-                        <xsl:if test="atom:link[@rel='previous']">
-                            <a href="{atom:link[@rel='previous']/@href}" class="p-2 rounded-md bg-white text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 shadow-sm" title="Page précédente">
-                                <i data-lucide="chevron-left" class="w-5 h-5"></i>
-                            </a>
-                        </xsl:if>
+                            <!-- Enhanced Pagination -->
+                            <xsl:if test="atom:link[@rel='first'] or atom:link[@rel='previous'] or atom:link[@rel='next'] or atom:link[@rel='last']">
+                                <div class="flex flex-col sm:flex-row justify-center items-center gap-4">
+                                    <!-- Page Info -->
+                                    <div id="page-info" class="text-sm text-slate-600 dark:text-slate-400 font-medium"></div>
+                                    
+                                    <!-- Pagination Controls -->
+                                    <div class="flex items-center gap-2">
+                                        <!-- First Page -->
+                                        <xsl:if test="atom:link[@rel='first'] and atom:link[@rel='previous']">
+                                            <a href="{atom:link[@rel='first']/@href}" class="p-2 rounded-md bg-white text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 shadow-sm transition-colors" title="Première page">
+                                                <i data-lucide="chevrons-left" class="w-5 h-5"></i>
+                                            </a>
+                                        </xsl:if>
+                                        
+                                        <!-- Previous Page -->
+                                        <xsl:if test="atom:link[@rel='previous']">
+                                            <a href="{atom:link[@rel='previous']/@href}" class="p-2 rounded-md bg-white text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 shadow-sm transition-colors" title="Page précédente">
+                                                <i data-lucide="chevron-left" class="w-5 h-5"></i>
+                                            </a>
+                                        </xsl:if>
 
-                        <xsl:if test="atom:link[@rel='next']">
-                            <a href="{atom:link[@rel='next']/@href}" class="p-2 rounded-md bg-white text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 shadow-sm" title="Page suivante">
-                                <i data-lucide="chevron-right" class="w-5 h-5"></i>
-                            </a>
-                        </xsl:if>
-                        <xsl:if test="atom:link[@rel='last'] and atom:link[@rel='next']">
-                            <a href="{atom:link[@rel='last']/@href}" class="p-2 rounded-md bg-white text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 shadow-sm" title="Dernière page">
-                                <i data-lucide="chevrons-right" class="w-5 h-5"></i>
-                            </a>
-                        </xsl:if>
+                                        <!-- Page Numbers Container -->
+                                        <div id="page-numbers" class="flex items-center gap-1"></div>
+
+                                        <!-- Next Page -->
+                                        <xsl:if test="atom:link[@rel='next']">
+                                            <a href="{atom:link[@rel='next']/@href}" class="p-2 rounded-md bg-white text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 shadow-sm transition-colors" title="Page suivante">
+                                                <i data-lucide="chevron-right" class="w-5 h-5"></i>
+                                            </a>
+                                        </xsl:if>
+                                        
+                                        <!-- Last Page -->
+                                        <xsl:if test="atom:link[@rel='last'] and atom:link[@rel='next']">
+                                            <a href="{atom:link[@rel='last']/@href}" class="p-2 rounded-md bg-white text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 shadow-sm transition-colors" title="Dernière page">
+                                                <i data-lucide="chevrons-right" class="w-5 h-5"></i>
+                                            </a>
+                                        </xsl:if>
+                                    </div>
+                                </div>
+                            </xsl:if>
+                        </div>
                     </div>
                 </xsl:if>
 
@@ -280,11 +303,98 @@
                         });
                     }
 
-                    // Setup lazy loading when DOM is ready
+                    // Setup enhanced pagination with numbered page links
+                    function setupPagination() {
+                        const pageInfoEl = document.getElementById('page-info');
+                        const pageNumbersEl = document.getElementById('page-numbers');
+                        
+                        if (!pageInfoEl || !pageNumbersEl) return;
+                        
+                        // Parse current page and total pages from the title
+                        const titleEl = document.querySelector('h1');
+                        if (!titleEl) return;
+                        
+                        const titleText = titleEl.textContent;
+                        const pageMatch = titleText.match(/Page (\d+) of (\d+)/);
+                        
+                        if (!pageMatch) return;
+                        
+                        const currentPage = parseInt(pageMatch[1]);
+                        const totalPages = parseInt(pageMatch[2]);
+                        
+                        // Display page info
+                        pageInfoEl.textContent = `Page ${currentPage} of ${totalPages}`;
+                        
+                        // Get base URL (remove query params)
+                        const currentUrl = new URL(window.location.href);
+                        const baseUrl = currentUrl.pathname;
+                        
+                        // Generate page numbers with smart truncation
+                        const pageNumbers = [];
+                        const maxVisible = 7; // Maximum number of page buttons to show
+                        
+                        if (totalPages &lt;= maxVisible) {
+                            // Show all pages if total is small
+                            for (let i = 1; i &lt;= totalPages; i++) {
+                                pageNumbers.push(i);
+                            }
+                        } else {
+                            // Smart truncation algorithm
+                            pageNumbers.push(1); // Always show first page
+                            
+                            let rangeStart = Math.max(2, currentPage - 2);
+                            let rangeEnd = Math.min(totalPages - 1, currentPage + 2);
+                            
+                            // Add ellipsis before range if needed
+                            if (rangeStart &gt; 2) {
+                                pageNumbers.push('...');
+                            }
+                            
+                            // Add middle range
+                            for (let i = rangeStart; i &lt;= rangeEnd; i++) {
+                                pageNumbers.push(i);
+                            }
+                            
+                            // Add ellipsis after range if needed
+                            if (rangeEnd &lt; totalPages - 1) {
+                                pageNumbers.push('...');
+                            }
+                            
+                            pageNumbers.push(totalPages); // Always show last page
+                        }
+                        
+                        // Create page number buttons
+                        pageNumbers.forEach(function(pageNum) {
+                            if (pageNum === '...') {
+                                const ellipsis = document.createElement('span');
+                                ellipsis.className = 'px-2 text-slate-400 dark:text-slate-500';
+                                ellipsis.textContent = '...';
+                                pageNumbersEl.appendChild(ellipsis);
+                            } else {
+                                const link = document.createElement('a');
+                                link.href = `${baseUrl}?page=${pageNum}`;
+                                
+                                if (pageNum === currentPage) {
+                                    link.className = 'px-3 py-2 rounded-md text-sm font-medium bg-slate-700 text-white dark:bg-slate-300 dark:text-slate-900 shadow-sm';
+                                } else {
+                                    link.className = 'px-3 py-2 rounded-md text-sm font-medium bg-white text-slate-700 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 shadow-sm transition-colors';
+                                }
+                                
+                                link.textContent = pageNum;
+                                pageNumbersEl.appendChild(link);
+                            }
+                        });
+                    }
+
+                    // Setup lazy loading and pagination when DOM is ready
                     if (document.readyState === 'loading') {
-                        document.addEventListener('DOMContentLoaded', setupLazyCoverLoading);
+                        document.addEventListener('DOMContentLoaded', function() {
+                            setupLazyCoverLoading();
+                            setupPagination();
+                        });
                     } else {
                         setupLazyCoverLoading();
+                        setupPagination();
                     }
                 </script>
             </body>
