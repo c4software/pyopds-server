@@ -13,6 +13,7 @@ If you browse your OPDS feed in a web browser, it will display a simple HTML rep
 ## Features
 
 - **OPDS Catalog**: Exposes EPUB books via an OPDS feed accessible at the `/opds` endpoint.
+- **OpenSearch**: Integrated search functionality compliant with OpenSearch specification, allowing users to search books by title or author.
 - **Subdirectory Support**: Scans EPUB files in the configured directory and its subdirectories.
 - **Sorted by Most Recent**: Books are listed in the OPDS feed sorted by modification date, with the most recently modified files appearing first.
 - **Metadata Extraction**: Extracts title and author from EPUB files for rich display in the catalog.

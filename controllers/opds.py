@@ -686,6 +686,72 @@ class BookScanner:
         
         return paginated_books, total_count
 
+    def search_books(self, query: str, page: int, size: int) -> tuple[list[dict], int]:
+        """Search books by title or author.
+        
+        Performs case-insensitive search across both title and author fields.
+        Uses the same pattern as get_all_books_paginated: 
+        only extracts full metadata for the current page's books.
+        
+        Args:
+            query: Search query string
+            page: Page number (1-indexed)
+            size: Number of books per page
+        
+        Returns:
+            tuple: (list of book dicts, total count)
+        """
+        # Normalize query for case-insensitive search
+        query_lower = query.lower().strip()
+        
+        if not query_lower:
+            # Empty query returns all books
+            return self.get_all_books_paginated(page, size)
+        
+        if self._all_paths_cache is None:
+            self._all_paths_cache = self.collect_all_epub_paths()
+        
+        # First pass: find all matching paths
+        matching_paths = []
+        for path in self._all_paths_cache:
+            relative_path = os.path.relpath(path, LIBRARY_DIR)
+            if self.security.has_path_traversal(relative_path) or not self.security.is_within_library_dir(path):
+                continue
+            
+            # Extract metadata to check if it matches
+            title, author, pub_date = self.metadata_extractor.extract_epub_metadata(path)
+            title = title or os.path.basename(path)
+            author = author or 'Unknown'
+            
+            # Case-insensitive partial match in title or author
+            if query_lower in title.lower() or query_lower in author.lower():
+                matching_paths.append(path)
+        
+        total_count = len(matching_paths)
+        
+        # Paginate the results
+        start = (page - 1) * size
+        end = start + size
+        paginated_paths = matching_paths[start:end]
+        
+        # Extract full metadata for paginated results only
+        paginated_books = []
+        for path in paginated_paths:
+            relative_path = os.path.relpath(path, LIBRARY_DIR)
+            title, author, pub_date = self.metadata_extractor.extract_epub_metadata(path)
+            title = title or os.path.basename(path)
+            author = author or 'Unknown'
+            paginated_books.append({
+                'path': path,
+                'relative_path': relative_path,
+                'title': title,
+                'author': author,
+                'publication_date': pub_date,
+                'mtime': os.path.getmtime(path),
+            })
+        
+        return paginated_books, total_count
+
 
 class OPDSController:
     """Controller for OPDS catalog operations."""
@@ -774,6 +840,14 @@ class OPDSController:
         """Display books for a specific author."""
         self._handle_author_books()
 
+    def serve_opensearch_description(self):
+        """Serve OpenSearch description document."""
+        self._handle_opensearch_description()
+
+    def show_search_results(self):
+        """Display search results."""
+        self._handle_search_results()
+
     def _handle_root_catalog(self):
         links = [
             (
@@ -785,6 +859,11 @@ class OPDSController:
                 'start',
                 '/opds',
                 'application/atom+xml;profile=opds-catalog;kind=navigation',
+            ),
+            (
+                'search',
+                '/opds/opensearch.xml',
+                'application/opensearchdescription+xml',
             ),
         ]
 
@@ -1336,6 +1415,121 @@ class OPDSController:
         self.request.send_header('Cache-Control', 'public, max-age=86400')
         self.request.end_headers()
         self.request.wfile.write(cover_data)
+
+    def _handle_opensearch_description(self):
+        """Generate and serve OpenSearch description document."""
+        # Get the host from the request headers
+        host = self.request.headers.get('Host', 'localhost:8080')
+        scheme = 'http'  # Could be enhanced to detect HTTPS
+        base_url = f'{scheme}://{host}'
+        
+        opensearch_xml = f'''<?xml version="1.0" encoding="UTF-8"?>
+<OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/">
+  <ShortName>PyOPDS</ShortName>
+  <Description>Search books in PyOPDS catalog</Description>
+  <Tags>opds epub books</Tags>
+  <Url type="application/atom+xml;profile=opds-catalog;kind=acquisition" 
+       template="{base_url}/opds/search?q={{searchTerms}}&amp;page={{startPage?}}"/>
+</OpenSearchDescription>'''
+        
+        body = opensearch_xml.encode('utf-8')
+        self.request.send_response(200)
+        self.request.send_header('Content-Type', 'application/opensearchdescription+xml')
+        self.request.send_header('Content-Length', str(len(body)))
+        self.request.end_headers()
+        self.request.wfile.write(body)
+
+    def _handle_search_results(self):
+        """Handle search requests and display results."""
+        page, size, parsed_url = self._parse_url_params()
+        query_params = parse_qs(parsed_url.query)
+        
+        # Get search query
+        query = query_params.get('q', [''])[0]
+        
+        # Perform search
+        search_results, total_count = self.book_scanner.search_books(query, page, size)
+        
+        # Generate pagination links
+        path_base = '/opds/search'
+        links = []
+        
+        total_pages = self._get_total_pages(total_count, size)
+        
+        # Self link with query
+        query_string = f'q={quote(query)}&page={page}'
+        links.append(
+            (
+                'self',
+                f'{path_base}?{query_string}',
+                'application/atom+xml;profile=opds-catalog;kind=acquisition',
+            )
+        )
+        
+        # Start link (root catalog)
+        links.append(
+            (
+                'start',
+                '/opds',
+                'application/atom+xml;profile=opds-catalog;kind=navigation',
+            )
+        )
+        
+        # Pagination links
+        if page < total_pages:
+            next_query = f'q={quote(query)}&page={page + 1}'
+            links.append(
+                (
+                    'next',
+                    f'{path_base}?{next_query}',
+                    'application/atom+xml;profile=opds-catalog;kind=acquisition',
+                )
+            )
+        
+        if page > 1:
+            prev_query = f'q={quote(query)}&page={page - 1}'
+            links.append(
+                (
+                    'previous',
+                    f'{path_base}?{prev_query}',
+                    'application/atom+xml;profile=opds-catalog;kind=acquisition',
+                )
+            )
+        
+        if total_pages > 1:
+            first_query = f'q={quote(query)}&page=1'
+            last_query = f'q={quote(query)}&page={total_pages}'
+            links.append(
+                (
+                    'first',
+                    f'{path_base}?{first_query}',
+                    'application/atom+xml;profile=opds-catalog;kind=acquisition',
+                )
+            )
+            links.append(
+                (
+                    'last',
+                    f'{path_base}?{last_query}',
+                    'application/atom+xml;profile=opds-catalog;kind=acquisition',
+                )
+            )
+        
+        # Create book entries
+        entries = self._create_book_entries(search_results)
+        
+        # Generate title
+        if query:
+            title = f'Search results for "{query}"'
+            if total_pages > 1:
+                title = f'{title} (Page {page} of {total_pages})'
+        else:
+            title = f'All Books (Page {page} of {total_pages})'
+        
+        # Generate feed
+        feed_id = f'urn:search:{hashlib.md5(query.encode()).hexdigest()}'
+        xml = self.feed_generator.generate_feed(title, feed_id, links, entries)
+        
+        self._send_xml_response(xml, 'acquisition')
 
     def _serve_xslt(self):
         try:

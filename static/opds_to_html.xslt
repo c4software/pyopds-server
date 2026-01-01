@@ -61,21 +61,65 @@
                 </style>
             </head>
             <body class="bg-slate-50 font-sans dark:bg-slate-900">
-                <div class="bg-white/80 backdrop-blur-sm sticky top-0 z-10 shadow-sm p-4 flex items-center justify-between dark:bg-slate-800/80 dark:shadow-slate-700">
-                    <a id="back-button" class="hidden items-center text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 gap-2" style="text-decoration: none;">
-                        <i data-lucide="arrow-left" class="w-5 h-5"></i>
-                        Retour
+                <div class="bg-white/80 backdrop-blur-sm sticky top-0 z-10 shadow-sm px-4 py-2.5 flex items-center gap-3 dark:bg-slate-800/80 dark:shadow-slate-700">
+                    <a id="back-button" class="hidden items-center text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 gap-1.5 flex-shrink-0" style="text-decoration: none;">
+                        <i data-lucide="arrow-left" class="w-4 h-4"></i>
+                        <span class="text-sm">Retour</span>
                     </a>
-                    <h1 class="text-2xl font-light text-slate-800 text-center flex-grow truncate px-4 dark:text-slate-200"><xsl:value-of select="atom:title"/></h1>
-                    <div id="quick-links" class="min-w-max flex items-center gap-4">
+                    <h1 class="text-lg font-light text-slate-800 truncate flex-shrink-0 dark:text-slate-200"><xsl:value-of select="atom:title"/></h1>
+                    <!-- Search form: hidden on mobile, visible on md+ -->
+                    <form id="search-form" class="hidden md:flex flex-grow max-w-sm mx-auto m-0" action="/opds/search" method="get">
+                        <div class="relative w-full">
+                            <input 
+                                type="text" 
+                                name="q" 
+                                id="search-input"
+                                placeholder="Rechercher..." 
+                                class="w-full h-7 px-3 pr-8 text-sm rounded-md border border-slate-300 bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100 dark:placeholder-slate-400 dark:focus:ring-slate-500"
+                            />
+                            <button 
+                                type="submit" 
+                                class="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
+                                title="Rechercher"
+                            >
+                                <i data-lucide="search" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                    </form>
+                    <!-- Spacer for mobile to push icons to right -->
+                    <div class="flex-grow md:hidden"></div>
+                    <div id="quick-links" class="flex items-center gap-3 flex-shrink-0">
+                        <!-- Mobile search toggle button -->
+                        <button id="search-toggle" type="button" class="md:hidden text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Rechercher">
+                            <i data-lucide="search" class="w-4 h-4"></i>
+                        </button>
                         <a href="/opds" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center" title="Accueil">
-                            <i data-lucide="home" class="w-5 h-5"></i>
+                            <i data-lucide="home" class="w-4 h-4"></i>
                         </a>
                         <button id="theme-toggle" type="button" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200">
-                            <i id="theme-toggle-dark-icon" class="hidden w-5 h-5" data-lucide="moon"></i>
-                            <i id="theme-toggle-light-icon" class="hidden w-5 h-5" data-lucide="sun"></i>
+                            <i id="theme-toggle-dark-icon" class="hidden w-4 h-4" data-lucide="moon"></i>
+                            <i id="theme-toggle-light-icon" class="hidden w-4 h-4" data-lucide="sun"></i>
                         </button>
                     </div>
+                </div>
+                <!-- Mobile search overlay -->
+                <div id="mobile-search-overlay" class="hidden fixed inset-0 bg-black/50 z-20 md:hidden" style="display: none;"></div>
+                <div id="mobile-search-bar" class="hidden fixed top-0 left-0 right-0 bg-white dark:bg-slate-800 z-30 p-3 shadow-lg md:hidden" style="display: none;">
+                    <form id="mobile-search-form" class="flex items-center gap-2" action="/opds/search" method="get">
+                        <button type="button" id="close-search" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200">
+                            <i data-lucide="x" class="w-5 h-5"></i>
+                        </button>
+                        <input 
+                            type="text" 
+                            name="q" 
+                            id="mobile-search-input"
+                            placeholder="Rechercher un livre ou un auteur..." 
+                            class="flex-grow h-9 px-3 text-sm rounded-md border border-slate-300 bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100 dark:placeholder-slate-400 dark:focus:ring-slate-500"
+                        />
+                        <button type="submit" class="px-3 py-2 bg-slate-700 text-white rounded-md hover:bg-slate-600 dark:bg-slate-600 dark:hover:bg-slate-500">
+                            <i data-lucide="search" class="w-4 h-4"></i>
+                        </button>
+                    </form>
                 </div>
                 <!-- System Collections -->
                 <xsl:if test="atom:entry[atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author')]">
@@ -210,11 +254,58 @@
                         } else {
                             parentPath = '/opds/by-author';
                         }
+                    } else if (currentPath === '/opds/search') {
+                        parentPath = '/opds';
                     }
 
                     if (parentPath) {
                         backButton.href = parentPath;
                         backButton.style.display = 'flex';
+                    }
+
+                    // Initialize search form
+                    const searchInput = document.getElementById('search-input');
+                    const mobileSearchInput = document.getElementById('mobile-search-input');
+                    if (currentPath === '/opds/search') {
+                        // Pre-fill search input from URL query parameter
+                        const urlParams = new URLSearchParams(window.location.search);
+                        const query = urlParams.get('q');
+                        if (query) {
+                            if (searchInput) searchInput.value = query;
+                            if (mobileSearchInput) mobileSearchInput.value = query;
+                        }
+                    }
+
+                    // Mobile search toggle
+                    const searchToggle = document.getElementById('search-toggle');
+                    const mobileSearchBar = document.getElementById('mobile-search-bar');
+                    const mobileSearchOverlay = document.getElementById('mobile-search-overlay');
+                    const closeSearch = document.getElementById('close-search');
+
+                    function openMobileSearch() {
+                        if (mobileSearchBar &amp;&amp; mobileSearchOverlay) {
+                            mobileSearchBar.style.display = 'block';
+                            mobileSearchOverlay.style.display = 'block';
+                            if (mobileSearchInput) mobileSearchInput.focus();
+                            lucide.createIcons();
+                        }
+                    }
+
+                    function closeMobileSearch() {
+                        if (mobileSearchBar &amp;&amp; mobileSearchOverlay) {
+                            mobileSearchBar.style.display = 'none';
+                            mobileSearchOverlay.style.display = 'none';
+                        }
+                    }
+
+                    if (searchToggle) {
+                        searchToggle.addEventListener('click', openMobileSearch);
+                    }
+                    if (closeSearch) {
+                        closeSearch.addEventListener('click', closeMobileSearch);
+                    }
+                    if (mobileSearchOverlay) {
+                        mobileSearchOverlay.addEventListener('click', closeMobileSearch);
                     }
 
                     var themeToggleDarkIcon = document.getElementById('theme-toggle-dark-icon');
