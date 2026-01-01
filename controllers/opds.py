@@ -654,7 +654,7 @@ class OPDSController:
                 ],
             },
             {
-                'title': 'Par Année de Publication',
+                'title': 'By Year',
                 'id': 'urn:by-year',
                 'links': [
                     (
@@ -665,7 +665,7 @@ class OPDSController:
                 ],
             },
             {
-                'title': 'Par Auteur',
+                'title': 'By Author',
                 'id': 'urn:by-author',
                 'links': [
                     (
@@ -821,7 +821,7 @@ class OPDSController:
             year_id = f'urn:year:{year}'
             encoded_year = quote(year)
             entries.append({
-                'title': f'{year} ({count} livres)',
+                'title': f'{year} ({count} books)',
                 'id': year_id,
                 'links': [
                     (
@@ -832,7 +832,7 @@ class OPDSController:
                 ],
             })
 
-        xml = self.feed_generator.generate_feed('Par Année de Publication', 'urn:by-year', links, entries)
+        xml = self.feed_generator.generate_feed('By Year', 'urn:by-year', links, entries)
         self._send_xml_response(xml, 'navigation')
 
     def _handle_year_books(self):
@@ -862,7 +862,7 @@ class OPDSController:
         entries = self._create_book_entries(paginated_books)
 
         total_pages = self._get_total_pages(total_count, size)
-        title = f'Année {year}'
+        title = f'Year {year}'
         if total_pages > 1:
             title = f'{title} (Page {page} of {total_pages})'
 
@@ -890,7 +890,7 @@ class OPDSController:
             author_id = f'urn:author:{hashlib.md5(author.encode()).hexdigest()}'
             encoded_author = quote(author)
             entries.append({
-                'title': f'{author} ({count} livres)',
+                'title': f'{author} ({count} books)',
                 'id': author_id,
                 'links': [
                     (
@@ -901,7 +901,7 @@ class OPDSController:
                 ],
             })
 
-        xml = self.feed_generator.generate_feed('Par Auteur', 'urn:by-author', links, entries)
+        xml = self.feed_generator.generate_feed('By Author', 'urn:by-author', links, entries)
         self._send_xml_response(xml, 'navigation')
 
     def _handle_author_books(self):

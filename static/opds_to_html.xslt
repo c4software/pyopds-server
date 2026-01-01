@@ -130,6 +130,12 @@
                         }
                     } else if (currentPath === '/opds/books' || currentPath === '/opds/recent') {
                         parentPath = '/opds';
+                    } else if (currentPath.startsWith('/opds/by-year/')) {
+                        parentPath = '/opds/by-year';
+                    } else if (currentPath === '/opds/by-year' || currentPath === '/opds/by-author') {
+                        parentPath = '/opds';
+                    } else if (currentPath.startsWith('/opds/by-author/')) {
+                        parentPath = '/opds/by-author';
                     }
 
                     if (parentPath) {
@@ -236,7 +242,7 @@
 
     <xsl:template match="atom:entry">
         <xsl:choose>
-            <xsl:when test="atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books')">
+            <xsl:when test="atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author')">
                 <a class="block group rounded-lg overflow-hidden transition-all duration-300 transform hover:-translate-y-1 hover:shadow-xl aspect-[2/3]">
                     <xsl:attribute name="href">
                         <xsl:value-of select="atom:link[@rel='subsection']/@href"/>
@@ -246,9 +252,15 @@
                             <xsl:when test="atom:id = 'urn:all-books'">
                                 <i data-lucide="library" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
                             </xsl:when>
-                            <xsl:otherwise>
+                            <xsl:when test="atom:id = 'urn:recent-books'">
                                 <i data-lucide="clock" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
-                            </xsl:otherwise>
+                            </xsl:when>
+                            <xsl:when test="atom:id = 'urn:by-year'">
+                                <i data-lucide="calendar" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
+                            </xsl:when>
+                            <xsl:when test="atom:id = 'urn:by-author'">
+                                <i data-lucide="users" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
+                            </xsl:when>
                         </xsl:choose>
                         <div class="font-semibold text-slate-700 transition-colors dark:text-slate-300"><xsl:value-of select="atom:title"/></div>
                         <div class="text-sm text-slate-500 mt-1 dark:text-slate-400">System collection</div>
