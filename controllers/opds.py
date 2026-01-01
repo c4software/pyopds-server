@@ -39,21 +39,28 @@ class BookMetadata:
 
     @staticmethod
     def extract_epub_metadata(epub_path):
+        """Extract metadata from EPUB file.
+        
+        Returns:
+            tuple: (title, author, publication_date) or (None, None, None) if not found
+        """
         try:
             with zipfile.ZipFile(epub_path) as zf:
                 opf_root, _ = BookMetadata._parse_opf_from_epub(zf)
                 if opf_root is None:
-                    return None, None
+                    return None, None, None
 
                 ns_dc = {'dc': 'http://purl.org/dc/elements/1.1/'}
                 title_elem = opf_root.find(".//dc:title", ns_dc)
                 title = title_elem.text if title_elem is not None else None
                 author_elem = opf_root.find(".//dc:creator", ns_dc)
                 author = author_elem.text if author_elem is not None else None
+                date_elem = opf_root.find(".//dc:date", ns_dc)
+                publication_date = date_elem.text if date_elem is not None else None
 
-                return title, author
+                return title, author, publication_date
         except Exception:
-            return None, None
+            return None, None, None
 
     @staticmethod
     def extract_epub_cover(epub_path):
@@ -240,7 +247,7 @@ class BookScanner:
             relative_path = os.path.relpath(path, LIBRARY_DIR)
             if self.security.has_path_traversal(relative_path) or not self.security.is_within_library_dir(path):
                 continue
-            title, author = self.metadata_extractor.extract_epub_metadata(path)
+            title, author, pub_date = self.metadata_extractor.extract_epub_metadata(path)
             title = title or os.path.basename(path)
             author = author or 'Unknown'
             paginated_books.append(
@@ -249,6 +256,7 @@ class BookScanner:
                     'relative_path': relative_path,
                     'title': title,
                     'author': author,
+                    'publication_date': pub_date,
                     'mtime': os.path.getmtime(path),
                 }
             )
@@ -355,7 +363,7 @@ class BookScanner:
                 not self.security.has_path_traversal(relative_path)
                 and self.security.is_within_library_dir(file_path)
             ):
-                title, author = self.metadata_extractor.extract_epub_metadata(file_path)
+                title, author, pub_date = self.metadata_extractor.extract_epub_metadata(file_path)
                 title = title or os.path.basename(file_path)
                 author = author or 'Unknown'
 
@@ -365,6 +373,7 @@ class BookScanner:
                         'relative_path': relative_path,
                         'title': title,
                         'author': author,
+                        'publication_date': pub_date,
                         'mtime': mtime,
                     }
                 )
@@ -381,7 +390,7 @@ class BookScanner:
         if self.security.has_path_traversal(relative_path) or not self.security.is_within_library_dir(path):
             return None
 
-        title, author = self.metadata_extractor.extract_epub_metadata(path)
+        title, author, pub_date = self.metadata_extractor.extract_epub_metadata(path)
         title = title or filename
         author = author or 'Unknown'
 
@@ -390,8 +399,132 @@ class BookScanner:
             'relative_path': relative_path,
             'title': title,
             'author': author,
+            'publication_date': pub_date,
             'mtime': os.path.getmtime(path),
         }
+
+    @staticmethod
+    def _extract_year(publication_date):
+        """Extract year from publication date string.
+        
+        Handles formats like '2023-01-15', '2023', etc.
+        Returns 'Unknown' if year cannot be extracted.
+        """
+        if not publication_date:
+            return 'Unknown'
+        # Try to extract first 4 digits as year
+        year_str = publication_date[:4]
+        if year_str.isdigit() and len(year_str) == 4:
+            return year_str
+        return 'Unknown'
+
+    def collect_all_books_with_metadata(self):
+        """Collect all books with full metadata.
+        
+        Uses cached paths if available.
+        Returns list of book info dicts with metadata.
+        """
+        if self._all_paths_cache is None:
+            self._all_paths_cache = self.collect_all_epub_paths()
+        
+        books = []
+        for path in self._all_paths_cache:
+            relative_path = os.path.relpath(path, LIBRARY_DIR)
+            if self.security.has_path_traversal(relative_path) or not self.security.is_within_library_dir(path):
+                continue
+            title, author, pub_date = self.metadata_extractor.extract_epub_metadata(path)
+            title = title or os.path.basename(path)
+            author = author or 'Unknown'
+            books.append({
+                'path': path,
+                'relative_path': relative_path,
+                'title': title,
+                'author': author,
+                'publication_date': pub_date,
+                'year': self._extract_year(pub_date),
+                'mtime': os.path.getmtime(path),
+            })
+        return books
+
+    def get_years_with_counts(self):
+        """Get all publication years with book counts.
+        
+        Returns list of (year, count) tuples sorted by year descending.
+        """
+        books = self.collect_all_books_with_metadata()
+        year_counts = {}
+        for book in books:
+            year = book['year']
+            year_counts[year] = year_counts.get(year, 0) + 1
+        
+        # Sort years: known years descending, 'Unknown' at the end
+        sorted_years = sorted(
+            year_counts.items(),
+            key=lambda x: (x[0] == 'Unknown', -int(x[0]) if x[0] != 'Unknown' else 0)
+        )
+        return sorted_years
+
+    def get_authors_with_counts(self):
+        """Get all authors with book counts.
+        
+        Returns list of (author, count) tuples sorted alphabetically.
+        """
+        books = self.collect_all_books_with_metadata()
+        author_counts = {}
+        for book in books:
+            author = book['author']
+            author_counts[author] = author_counts.get(author, 0) + 1
+        
+        # Sort authors alphabetically, 'Unknown' at the end
+        sorted_authors = sorted(
+            author_counts.items(),
+            key=lambda x: (x[0] == 'Unknown', x[0].lower())
+        )
+        return sorted_authors
+
+    def get_books_for_year(self, year, page, size):
+        """Get paginated books for a specific year.
+        
+        Args:
+            year: Publication year string
+            page: Page number (1-indexed)
+            size: Number of books per page
+        
+        Returns:
+            tuple: (list of book dicts, total count)
+        """
+        books = self.collect_all_books_with_metadata()
+        year_books = [b for b in books if b['year'] == year]
+        # Sort by title
+        year_books.sort(key=lambda x: x['title'].lower())
+        
+        total_count = len(year_books)
+        start = (page - 1) * size
+        end = start + size
+        
+        return year_books[start:end], total_count
+
+    def get_books_for_author(self, author, page, size):
+        """Get paginated books for a specific author.
+        
+        Args:
+            author: Author name
+            page: Page number (1-indexed)
+            size: Number of books per page
+        
+        Returns:
+            tuple: (list of book dicts, total count)
+        """
+        books = self.collect_all_books_with_metadata()
+        author_books = [b for b in books if b['author'] == author]
+        # Sort by title
+        author_books.sort(key=lambda x: x['title'].lower())
+        
+        total_count = len(author_books)
+        start = (page - 1) * size
+        end = start + size
+        
+        return author_books[start:end], total_count
 
 
 class OPDSController:
@@ -461,6 +594,22 @@ class OPDSController:
         self.request.end_headers()
         self.request.wfile.write(body)
 
+    def show_by_year_catalog(self):
+        """Display catalog of years with book counts."""
+        self._handle_by_year_catalog()
+
+    def show_year_books(self):
+        """Display books for a specific year."""
+        self._handle_year_books()
+
+    def show_by_author_catalog(self):
+        """Display catalog of authors with book counts."""
+        self._handle_by_author_catalog()
+
+    def show_author_books(self):
+        """Display books for a specific author."""
+        self._handle_author_books()
+
     def _handle_root_catalog(self):
         links = [
             (
@@ -504,7 +653,30 @@ class OPDSController:
                     )
                 ],
             },
+            {
+                'title': 'Par Année de Publication',
+                'id': 'urn:by-year',
+                'links': [
+                    (
+                        'subsection',
+                        '/opds/by-year',
+                        'application/atom+xml;profile=opds-catalog;kind=navigation',
+                    )
+                ],
+            },
+            {
+                'title': 'Par Auteur',
+                'id': 'urn:by-author',
+                'links': [
+                    (
+                        'subsection',
+                        '/opds/by-author',
+                        'application/atom+xml;profile=opds-catalog;kind=navigation',
+                    )
+                ],
+            },
         ]
+
 
         for folder in sorted(os.listdir(LIBRARY_DIR)):
             folder_path = os.path.join(LIBRARY_DIR, folder)
@@ -626,6 +798,144 @@ class OPDSController:
 
         xml = self.feed_generator.generate_feed(title, feed_id, links, formatted_entries)
 
+        self._send_xml_response(xml, 'acquisition')
+
+    def _handle_by_year_catalog(self):
+        """Handle display of years catalog."""
+        links = [
+            (
+                'self',
+                '/opds/by-year',
+                'application/atom+xml;profile=opds-catalog;kind=navigation',
+            ),
+            (
+                'start',
+                '/opds',
+                'application/atom+xml;profile=opds-catalog;kind=navigation',
+            ),
+        ]
+
+        years_with_counts = self.book_scanner.get_years_with_counts()
+        entries = []
+        for year, count in years_with_counts:
+            year_id = f'urn:year:{year}'
+            encoded_year = quote(year)
+            entries.append({
+                'title': f'{year} ({count} livres)',
+                'id': year_id,
+                'links': [
+                    (
+                        'subsection',
+                        f'/opds/by-year/{encoded_year}?page=1',
+                        'application/atom+xml;profile=opds-catalog;kind=acquisition',
+                    )
+                ],
+            })
+
+        xml = self.feed_generator.generate_feed('Par Année de Publication', 'urn:by-year', links, entries)
+        self._send_xml_response(xml, 'navigation')
+
+    def _handle_year_books(self):
+        """Handle display of books for a specific year."""
+        page, size, parsed_url = self._parse_url_params()
+        year = unquote(parsed_url.path[len('/opds/by-year/'):])
+        path_base = parsed_url.path
+
+        paginated_books, total_count = self.book_scanner.get_books_for_year(year, page, size)
+
+        links = self._get_pagination_links(path_base, page, size, total_count)
+        links.append(
+            (
+                'start',
+                '/opds',
+                'application/atom+xml;profile=opds-catalog;kind=navigation',
+            )
+        )
+        links.append(
+            (
+                'up',
+                '/opds/by-year',
+                'application/atom+xml;profile=opds-catalog;kind=navigation',
+            )
+        )
+
+        entries = self._create_book_entries(paginated_books)
+
+        total_pages = self._get_total_pages(total_count, size)
+        title = f'Année {year}'
+        if total_pages > 1:
+            title = f'{title} (Page {page} of {total_pages})'
+
+        xml = self.feed_generator.generate_feed(title, f'urn:year:{year}', links, entries)
+        self._send_xml_response(xml, 'acquisition')
+
+    def _handle_by_author_catalog(self):
+        """Handle display of authors catalog."""
+        links = [
+            (
+                'self',
+                '/opds/by-author',
+                'application/atom+xml;profile=opds-catalog;kind=navigation',
+            ),
+            (
+                'start',
+                '/opds',
+                'application/atom+xml;profile=opds-catalog;kind=navigation',
+            ),
+        ]
+
+        authors_with_counts = self.book_scanner.get_authors_with_counts()
+        entries = []
+        for author, count in authors_with_counts:
+            author_id = f'urn:author:{hashlib.md5(author.encode()).hexdigest()}'
+            encoded_author = quote(author)
+            entries.append({
+                'title': f'{author} ({count} livres)',
+                'id': author_id,
+                'links': [
+                    (
+                        'subsection',
+                        f'/opds/by-author/{encoded_author}?page=1',
+                        'application/atom+xml;profile=opds-catalog;kind=acquisition',
+                    )
+                ],
+            })
+
+        xml = self.feed_generator.generate_feed('Par Auteur', 'urn:by-author', links, entries)
+        self._send_xml_response(xml, 'navigation')
+
+    def _handle_author_books(self):
+        """Handle display of books for a specific author."""
+        page, size, parsed_url = self._parse_url_params()
+        author = unquote(parsed_url.path[len('/opds/by-author/'):])
+        path_base = parsed_url.path
+
+        paginated_books, total_count = self.book_scanner.get_books_for_author(author, page, size)
+
+        links = self._get_pagination_links(path_base, page, size, total_count)
+        links.append(
+            (
+                'start',
+                '/opds',
+                'application/atom+xml;profile=opds-catalog;kind=navigation',
+            )
+        )
+        links.append(
+            (
+                'up',
+                '/opds/by-author',
+                'application/atom+xml;profile=opds-catalog;kind=navigation',
+            )
+        )
+
+        entries = self._create_book_entries(paginated_books)
+
+        total_pages = self._get_total_pages(total_count, size)
+        title = author
+        if total_pages > 1:
+            title = f'{title} (Page {page} of {total_pages})'
+
+        xml = self.feed_generator.generate_feed(title, f'urn:author:{hashlib.md5(author.encode()).hexdigest()}', links, entries)
         self._send_xml_response(xml, 'acquisition')
 
     def _get_total_pages(self, total_count, size=None):
