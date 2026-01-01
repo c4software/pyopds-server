@@ -96,6 +96,9 @@
                         <a href="/opds" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center" title="Accueil">
                             <i data-lucide="home" class="w-4 h-4"></i>
                         </a>
+                        <a href="/opds/refresh" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center" title="Rafraîchir le cache">
+                            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                        </a>
                         <button id="theme-toggle" type="button" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200">
                             <i id="theme-toggle-dark-icon" class="hidden w-4 h-4" data-lucide="moon"></i>
                             <i id="theme-toggle-light-icon" class="hidden w-4 h-4" data-lucide="sun"></i>

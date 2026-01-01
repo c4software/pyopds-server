@@ -869,6 +869,13 @@ class OPDSController:
         """Display search results."""
         self._handle_search_results()
 
+    def refresh_cache(self):
+        """Invalidate all caches and redirect to root catalog."""
+        self.book_scanner.invalidate_caches()
+        self.request.send_response(302)
+        self.request.send_header('Location', '/opds')
+        self.request.end_headers()
+
     def _handle_root_catalog(self):
         links = [
             (
