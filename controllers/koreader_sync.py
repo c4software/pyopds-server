@@ -1,9 +1,7 @@
 """KoReader sync storage and HTTP controller."""
-import datetime
 import json
 import os
 import sqlite3
-from urllib.parse import parse_qs
 import base64
 import time
 

@@ -14,7 +14,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-def create_epub(path, title, author):
+def create_epub(path, title, author, date=None):
         container_xml = """<?xml version='1.0' encoding='UTF-8'?>
 <container version='1.0' xmlns='urn:oasis:names:tc:opendocument:xmlns:container'>
     <rootfiles>
@@ -22,11 +22,13 @@ def create_epub(path, title, author):
     </rootfiles>
 </container>
 """
-        opf_template = """<?xml version='1.0' encoding='UTF-8'?>
+        date_element = f"<dc:date>{date}</dc:date>" if date else ""
+        opf_template = f"""<?xml version='1.0' encoding='UTF-8'?>
 <package xmlns='http://www.idpf.org/2007/opf' version='3.0'>
     <metadata xmlns:dc='http://purl.org/dc/elements/1.1/'>
-        <dc:title>{title}</dc:title>
-        <dc:creator>{author}</dc:creator>
+        <dc:title>{{title}}</dc:title>
+        <dc:creator>{{author}}</dc:creator>
+        {date_element}
     </metadata>
     <manifest/>
     <spine/>
@@ -58,11 +60,11 @@ class TestOPDSCatalog(unittest.TestCase):
         importlib.reload(importlib.import_module('routes'))
         cls.server = importlib.reload(importlib.import_module('server'))
         cls.alpha_path = os.path.join(cls.library_dir.name, 'alpha.epub')
-        create_epub(cls.alpha_path, 'Alpha Title', 'Author One')
+        create_epub(cls.alpha_path, 'Alpha Title', 'Author One', date='2023-01-15')
         subfolder_path = os.path.join(cls.library_dir.name, 'Subfolder')
         os.makedirs(subfolder_path, exist_ok=True)
         cls.beta_path = os.path.join(subfolder_path, 'beta.epub')
-        create_epub(cls.beta_path, 'Beta Title', 'Author Two')
+        create_epub(cls.beta_path, 'Beta Title', 'Author Two', date='2024-06-20')
         now = time.time()
         os.utime(cls.alpha_path, (now - 200, now - 200))
         os.utime(cls.beta_path, (now - 50, now - 50))
@@ -111,6 +113,8 @@ class TestOPDSCatalog(unittest.TestCase):
         entry_titles = {entry.find('atom:title', ns).text for entry in feed.findall('atom:entry', ns)}
         self.assertIn('All Books', entry_titles)
         self.assertIn('Recent Books', entry_titles)
+        self.assertIn('By Year', entry_titles)
+        self.assertIn('By Author', entry_titles)
         self.assertIn('Subfolder', entry_titles)
 
     def test_all_books_feed_paginates_and_lists_books(self):
@@ -161,6 +165,72 @@ class TestOPDSCatalog(unittest.TestCase):
         self.assertGreater(len(download_body), 0)
         status_forbidden, _, _ = self._get('/download/../server.py')
         self.assertEqual(status_forbidden, 403)
+
+    def test_by_year_catalog_lists_years(self):
+        """Test /opds/by-year returns a catalog of years."""
+        ns = {'atom': 'http://www.w3.org/2005/Atom'}
+        status, headers, body = self._get('/opds/by-year')
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get('Content-Type'), 'application/xml;profile=opds-catalog;kind=navigation')
+        feed = self._parse_feed(body)
+        entries = feed.findall('atom:entry', ns)
+        self.assertGreaterEqual(len(entries), 2)
+        # Check that years 2023 and 2024 are in the titles
+        entry_titles = [entry.find('atom:title', ns).text for entry in entries]
+        year_found_2023 = any('2023' in t for t in entry_titles)
+        year_found_2024 = any('2024' in t for t in entry_titles)
+        self.assertTrue(year_found_2023, "Year 2023 should be in catalog")
+        self.assertTrue(year_found_2024, "Year 2024 should be in catalog")
+
+    def test_by_year_books_lists_books_for_year(self):
+        """Test /opds/by-year/2023 returns books from that year."""
+        ns = {'atom': 'http://www.w3.org/2005/Atom'}
+        status, headers, body = self._get('/opds/by-year/2023?page=1')
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get('Content-Type'), 'application/xml;profile=opds-catalog;kind=acquisition')
+        feed = self._parse_feed(body)
+        entries = feed.findall('atom:entry', ns)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].find('atom:title', ns).text, 'Alpha Title')
+
+    def test_by_author_catalog_lists_letters(self):
+        """Test /opds/by-author returns A-Z letter navigation."""
+        ns = {'atom': 'http://www.w3.org/2005/Atom'}
+        status, headers, body = self._get('/opds/by-author')
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get('Content-Type'), 'application/xml;profile=opds-catalog;kind=navigation')
+        feed = self._parse_feed(body)
+        entries = feed.findall('atom:entry', ns)
+        # Should have A-Z + #
+        self.assertEqual(len(entries), 27)
+        entry_titles = [entry.find('atom:title', ns).text for entry in entries]
+        self.assertIn('A', entry_titles)
+        self.assertIn('B', entry_titles)
+
+    def test_by_author_letter_lists_authors(self):
+        """Test /opds/by-author/letter/A returns authors starting with A."""
+        ns = {'atom': 'http://www.w3.org/2005/Atom'}
+        status, headers, body = self._get('/opds/by-author/letter/A?page=1')
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get('Content-Type'), 'application/xml;profile=opds-catalog;kind=navigation')
+        feed = self._parse_feed(body)
+        entries = feed.findall('atom:entry', ns)
+        # PAGE_SIZE=1, so only 1 author per page
+        self.assertGreaterEqual(len(entries), 1)
+        entry_titles = [entry.find('atom:title', ns).text for entry in entries]
+        # Author should start with 'Author'
+        self.assertTrue(all('Author' in t for t in entry_titles))
+
+    def test_by_author_books_lists_books_for_author(self):
+        """Test /opds/by-author/Author%20One returns books by that author."""
+        ns = {'atom': 'http://www.w3.org/2005/Atom'}
+        status, headers, body = self._get('/opds/by-author/Author%20One?page=1')
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get('Content-Type'), 'application/xml;profile=opds-catalog;kind=acquisition')
+        feed = self._parse_feed(body)
+        entries = feed.findall('atom:entry', ns)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].find('atom:title', ns).text, 'Alpha Title')
 
 if __name__ == '__main__':
     unittest.main()

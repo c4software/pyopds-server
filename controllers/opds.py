@@ -15,7 +15,7 @@ PAGE_SIZE = int(os.environ.get('PAGE_SIZE', 25))
 
 class BookMetadata:
     @staticmethod
-    def _parse_opf_from_epub(zf):
+    def _parse_opf_from_epub(zf: zipfile.ZipFile) -> tuple[ET.Element | None, str | None]:
         """Internal: parse container.xml and OPF, return (opf_root, opf_dir)."""
         try:
             container_xml = zf.read('META-INF/container.xml')
@@ -38,7 +38,7 @@ class BookMetadata:
             return None, None
 
     @staticmethod
-    def extract_epub_metadata(epub_path):
+    def extract_epub_metadata(epub_path: str) -> tuple[str | None, str | None, str | None]:
         """Extract metadata from EPUB file.
         
         Returns:
@@ -63,7 +63,7 @@ class BookMetadata:
             return None, None, None
 
     @staticmethod
-    def extract_epub_cover(epub_path):
+    def extract_epub_cover(epub_path: str) -> tuple[bytes | None, str | None]:
         """Extract cover image from EPUB file.
         
         Returns:
@@ -134,13 +134,13 @@ class BookMetadata:
 
 class SecurityUtils:
     @staticmethod
-    def is_within_library_dir(file_path):
+    def is_within_library_dir(file_path: str) -> bool:
         library_realpath = os.path.realpath(LIBRARY_DIR)
         file_realpath = os.path.realpath(file_path)
         return file_realpath.startswith(library_realpath + os.sep) or file_realpath == library_realpath
 
     @staticmethod
-    def has_path_traversal(path):
+    def has_path_traversal(path: str) -> bool:
         """Check if path contains dangerous traversal sequences."""
         dangerous_patterns = ['..', '~']
 
@@ -158,7 +158,7 @@ class SecurityUtils:
 
 class OPDSFeedGenerator:
     @staticmethod
-    def generate_feed(title, feed_id, links, entries):
+    def generate_feed(title: str, feed_id: str, links: list[tuple[str, str, str]], entries: list[dict]) -> str:
         feed = ET.Element(
             'feed',
             {
@@ -196,6 +196,17 @@ class OPDSFeedGenerator:
 
 
 class BookScanner:
+    """Scanner for EPUB files with caching."""
+    
+    _instance = None  # Singleton instance
+    
+    @classmethod
+    def get_instance(cls) -> 'BookScanner':
+        """Get or create singleton instance."""
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+    
     def __init__(self):
         self.metadata_extractor = BookMetadata()
         self.security = SecurityUtils()
@@ -207,8 +218,24 @@ class BookScanner:
         self._recent_books_cache = None
         self._recent_books_cache_time = 0
         self.RECENT_CACHE_TTL = 300
+    
+    def _create_book_info_from_path(self, path: str) -> dict:
+        """Create book info dict from file path. Used to avoid code duplication."""
+        relative_path = os.path.relpath(path, LIBRARY_DIR)
+        title, author, pub_date = self.metadata_extractor.extract_epub_metadata(path)
+        title = title or os.path.basename(path)
+        author = author or 'Unknown'
+        return {
+            'path': path,
+            'relative_path': relative_path,
+            'title': title,
+            'author': author,
+            'publication_date': pub_date,
+            'year': self._extract_year(pub_date),
+            'mtime': os.path.getmtime(path),
+        }
 
-    def collect_all_epub_paths(self):
+    def collect_all_epub_paths(self) -> list[str]:
         paths = []
         for root, _, files in os.walk(LIBRARY_DIR):
             for file in files:
@@ -216,7 +243,7 @@ class BookScanner:
                     paths.append(os.path.join(root, file))
         return sorted(paths, key=lambda p: os.path.basename(p).lower())
 
-    def scan_directory_single_level(self, directory_path, base_path=None):
+    def scan_directory_single_level(self, directory_path: str, base_path: str | None = None) -> list[dict]:
         if base_path is None:
             base_path = directory_path
 
@@ -235,7 +262,7 @@ class BookScanner:
 
         return sorted(file_list, key=lambda x: x['title'].lower())
 
-    def get_all_books_paginated(self, page, size):
+    def get_all_books_paginated(self, page: int, size: int) -> tuple[list[dict], int]:
         if self._all_paths_cache is None:
             self._all_paths_cache = self.collect_all_epub_paths()
 
@@ -267,7 +294,7 @@ class BookScanner:
 
         return paginated_books, total_count
 
-    def get_folder_content_paginated(self, folder_full_path, parent_folder_path, page, size, base_path=None):
+    def get_folder_content_paginated(self, folder_full_path: str, parent_folder_path: str, page: int, size: int, base_path: str | None = None) -> tuple[list[dict], int]:
         subfolders = []
         for item in os.listdir(folder_full_path):
             item_path = os.path.join(folder_full_path, item)
@@ -328,7 +355,7 @@ class BookScanner:
 
         return paginated_entries, total_count
 
-    def scan_recent_books(self, directory_path, limit=25):
+    def scan_recent_books(self, directory_path: str, limit: int = 25) -> list[dict]:
         current_time = time.time()
         if (
             self._recent_books_cache is not None
@@ -408,7 +435,7 @@ class BookScanner:
         }
 
     @staticmethod
-    def _extract_year(publication_date):
+    def _extract_year(publication_date: str | None) -> str:
         """Extract year from publication date string.
         
         Handles formats like '2023-01-15', '2023', etc.
@@ -422,7 +449,7 @@ class BookScanner:
             return year_str
         return 'Unknown'
 
-    def collect_all_books_with_metadata(self):
+    def collect_all_books_with_metadata(self) -> list[dict]:
         """Collect all books with full metadata.
         
         Uses cached metadata if available for better performance.
@@ -455,7 +482,7 @@ class BookScanner:
         self._all_books_metadata_cache = books
         return books
 
-    def _build_year_author_indexes(self):
+    def _build_year_author_indexes(self) -> None:
         """Build lightweight indexes for year and author lookups.
         
         Only extracts minimal metadata (year, author) without full book info.
@@ -496,7 +523,7 @@ class BookScanner:
         self._year_index = year_index
         self._author_index = author_index
 
-    def get_years_with_counts(self):
+    def get_years_with_counts(self) -> list[tuple[str, int]]:
         """Get all publication years with book counts.
         
         Returns list of (year, count) tuples sorted by year descending.
@@ -512,7 +539,7 @@ class BookScanner:
         )
         return sorted_years
 
-    def get_authors_with_counts(self):
+    def get_authors_with_counts(self) -> list[tuple[str, int]]:
         """Get all authors with book counts.
         
         Returns list of (author, count) tuples sorted alphabetically.
@@ -528,7 +555,7 @@ class BookScanner:
         )
         return sorted_authors
 
-    def get_letters_with_author_counts(self):
+    def get_letters_with_author_counts(self) -> list[str]:
         """Get all letters A-Z plus '#' for navigation.
         
         Returns list of letters for A-Z and '#' for special chars.
@@ -539,7 +566,7 @@ class BookScanner:
         letters.append('#')
         return letters
 
-    def get_authors_by_letter(self, letter, page, size):
+    def get_authors_by_letter(self, letter: str, page: int, size: int) -> tuple[list[tuple[str, int]], int]:
         """Get paginated authors starting with a specific letter.
         
         Args:
@@ -575,7 +602,7 @@ class BookScanner:
         
         return filtered_authors[start:end], total_count
 
-    def get_books_for_year(self, year, page, size):
+    def get_books_for_year(self, year: str, page: int, size: int) -> tuple[list[dict], int]:
         """Get paginated books for a specific year.
         
         Uses the same pattern as get_all_books_paginated: 
@@ -617,7 +644,7 @@ class BookScanner:
         
         return paginated_books, total_count
 
-    def get_books_for_author(self, author, page, size):
+    def get_books_for_author(self, author: str, page: int, size: int) -> tuple[list[dict], int]:
         """Get paginated books for a specific author.
         
         Uses the same pattern as get_all_books_paginated: 
@@ -666,7 +693,7 @@ class OPDSController:
     def __init__(self, request_handler):
         self.request = request_handler
         self.feed_generator = OPDSFeedGenerator()
-        self.book_scanner = BookScanner()
+        self.book_scanner = BookScanner.get_instance()  # Use singleton
         self.security = SecurityUtils()
 
     def _parse_url_params(self):
@@ -676,7 +703,7 @@ class OPDSController:
 
         try:
             page = int(query_params.get('page', ['1'])[0])
-            page = max(1, page)
+            page = max(1, min(page, 10000))  # Limit to reasonable range
         except ValueError:
             page = 1
 
@@ -1268,10 +1295,15 @@ class OPDSController:
                 f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded_name}",
             )
         
+        # Add Content-Length for download progress
+        file_size = os.path.getsize(file_path)
+        self.request.send_header('Content-Length', str(file_size))
         self.request.end_headers()
 
+        # Stream file in chunks to avoid loading entire file into memory
         with open(file_path, 'rb') as f:
-            self.request.wfile.write(f.read())
+            while chunk := f.read(8192):  # 8KB chunks
+                self.request.wfile.write(chunk)
 
     def _handle_cover_download(self):
         """Handle cover image download requests."""
