@@ -219,6 +219,15 @@ class BookScanner:
         self._recent_books_cache_time = 0
         self.RECENT_CACHE_TTL = 300
     
+    def invalidate_caches(self) -> None:
+        """Invalidate all caches. Called when a missing file is detected."""
+        self._all_paths_cache = None
+        self._all_books_metadata_cache = None
+        self._year_index = None
+        self._author_index = None
+        self._recent_books_cache = None
+        self._recent_books_cache_time = 0
+    
     def _create_book_info_from_path(self, path: str) -> dict:
         """Create book info dict from file path. Used to avoid code duplication."""
         relative_path = os.path.relpath(path, LIBRARY_DIR)
@@ -232,7 +241,7 @@ class BookScanner:
             'author': author,
             'publication_date': pub_date,
             'year': self._extract_year(pub_date),
-            'mtime': os.path.getmtime(path),
+            'mtime': self._safe_getmtime(path),
         }
 
     def collect_all_epub_paths(self) -> list[str]:
@@ -431,8 +440,20 @@ class BookScanner:
             'title': title,
             'author': author,
             'publication_date': pub_date,
-            'mtime': os.path.getmtime(path),
+            'mtime': self._safe_getmtime(path),
         }
+
+    def _safe_getmtime(self, path: str) -> float:
+        """Safely get file modification time.
+        
+        Returns 0 if file doesn't exist or cannot be accessed.
+        Also invalidates caches when a missing file is detected.
+        """
+        try:
+            return os.path.getmtime(path)
+        except (FileNotFoundError, PermissionError, OSError):
+            self.invalidate_caches()
+            return 0
 
     @staticmethod
     def _extract_year(publication_date: str | None) -> str:
@@ -476,7 +497,7 @@ class BookScanner:
                 'author': author,
                 'publication_date': pub_date,
                 'year': self._extract_year(pub_date),
-                'mtime': os.path.getmtime(path),
+                'mtime': self._safe_getmtime(path),
             })
         
         self._all_books_metadata_cache = books
@@ -639,7 +660,7 @@ class BookScanner:
                 'author': author,
                 'publication_date': pub_date,
                 'year': self._extract_year(pub_date),
-                'mtime': os.path.getmtime(path),
+                'mtime': self._safe_getmtime(path),
             })
         
         return paginated_books, total_count
@@ -681,7 +702,7 @@ class BookScanner:
                 'author': book_author,
                 'publication_date': pub_date,
                 'year': self._extract_year(pub_date),
-                'mtime': os.path.getmtime(path),
+                'mtime': self._safe_getmtime(path),
             })
         
         return paginated_books, total_count
@@ -747,7 +768,7 @@ class BookScanner:
                 'title': title,
                 'author': author,
                 'publication_date': pub_date,
-                'mtime': os.path.getmtime(path),
+                'mtime': self._safe_getmtime(path),
             })
         
         return paginated_books, total_count
