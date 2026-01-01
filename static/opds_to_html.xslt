@@ -298,12 +298,12 @@
                     <xsl:attribute name="href">
                         <xsl:value-of select="atom:link[@rel='subsection']/@href"/>
                     </xsl:attribute>
-                    <div class="h-full bg-gradient-to-br from-indigo-100 to-purple-100 dark:from-indigo-900 dark:to-purple-900 flex flex-col items-center justify-center p-4 text-center border border-indigo-200 dark:border-indigo-700">
+                    <div class="h-full bg-slate-100 flex flex-col items-center justify-center p-4 text-center border border-slate-200 dark:bg-slate-800 dark:border-slate-700">
                         <xsl:variable name="letter" select="substring-after(atom:id, 'urn:author-letter:')"/>
-                        <div class="text-5xl font-bold text-indigo-600 dark:text-indigo-300 mb-2">
+                        <div class="text-4xl font-bold text-slate-600 dark:text-slate-300 mb-2">
                             <xsl:value-of select="$letter"/>
                         </div>
-                        <div class="font-semibold text-slate-700 transition-colors dark:text-slate-300 text-sm"><xsl:value-of select="atom:title"/></div>
+                        <div class="text-sm text-slate-500 mt-1 dark:text-slate-400">Auteurs</div>
                     </div>
                 </a>
             </xsl:when>

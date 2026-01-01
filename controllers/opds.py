@@ -483,31 +483,15 @@ class BookScanner:
         return sorted_authors
 
     def get_letters_with_author_counts(self):
-        """Get all letters that have authors, with count of authors per letter.
+        """Get all letters A-Z plus '#' for navigation.
         
-        Returns list of (letter, count) tuples for A-Z and '#' for special chars.
+        Returns list of letters for A-Z and '#' for special chars.
+        No counting for performance.
         """
-        authors = self.get_authors_with_counts()
-        letter_counts = {}
-        
-        for author, count in authors:
-            if author == 'Unknown':
-                first_char = '#'
-            else:
-                first_char = author[0].upper() if author else '#'
-                if not first_char.isalpha():
-                    first_char = '#'
-            
-            if first_char not in letter_counts:
-                letter_counts[first_char] = 0
-            letter_counts[first_char] += 1
-        
-        # Sort: A-Z first, then '#'
-        sorted_letters = sorted(
-            letter_counts.items(),
-            key=lambda x: (x[0] == '#', x[0])
-        )
-        return sorted_letters
+        # Return all letters A-Z + '#' without counting
+        letters = [chr(i) for i in range(ord('A'), ord('Z') + 1)]
+        letters.append('#')
+        return letters
 
     def get_authors_by_letter(self, letter, page, size):
         """Get paginated authors starting with a specific letter.
@@ -951,14 +935,14 @@ class OPDSController:
             ),
         ]
 
-        letters_with_counts = self.book_scanner.get_letters_with_author_counts()
+        letters = self.book_scanner.get_letters_with_author_counts()
         entries = []
-        for letter, count in letters_with_counts:
+        for letter in letters:
             letter_id = f'urn:author-letter:{letter}'
             encoded_letter = quote(letter)
             display_letter = letter if letter != '#' else '# (Autres)'
             entries.append({
-                'title': f'{display_letter} ({count} auteurs)',
+                'title': display_letter,
                 'id': letter_id,
                 'links': [
                     (
@@ -998,9 +982,8 @@ class OPDSController:
 
         # Add letter navigation links
         all_letters = self.book_scanner.get_letters_with_author_counts()
-        for nav_letter, _ in all_letters:
+        for nav_letter in all_letters:
             encoded_nav_letter = quote(nav_letter)
-            rel = 'related' if nav_letter != letter else 'self'
             links.append(
                 (
                     f'http://opds-spec.org/facet#{nav_letter}',
