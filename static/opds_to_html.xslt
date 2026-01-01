@@ -93,7 +93,7 @@
                             <div class="flex-grow h-px bg-gradient-to-r from-transparent via-slate-300 to-transparent dark:via-slate-700"></div>
                             <div class="flex items-center gap-2 text-slate-500 dark:text-slate-400">
                                 <i data-lucide="hard-drive" class="w-5 h-5"></i>
-                                <span class="text-sm font-medium uppercase tracking-wider">Dossiers sur disque</span>
+                                <span class="text-sm font-medium uppercase tracking-wider">Files on disk</span>
                             </div>
                             <div class="flex-grow h-px bg-gradient-to-r from-transparent via-slate-300 to-transparent dark:via-slate-700"></div>
                         </div>
