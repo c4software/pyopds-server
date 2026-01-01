@@ -201,6 +201,9 @@ class BookScanner:
         self.security = SecurityUtils()
         self._all_paths_cache = None
         self._all_books_metadata_cache = None
+        # Lightweight index caches: only store path -> year/author mapping
+        self._year_index = None  # {year: [paths...]}
+        self._author_index = None  # {author: [paths...]}
         self._recent_books_cache = None
         self._recent_books_cache_time = 0
         self.RECENT_CACHE_TTL = 300
@@ -452,20 +455,59 @@ class BookScanner:
         self._all_books_metadata_cache = books
         return books
 
+    def _build_year_author_indexes(self):
+        """Build lightweight indexes for year and author lookups.
+        
+        Only extracts minimal metadata (year, author) without full book info.
+        Much faster than collect_all_books_with_metadata.
+        """
+        if self._year_index is not None and self._author_index is not None:
+            return
+        
+        if self._all_paths_cache is None:
+            self._all_paths_cache = self.collect_all_epub_paths()
+        
+        year_index = {}  # {year: [paths...]}
+        author_index = {}  # {author: [paths...]}
+        
+        for path in self._all_paths_cache:
+            relative_path = os.path.relpath(path, LIBRARY_DIR)
+            if self.security.has_path_traversal(relative_path) or not self.security.is_within_library_dir(path):
+                continue
+            
+            _, author, pub_date = self.metadata_extractor.extract_epub_metadata(path)
+            author = author or 'Unknown'
+            year = self._extract_year(pub_date)
+            
+            if year not in year_index:
+                year_index[year] = []
+            year_index[year].append(path)
+            
+            if author not in author_index:
+                author_index[author] = []
+            author_index[author].append(path)
+        
+        # Sort paths within each group by filename for consistent ordering
+        for paths in year_index.values():
+            paths.sort(key=lambda p: os.path.basename(p).lower())
+        for paths in author_index.values():
+            paths.sort(key=lambda p: os.path.basename(p).lower())
+        
+        self._year_index = year_index
+        self._author_index = author_index
+
     def get_years_with_counts(self):
         """Get all publication years with book counts.
         
         Returns list of (year, count) tuples sorted by year descending.
         """
-        books = self.collect_all_books_with_metadata()
-        year_counts = {}
-        for book in books:
-            year = book['year']
-            year_counts[year] = year_counts.get(year, 0) + 1
+        self._build_year_author_indexes()
+        
+        year_counts = [(year, len(paths)) for year, paths in self._year_index.items()]
         
         # Sort years: known years descending, 'Unknown' at the end
         sorted_years = sorted(
-            year_counts.items(),
+            year_counts,
             key=lambda x: (x[0] == 'Unknown', -int(x[0]) if x[0] != 'Unknown' else 0)
         )
         return sorted_years
@@ -475,15 +517,13 @@ class BookScanner:
         
         Returns list of (author, count) tuples sorted alphabetically.
         """
-        books = self.collect_all_books_with_metadata()
-        author_counts = {}
-        for book in books:
-            author = book['author']
-            author_counts[author] = author_counts.get(author, 0) + 1
+        self._build_year_author_indexes()
+        
+        author_counts = [(author, len(paths)) for author, paths in self._author_index.items()]
         
         # Sort authors alphabetically, 'Unknown' at the end
         sorted_authors = sorted(
-            author_counts.items(),
+            author_counts,
             key=lambda x: (x[0] == 'Unknown', x[0].lower())
         )
         return sorted_authors
@@ -538,6 +578,9 @@ class BookScanner:
     def get_books_for_year(self, year, page, size):
         """Get paginated books for a specific year.
         
+        Uses the same pattern as get_all_books_paginated: 
+        only extracts full metadata for the current page's books.
+        
         Args:
             year: Publication year string
             page: Page number (1-indexed)
@@ -546,19 +589,39 @@ class BookScanner:
         Returns:
             tuple: (list of book dicts, total count)
         """
-        books = self.collect_all_books_with_metadata()
-        year_books = [b for b in books if b['year'] == year]
-        # Sort by title
-        year_books.sort(key=lambda x: x['title'].lower())
+        self._build_year_author_indexes()
         
-        total_count = len(year_books)
+        paths = self._year_index.get(year, [])
+        total_count = len(paths)
+        
         start = (page - 1) * size
         end = start + size
+        paginated_paths = paths[start:end]
         
-        return year_books[start:end], total_count
+        # Only extract full metadata for current page (like get_all_books_paginated)
+        paginated_books = []
+        for path in paginated_paths:
+            relative_path = os.path.relpath(path, LIBRARY_DIR)
+            title, author, pub_date = self.metadata_extractor.extract_epub_metadata(path)
+            title = title or os.path.basename(path)
+            author = author or 'Unknown'
+            paginated_books.append({
+                'path': path,
+                'relative_path': relative_path,
+                'title': title,
+                'author': author,
+                'publication_date': pub_date,
+                'year': self._extract_year(pub_date),
+                'mtime': os.path.getmtime(path),
+            })
+        
+        return paginated_books, total_count
 
     def get_books_for_author(self, author, page, size):
         """Get paginated books for a specific author.
+        
+        Uses the same pattern as get_all_books_paginated: 
+        only extracts full metadata for the current page's books.
         
         Args:
             author: Author name
@@ -568,16 +631,33 @@ class BookScanner:
         Returns:
             tuple: (list of book dicts, total count)
         """
-        books = self.collect_all_books_with_metadata()
-        author_books = [b for b in books if b['author'] == author]
-        # Sort by title
-        author_books.sort(key=lambda x: x['title'].lower())
+        self._build_year_author_indexes()
         
-        total_count = len(author_books)
+        paths = self._author_index.get(author, [])
+        total_count = len(paths)
+        
         start = (page - 1) * size
         end = start + size
+        paginated_paths = paths[start:end]
         
-        return author_books[start:end], total_count
+        # Only extract full metadata for current page (like get_all_books_paginated)
+        paginated_books = []
+        for path in paginated_paths:
+            relative_path = os.path.relpath(path, LIBRARY_DIR)
+            title, book_author, pub_date = self.metadata_extractor.extract_epub_metadata(path)
+            title = title or os.path.basename(path)
+            book_author = book_author or 'Unknown'
+            paginated_books.append({
+                'path': path,
+                'relative_path': relative_path,
+                'title': title,
+                'author': book_author,
+                'publication_date': pub_date,
+                'year': self._extract_year(pub_date),
+                'mtime': os.path.getmtime(path),
+            })
+        
+        return paginated_books, total_count
 
 
 class OPDSController:
