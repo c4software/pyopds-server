@@ -77,9 +77,35 @@
                         </button>
                     </div>
                 </div>
-                <div class="p-4 sm:p-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 sm:gap-6">
-                    <xsl:apply-templates select="atom:entry"/>
-                </div>
+                <!-- System Collections -->
+                <xsl:if test="atom:entry[atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author')]">
+                    <div class="p-4 sm:p-6">
+                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 sm:gap-6">
+                            <xsl:apply-templates select="atom:entry[atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author')]"/>
+                        </div>
+                    </div>
+                </xsl:if>
+
+                <!-- Divider between System Collections and Disk Folders -->
+                <xsl:if test="atom:entry[atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author')] and atom:entry[atom:link[@rel='subsection'] and not(atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author' or starts-with(atom:id, 'urn:author-letter:') or starts-with(atom:id, 'urn:author:'))]">
+                    <div class="px-4 sm:px-6 py-6">
+                        <div class="flex items-center gap-4">
+                            <div class="flex-grow h-px bg-gradient-to-r from-transparent via-slate-300 to-transparent dark:via-slate-700"></div>
+                            <div class="flex items-center gap-2 text-slate-500 dark:text-slate-400">
+                                <i data-lucide="hard-drive" class="w-5 h-5"></i>
+                                <span class="text-sm font-medium uppercase tracking-wider">Dossiers sur disque</span>
+                            </div>
+                            <div class="flex-grow h-px bg-gradient-to-r from-transparent via-slate-300 to-transparent dark:via-slate-700"></div>
+                        </div>
+                    </div>
+                </xsl:if>
+
+                <!-- Disk Folders and other entries -->
+                <xsl:if test="atom:entry[not(atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author'))]">
+                    <div class="p-4 sm:p-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 sm:gap-6">
+                        <xsl:apply-templates select="atom:entry[not(atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author'))]"/>
+                    </div>
+                </xsl:if>
 
                 <!-- Letter Navigation for Author pages -->
                 <xsl:if test="atom:link[starts-with(@rel, 'http://opds-spec.org/facet#')]">
