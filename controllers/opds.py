@@ -200,6 +200,7 @@ class BookScanner:
         self.metadata_extractor = BookMetadata()
         self.security = SecurityUtils()
         self._all_paths_cache = None
+        self._all_books_metadata_cache = None
         self._recent_books_cache = None
         self._recent_books_cache_time = 0
         self.RECENT_CACHE_TTL = 300
@@ -421,9 +422,12 @@ class BookScanner:
     def collect_all_books_with_metadata(self):
         """Collect all books with full metadata.
         
-        Uses cached paths if available.
+        Uses cached metadata if available for better performance.
         Returns list of book info dicts with metadata.
         """
+        if self._all_books_metadata_cache is not None:
+            return self._all_books_metadata_cache
+        
         if self._all_paths_cache is None:
             self._all_paths_cache = self.collect_all_epub_paths()
         
@@ -444,6 +448,8 @@ class BookScanner:
                 'year': self._extract_year(pub_date),
                 'mtime': os.path.getmtime(path),
             })
+        
+        self._all_books_metadata_cache = books
         return books
 
     def get_years_with_counts(self):
