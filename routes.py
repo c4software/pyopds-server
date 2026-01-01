@@ -72,6 +72,7 @@ def register_routes(router):
     router.get('/opds/by-year', (OPDSController, 'show_by_year_catalog'), name='opds.by-year')
     router.get(r'/opds/by-year/.*', (OPDSController, 'show_year_books'), name='opds.year')
     router.get('/opds/by-author', (OPDSController, 'show_by_author_catalog'), name='opds.by-author')
+    router.get(r'/opds/by-author/letter/.*', (OPDSController, 'show_author_letter_catalog'), name='opds.author-letter')
     router.get(r'/opds/by-author/.*', (OPDSController, 'show_author_books'), name='opds.author')
     router.get(r'/opds/folder/.*', (OPDSController, 'show_folder_catalog'), name='opds.folder')
     router.get('/opds_to_html.xslt', (OPDSController, 'serve_xslt'), name='opds.xslt')

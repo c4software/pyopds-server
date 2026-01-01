@@ -81,6 +81,18 @@
                     <xsl:apply-templates select="atom:entry"/>
                 </div>
 
+                <!-- Letter Navigation for Author pages -->
+                <xsl:if test="atom:link[starts-with(@rel, 'http://opds-spec.org/facet#')]">
+                    <div class="flex flex-wrap justify-center items-center gap-2 p-4 sm:p-6 bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700">
+                        <xsl:for-each select="atom:link[starts-with(@rel, 'http://opds-spec.org/facet#')]">
+                            <xsl:variable name="letter" select="substring-after(@rel, 'http://opds-spec.org/facet#')"/>
+                            <a href="{@href}" class="px-3 py-2 rounded-md text-sm font-medium transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 shadow-sm">
+                                <xsl:value-of select="$letter"/>
+                            </a>
+                        </xsl:for-each>
+                    </div>
+                </xsl:if>
+
                 <xsl:if test="atom:link[@rel='first'] or atom:link[@rel='previous'] or atom:link[@rel='next'] or atom:link[@rel='last']">
                     <div class="flex justify-center items-center space-x-2 p-4 sm:p-6">
                         <xsl:if test="atom:link[@rel='first'] and atom:link[@rel='previous']">
@@ -134,8 +146,21 @@
                         parentPath = '/opds/by-year';
                     } else if (currentPath === '/opds/by-year' || currentPath === '/opds/by-author') {
                         parentPath = '/opds';
-                    } else if (currentPath.startsWith('/opds/by-author/')) {
+                    } else if (currentPath.startsWith('/opds/by-author/letter/')) {
                         parentPath = '/opds/by-author';
+                    } else if (currentPath.startsWith('/opds/by-author/')) {
+                        // Get the letter from the author name for proper back navigation
+                        const authorPart = decodeURIComponent(currentPath.substring('/opds/by-author/'.length));
+                        if (authorPart &amp;&amp; !authorPart.startsWith('letter/')) {
+                            const firstChar = authorPart.charAt(0).toUpperCase();
+                            if (/[A-Z]/.test(firstChar)) {
+                                parentPath = '/opds/by-author/letter/' + firstChar + '?page=1';
+                            } else {
+                                parentPath = '/opds/by-author/letter/%23?page=1';
+                            }
+                        } else {
+                            parentPath = '/opds/by-author';
+                        }
                     }
 
                     if (parentPath) {
@@ -264,6 +289,34 @@
                         </xsl:choose>
                         <div class="font-semibold text-slate-700 transition-colors dark:text-slate-300"><xsl:value-of select="atom:title"/></div>
                         <div class="text-sm text-slate-500 mt-1 dark:text-slate-400">System collection</div>
+                    </div>
+                </a>
+            </xsl:when>
+            <!-- Letter entries for author navigation -->
+            <xsl:when test="atom:link[@rel='subsection'] and starts-with(atom:id, 'urn:author-letter:')">
+                <a class="block group rounded-lg overflow-hidden transition-all duration-300 transform hover:-translate-y-1 hover:shadow-xl aspect-[2/3]">
+                    <xsl:attribute name="href">
+                        <xsl:value-of select="atom:link[@rel='subsection']/@href"/>
+                    </xsl:attribute>
+                    <div class="h-full bg-gradient-to-br from-indigo-100 to-purple-100 dark:from-indigo-900 dark:to-purple-900 flex flex-col items-center justify-center p-4 text-center border border-indigo-200 dark:border-indigo-700">
+                        <xsl:variable name="letter" select="substring-after(atom:id, 'urn:author-letter:')"/>
+                        <div class="text-5xl font-bold text-indigo-600 dark:text-indigo-300 mb-2">
+                            <xsl:value-of select="$letter"/>
+                        </div>
+                        <div class="font-semibold text-slate-700 transition-colors dark:text-slate-300 text-sm"><xsl:value-of select="atom:title"/></div>
+                    </div>
+                </a>
+            </xsl:when>
+            <!-- Author entries (with book count) -->
+            <xsl:when test="atom:link[@rel='subsection'] and starts-with(atom:id, 'urn:author:')">
+                <a class="block group rounded-lg overflow-hidden transition-all duration-300 transform hover:-translate-y-1 hover:shadow-xl aspect-[2/3]">
+                    <xsl:attribute name="href">
+                        <xsl:value-of select="atom:link[@rel='subsection']/@href"/>
+                    </xsl:attribute>
+                    <div class="h-full bg-slate-100 flex flex-col items-center justify-center p-4 text-center border border-slate-200 dark:bg-slate-800 dark:border-slate-700">
+                        <i data-lucide="user" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
+                        <div class="font-semibold text-slate-700 transition-colors dark:text-slate-300"><xsl:value-of select="atom:title"/></div>
+                        <div class="text-sm text-slate-500 mt-1 dark:text-slate-400">Auteur</div>
                     </div>
                 </a>
             </xsl:when>

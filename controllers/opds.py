@@ -482,6 +482,69 @@ class BookScanner:
         )
         return sorted_authors
 
+    def get_letters_with_author_counts(self):
+        """Get all letters that have authors, with count of authors per letter.
+        
+        Returns list of (letter, count) tuples for A-Z and '#' for special chars.
+        """
+        authors = self.get_authors_with_counts()
+        letter_counts = {}
+        
+        for author, count in authors:
+            if author == 'Unknown':
+                first_char = '#'
+            else:
+                first_char = author[0].upper() if author else '#'
+                if not first_char.isalpha():
+                    first_char = '#'
+            
+            if first_char not in letter_counts:
+                letter_counts[first_char] = 0
+            letter_counts[first_char] += 1
+        
+        # Sort: A-Z first, then '#'
+        sorted_letters = sorted(
+            letter_counts.items(),
+            key=lambda x: (x[0] == '#', x[0])
+        )
+        return sorted_letters
+
+    def get_authors_by_letter(self, letter, page, size):
+        """Get paginated authors starting with a specific letter.
+        
+        Args:
+            letter: Single letter (A-Z) or '#' for special chars
+            page: Page number (1-indexed)
+            size: Number of authors per page
+        
+        Returns:
+            tuple: (list of (author, count) tuples, total count)
+        """
+        all_authors = self.get_authors_with_counts()
+        
+        def matches_letter(author_name, target_letter):
+            if target_letter == '#':
+                if author_name == 'Unknown':
+                    return True
+                if not author_name:
+                    return True
+                return not author_name[0].upper().isalpha()
+            else:
+                if not author_name or author_name == 'Unknown':
+                    return False
+                return author_name[0].upper() == target_letter.upper()
+        
+        filtered_authors = [
+            (author, count) for author, count in all_authors
+            if matches_letter(author, letter)
+        ]
+        
+        total_count = len(filtered_authors)
+        start = (page - 1) * size
+        end = start + size
+        
+        return filtered_authors[start:end], total_count
+
     def get_books_for_year(self, year, page, size):
         """Get paginated books for a specific year.
         
@@ -603,8 +666,12 @@ class OPDSController:
         self._handle_year_books()
 
     def show_by_author_catalog(self):
-        """Display catalog of authors with book counts."""
+        """Display catalog of letters for author navigation."""
         self._handle_by_author_catalog()
+
+    def show_author_letter_catalog(self):
+        """Display catalog of authors for a specific letter."""
+        self._handle_author_letter_catalog()
 
     def show_author_books(self):
         """Display books for a specific author."""
@@ -870,7 +937,7 @@ class OPDSController:
         self._send_xml_response(xml, 'acquisition')
 
     def _handle_by_author_catalog(self):
-        """Handle display of authors catalog."""
+        """Handle display of letters catalog for authors."""
         links = [
             (
                 'self',
@@ -884,13 +951,70 @@ class OPDSController:
             ),
         ]
 
-        authors_with_counts = self.book_scanner.get_authors_with_counts()
+        letters_with_counts = self.book_scanner.get_letters_with_author_counts()
         entries = []
-        for author, count in authors_with_counts:
+        for letter, count in letters_with_counts:
+            letter_id = f'urn:author-letter:{letter}'
+            encoded_letter = quote(letter)
+            display_letter = letter if letter != '#' else '# (Autres)'
+            entries.append({
+                'title': f'{display_letter} ({count} auteurs)',
+                'id': letter_id,
+                'links': [
+                    (
+                        'subsection',
+                        f'/opds/by-author/letter/{encoded_letter}?page=1',
+                        'application/atom+xml;profile=opds-catalog;kind=navigation',
+                    )
+                ],
+            })
+
+        xml = self.feed_generator.generate_feed('By Author', 'urn:by-author', links, entries)
+        self._send_xml_response(xml, 'navigation')
+
+    def _handle_author_letter_catalog(self):
+        """Handle display of authors for a specific letter."""
+        page, size, parsed_url = self._parse_url_params()
+        letter = unquote(parsed_url.path[len('/opds/by-author/letter/'):])
+        path_base = parsed_url.path
+
+        paginated_authors, total_count = self.book_scanner.get_authors_by_letter(letter, page, size)
+
+        links = self._get_pagination_links(path_base, page, size, total_count)
+        links.append(
+            (
+                'start',
+                '/opds',
+                'application/atom+xml;profile=opds-catalog;kind=navigation',
+            )
+        )
+        links.append(
+            (
+                'up',
+                '/opds/by-author',
+                'application/atom+xml;profile=opds-catalog;kind=navigation',
+            )
+        )
+
+        # Add letter navigation links
+        all_letters = self.book_scanner.get_letters_with_author_counts()
+        for nav_letter, _ in all_letters:
+            encoded_nav_letter = quote(nav_letter)
+            rel = 'related' if nav_letter != letter else 'self'
+            links.append(
+                (
+                    f'http://opds-spec.org/facet#{nav_letter}',
+                    f'/opds/by-author/letter/{encoded_nav_letter}?page=1',
+                    'application/atom+xml;profile=opds-catalog;kind=navigation',
+                )
+            )
+
+        entries = []
+        for author, count in paginated_authors:
             author_id = f'urn:author:{hashlib.md5(author.encode()).hexdigest()}'
             encoded_author = quote(author)
             entries.append({
-                'title': f'{author} ({count} books)',
+                'title': f'{author} ({count} livres)',
                 'id': author_id,
                 'links': [
                     (
@@ -901,7 +1025,13 @@ class OPDSController:
                 ],
             })
 
-        xml = self.feed_generator.generate_feed('By Author', 'urn:by-author', links, entries)
+        total_pages = self._get_total_pages(total_count, size)
+        display_letter = letter if letter != '#' else '# (Autres)'
+        title = f'Auteurs - {display_letter}'
+        if total_pages > 1:
+            title = f'{title} (Page {page} of {total_pages})'
+
+        xml = self.feed_generator.generate_feed(title, f'urn:author-letter:{letter}', links, entries)
         self._send_xml_response(xml, 'navigation')
 
     def _handle_author_books(self):
