@@ -1290,15 +1290,8 @@ class OPDSController:
             )
         )
 
-        if total_pages > 1:
-            links.append(
-                (
-                    'first',
-                    f'{path_base}?page=1',
-                    'application/atom+xml;profile=opds-catalog;kind=acquisition',
-                )
-            )
-
+        # No rel="first"/"last": some clients (CrossPoint Sync app) list them as navigation rows;
+        # the HTML view builds its first/last page buttons itself
         if current_page < total_pages:
             links.append(
                 (
@@ -1317,15 +1310,6 @@ class OPDSController:
                 )
             )
 
-        if total_pages > 1:
-            links.append(
-                (
-                    'last',
-                    f'{path_base}?page={total_pages}',
-                    'application/atom+xml;profile=opds-catalog;kind=acquisition',
-                )
-            )
-
         return links
 
     def _validate_folder_access(self, folder_full_path):
@@ -1340,12 +1324,16 @@ class OPDSController:
             book_id = f'urn:book:{hashlib.md5(file_info["relative_path"].encode()).hexdigest()}'
             encoded_path = quote(file_info['relative_path'].replace(os.sep, '/'))
 
+            # Cover links are always listed: /cover/ answers 404 when the EPUB has none,
+            # which OPDS clients treat as "no cover" (checking here would open every EPUB)
             entry_links = [
                 (
                     'http://opds-spec.org/acquisition/open-access',
                     f'/download/{encoded_path}',
                     'application/epub+zip',
-                )
+                ),
+                ('http://opds-spec.org/image', f'/cover/{encoded_path}', 'image/jpeg'),
+                ('http://opds-spec.org/image/thumbnail', f'/cover/{encoded_path}', 'image/jpeg'),
             ]
 
             entries.append(
@@ -1521,24 +1509,6 @@ class OPDSController:
                 (
                     'previous',
                     f'{path_base}?{prev_query}',
-                    'application/atom+xml;profile=opds-catalog;kind=acquisition',
-                )
-            )
-        
-        if total_pages > 1:
-            first_query = f'q={quote(query)}&page=1'
-            last_query = f'q={quote(query)}&page={total_pages}'
-            links.append(
-                (
-                    'first',
-                    f'{path_base}?{first_query}',
-                    'application/atom+xml;profile=opds-catalog;kind=acquisition',
-                )
-            )
-            links.append(
-                (
-                    'last',
-                    f'{path_base}?{last_query}',
                     'application/atom+xml;profile=opds-catalog;kind=acquisition',
                 )
             )

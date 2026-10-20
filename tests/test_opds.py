@@ -147,9 +147,16 @@ class TestOPDSCatalog(unittest.TestCase):
         self.assertEqual(first_entry.find('atom:title', ns).text, 'Alpha Title')
         link_hrefs = {link.get('href') for link in first_entry.findall('atom:link', ns)}
         self.assertIn('/download/alpha.epub', link_hrefs)
+        # OPDS clients (KoReader, CrossPoint Sync app) only show covers declared in the feed
+        rels = {link.get('rel'): link.get('href') for link in first_entry.findall('atom:link', ns)}
+        self.assertEqual(rels['http://opds-spec.org/image'], '/cover/alpha.epub')
+        self.assertEqual(rels['http://opds-spec.org/image/thumbnail'], '/cover/alpha.epub')
         pagination_links = {link.get('rel'): link.get('href') for link in feed.findall('atom:link', ns)}
         self.assertIn('next', pagination_links)
         self.assertTrue(pagination_links['next'].endswith('page=2'))
+        # The CrossPoint Sync app would list first/last as navigation rows
+        self.assertNotIn('first', pagination_links)
+        self.assertNotIn('last', pagination_links)
         status2, _, body2 = self._get('/opds/books?page=2')
         self.assertEqual(status2, 200)
         feed2 = self._parse_feed(body2)

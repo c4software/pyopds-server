@@ -155,7 +155,7 @@
                 </xsl:if>
 
                 <!-- Unified Navigation: Letter Navigation + Pagination -->
-                <xsl:if test="atom:link[starts-with(@rel, 'http://opds-spec.org/facet#')] or atom:link[@rel='first'] or atom:link[@rel='previous'] or atom:link[@rel='next'] or atom:link[@rel='last']">
+                <xsl:if test="atom:link[starts-with(@rel, 'http://opds-spec.org/facet#')] or atom:link[@rel='previous'] or atom:link[@rel='next']">
                     <div class="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700">
                         <div class="p-4 sm:p-6">
                             <!-- Letter Navigation (for author pages) -->
@@ -171,19 +171,17 @@
                             </xsl:if>
 
                             <!-- Enhanced Pagination -->
-                            <xsl:if test="atom:link[@rel='first'] or atom:link[@rel='previous'] or atom:link[@rel='next'] or atom:link[@rel='last']">
+                            <xsl:if test="atom:link[@rel='previous'] or atom:link[@rel='next']">
                                 <div class="flex flex-col sm:flex-row justify-center items-center gap-4">
                                     <!-- Page Info -->
                                     <div id="page-info" class="text-sm text-slate-600 dark:text-slate-400 font-medium"></div>
                                     
                                     <!-- Pagination Controls -->
                                     <div class="flex items-center gap-2">
-                                        <!-- First Page -->
-                                        <xsl:if test="atom:link[@rel='first'] and atom:link[@rel='previous']">
-                                            <a href="{atom:link[@rel='first']/@href}" class="p-2 rounded-md bg-white text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 shadow-sm transition-colors" title="Première page">
+                                        <!-- First Page (href set by setupPagination) -->
+                                        <a id="first-page" hidden="hidden" class="p-2 rounded-md bg-white text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 shadow-sm transition-colors" title="Première page">
                                                 <i data-lucide="chevrons-left" class="w-5 h-5"></i>
                                             </a>
-                                        </xsl:if>
                                         
                                         <!-- Previous Page -->
                                         <xsl:if test="atom:link[@rel='previous']">
@@ -202,12 +200,10 @@
                                             </a>
                                         </xsl:if>
                                         
-                                        <!-- Last Page -->
-                                        <xsl:if test="atom:link[@rel='last'] and atom:link[@rel='next']">
-                                            <a href="{atom:link[@rel='last']/@href}" class="p-2 rounded-md bg-white text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 shadow-sm transition-colors" title="Dernière page">
+                                        <!-- Last Page (href set by setupPagination) -->
+                                        <a id="last-page" hidden="hidden" class="p-2 rounded-md bg-white text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 shadow-sm transition-colors" title="Dernière page">
                                                 <i data-lucide="chevrons-right" class="w-5 h-5"></i>
                                             </a>
-                                        </xsl:if>
                                     </div>
                                 </div>
                             </xsl:if>
@@ -419,9 +415,23 @@
                         // Display page info
                         pageInfoEl.textContent = `Page ${currentPage} of ${totalPages}`;
                         
-                        // Get base URL (remove query params)
-                        const currentUrl = new URL(window.location.href);
-                        const baseUrl = currentUrl.pathname;
+                        // Same URL with another page number (keeps other parameters such as the search query)
+                        const pageUrl = function(pageNum) {
+                            const url = new URL(window.location.href);
+                            url.searchParams.set('page', pageNum);
+                            return url.pathname + url.search;
+                        };
+
+                        const firstPageEl = document.getElementById('first-page');
+                        if (firstPageEl &amp;&amp; currentPage > 1) {
+                            firstPageEl.href = pageUrl(1);
+                            firstPageEl.hidden = false;
+                        }
+                        const lastPageEl = document.getElementById('last-page');
+                        if (lastPageEl &amp;&amp; currentPage &lt; totalPages) {
+                            lastPageEl.href = pageUrl(totalPages);
+                            lastPageEl.hidden = false;
+                        }
                         
                         // Generate page numbers with smart truncation
                         const pageNumbers = [];
@@ -466,7 +476,7 @@
                                 pageNumbersEl.appendChild(ellipsis);
                             } else {
                                 const link = document.createElement('a');
-                                link.href = `${baseUrl}?page=${pageNum}`;
+                                link.href = pageUrl(pageNum);
                                 
                                 if (pageNum === currentPage) {
                                     link.className = 'px-3 py-2 rounded-md text-sm font-medium bg-slate-700 text-white dark:bg-slate-300 dark:text-slate-900 shadow-sm';
@@ -569,13 +579,24 @@
                         <xsl:value-of select="atom:link[@rel='http://opds-spec.org/acquisition/open-access']/@href"/>
                     </xsl:attribute>
                     <div class="book h-full flex flex-col p-4 text-center relative rounded-r-md shadow-md group-hover:shadow-xl transition-shadow duration-300 overflow-hidden">
-                        <xsl:variable name="downloadHref" select="atom:link[@rel='http://opds-spec.org/acquisition/open-access']/@href"/>
-                        <xsl:variable name="coverPath" select="concat('/cover/', substring-after($downloadHref, '/download/'))"/>
-                        
+                        <!-- Cover declared by the feed: thumbnail first, full image otherwise -->
+                        <xsl:variable name="coverPath">
+                            <xsl:choose>
+                                <xsl:when test="atom:link[@rel='http://opds-spec.org/image/thumbnail']">
+                                    <xsl:value-of select="atom:link[@rel='http://opds-spec.org/image/thumbnail']/@href"/>
+                                </xsl:when>
+                                <xsl:otherwise>
+                                    <xsl:value-of select="atom:link[@rel='http://opds-spec.org/image']/@href"/>
+                                </xsl:otherwise>
+                            </xsl:choose>
+                        </xsl:variable>
+
                         <img class="book-cover rounded-r-md" loading="lazy">
-                            <xsl:attribute name="data-cover-src">
-                                <xsl:value-of select="$coverPath"/>
-                            </xsl:attribute>
+                            <xsl:if test="string($coverPath)">
+                                <xsl:attribute name="data-cover-src">
+                                    <xsl:value-of select="$coverPath"/>
+                                </xsl:attribute>
+                            </xsl:if>
                             <xsl:attribute name="alt">
                                 <xsl:value-of select="atom:title"/>
                             </xsl:attribute>
