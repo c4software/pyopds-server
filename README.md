@@ -1,6 +1,8 @@
 # PyOPDS Server - OPDS Server for EPUB Library
 
-This project is a lightweight OPDS (Open Publication Distribution System) server written in Python 3, designed to expose a library of EPUB files stored in a local directory, compatible with clients like Calibre, KoReader, or any other OPDS-compliant reader. It uses only Python's standard libraries.
+This project is a lightweight OPDS (Open Publication Distribution System) server written in Python 3, designed to expose a library of EPUB files stored in a local directory, compatible with clients like Calibre, KoReader, [CrossPoint](https://github.com/crosspoint-reader/crosspoint-reader) readers, or any other OPDS-compliant reader. It uses only Python's standard libraries.
+
+It is also a reading progress sync server for KoReader and CrossPoint readers, compatible with the [CrossPoint Sync](https://github.com/crosspoint-reader/crosspoint-sync) app: library, reading statistics and clippings, with book details and covers taken from your EPUB library.
 
 ![Logo](./preview/ereader.jpeg)
 
@@ -17,7 +19,9 @@ If you browse your OPDS feed in a web browser, it will display a simple HTML rep
 - **Subdirectory Support**: Scans EPUB files in the configured directory and its subdirectories.
 - **Sorted by Most Recent**: Books are listed in the OPDS feed sorted by modification date, with the most recently modified files appearing first.
 - **Metadata Extraction**: Extracts title and author from EPUB files for rich display in the catalog.
-- **Reading Sync API**: KOSync-compatible progress sync for KoReader and CrossPoint readers, plus the CrossPoint Sync extensions (statistics, clippings, library) used by the CrossPoint Sync app.
+- **Book Covers**: Covers are extracted from the EPUB files and declared in the feed, so they show up in OPDS clients.
+- **Reading Sync API**: KOSync-compatible progress sync for KoReader and CrossPoint / CrossInk readers.
+- **CrossPoint Sync Compatible**: Implements the [crosspoint-sync](https://github.com/crosspoint-reader/crosspoint-sync) extensions (`/api/v1`): the CrossPoint Sync app shows your library, reading statuses, statistics, activity and clippings, and CrossPoint readers sync rich positions and clippings.
 - **Docker Deployment**: Includes a `Dockerfile` and `docker-compose.yml` for easy containerized deployment.
 - **Visual HTML Representation**: Provides a simple HTML view of the OPDS feed for easy browsing in web browsers (using XSLT transformation).
 
@@ -102,7 +106,7 @@ services:
 
 ## Usage with an OPDS Client
 
-1. In an OPDS-compatible client (e.g., KoReader or Calibre):
+1. In an OPDS-compatible client (e.g., KoReader, Calibre, or the *Browse* tab of the CrossPoint Sync app):
    - Add a new catalog with the URL: `http://<your-ip>:8080/opds`.
 2. Browse the book list at the `/opds/books` endpoint.
 3. Download books via the links provided in the OPDS feed.
@@ -111,7 +115,7 @@ services:
 
 The server includes a KOSync-compatible progress sync server, plus the CrossPoint Sync extensions (`/api/v1`) used by CrossPoint / CrossInk readers and the CrossPoint Sync app. Every endpoint is available both at the server root and under `/koreader/sync`.
 
-Data is stored in a local SQLite database (`KOREADER_SYNC_DB_PATH`). Databases created by older versions are migrated automatically on startup.
+Data is stored in a local SQLite database (`KOREADER_SYNC_DB_PATH`). Databases created by older versions are migrated automatically on the first sync request; back the file up before upgrading.
 
 ### KOSync endpoints
 
@@ -125,8 +129,8 @@ Errors, status codes and timestamps follow the reference KOSync server.
 ### Configuring the readers
 
 - **KoReader**: *Tools → Progress sync → Custom sync server* = `http://<your-ip>:8080/koreader/sync`.
-- **CrossPoint / CrossInk**: *Settings → KOReader Sync → Sync Server URL* = `http://<your-ip>:8080/koreader/sync` (or the root URL). Rich positions and clippings are synced as well.
-- **CrossPoint Sync app** (*Self-hosted*): `http://<your-ip>:8080`. Library, statuses, reading dates, merge of duplicate copies, reading statistics and activity, clippings and account management work. When a synced book matches an EPUB of the library (KoReader content hash, file name hash or file name), its title, author and cover come from the library.
+- **CrossPoint / CrossInk**: *Settings → KOReader Sync → Sync Server URL* = `http://<your-ip>:8080/koreader/sync` (or the root URL). Choose the *CrossPoint* (or *Other*) server type to sync rich positions; enable clippings sync in the same settings.
+- **CrossPoint Sync app** (*Self-hosted*): `http://<your-ip>:8080`. Library, statuses, reading dates, merge of duplicate copies, reading statistics and activity, clippings and account management work. When a synced book matches an EPUB of the library (KoReader content hash, file name hash or file name), its title, author, cover and an estimated print page count come from the library.
 
 ### CrossPoint Sync extensions (`/api/v1`)
 
