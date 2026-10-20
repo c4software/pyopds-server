@@ -328,14 +328,15 @@ class CrossPointSyncController(SyncControllerBase):
             document_aliases = aliases.get(row['document'], [])
             title, author, filename, cover_url = row['title'], row['author'], row['filename'], row['cover_url']
             page_count = row['page_count']
-            if not (title and author and filename and cover_url and page_count):
-                library_book = self._library_book([row['document'], *document_aliases], filename)
-                if library_book:
-                    title = title or library_book['title']
-                    author = author or library_book['author']
-                    filename = filename or library_book['filename']
-                    cover_url = cover_url or library_book['cover_url']
-                    page_count = page_count or library_book['page_count']
+            genres: list[str] = []
+            library_book = self._library_book([row['document'], *document_aliases], filename)
+            if library_book:
+                genres = library_book['genres']
+                title = title or library_book['title']
+                author = author or library_book['author']
+                filename = filename or library_book['filename']
+                cover_url = cover_url or library_book['cover_url']
+                page_count = page_count or library_book['page_count']
             position = None
             if row['position']:
                 try:
@@ -354,7 +355,7 @@ class CrossPointSyncController(SyncControllerBase):
                 'page_count': page_count,
                 'hardcover_slug': None,
                 'moods': [],
-                'genres': [],
+                'genres': genres,
                 'content_warnings': [],
                 'rating': None,
                 'series': None,

@@ -9,6 +9,8 @@ from xml.sax.saxutils import escape as xml_escape
 import zipfile
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
+from controllers.genres import MIN_GENRE_BOOKS, genre_key, normalize_genres
+
 LIBRARY_DIR = os.environ.get('LIBRARY_DIR', 'books')
 PAGE_SIZE = int(os.environ.get('PAGE_SIZE', 25))
 
@@ -44,11 +46,21 @@ class BookMetadata:
         Returns:
             tuple: (title, author, publication_date) or (None, None, None) if not found
         """
+        title, author, publication_date, _ = BookMetadata.extract_epub_details(epub_path)
+        return title, author, publication_date
+
+    @staticmethod
+    def extract_epub_details(epub_path: str) -> tuple[str | None, str | None, str | None, list[str]]:
+        """Extract title, author, publication date and genres (normalized dc:subject) in a single read.
+
+        Returns:
+            tuple: (title, author, publication_date, genres), (None, None, None, []) if not found
+        """
         try:
             with zipfile.ZipFile(epub_path) as zf:
                 opf_root, _ = BookMetadata._parse_opf_from_epub(zf)
                 if opf_root is None:
-                    return None, None, None
+                    return None, None, None, []
 
                 ns_dc = {'dc': 'http://purl.org/dc/elements/1.1/'}
                 title_elem = opf_root.find(".//dc:title", ns_dc)
@@ -57,10 +69,14 @@ class BookMetadata:
                 author = author_elem.text if author_elem is not None else None
                 date_elem = opf_root.find(".//dc:date", ns_dc)
                 publication_date = date_elem.text if date_elem is not None else None
+                subjects = [e.text for e in opf_root.findall(".//dc:subject", ns_dc) if e.text]
+                series_elem = opf_root.find(".//opf:meta[@name='calibre:series']", {'opf': 'http://www.idpf.org/2007/opf'})
+                series = series_elem.get('content') if series_elem is not None else None
+                genres = [name for _, name in normalize_genres(subjects, series)]
 
-                return title, author, publication_date
+                return title, author, publication_date, genres
         except Exception:
-            return None, None, None
+            return None, None, None, []
 
     @staticmethod
     def extract_epub_cover(epub_path: str) -> tuple[bytes | None, str | None]:
@@ -216,6 +232,7 @@ class BookScanner:
         # Lightweight index caches: only store path -> year/author mapping
         self._year_index = None  # {year: [paths...]}
         self._author_index = None  # {author: [paths...]}
+        self._genre_index = None  # {genre key: {'name': displayed genre, 'paths': [paths...]}}
         self._recent_books_cache = None
         self._recent_books_cache_time = 0
         self.RECENT_CACHE_TTL = 300
@@ -226,6 +243,7 @@ class BookScanner:
         self._all_books_metadata_cache = None
         self._year_index = None
         self._author_index = None
+        self._genre_index = None
         self._recent_books_cache = None
         self._recent_books_cache_time = 0
     
@@ -505,12 +523,12 @@ class BookScanner:
         return books
 
     def _build_year_author_indexes(self) -> None:
-        """Build lightweight indexes for year and author lookups.
+        """Build lightweight indexes for year, author and genre lookups.
         
-        Only extracts minimal metadata (year, author) without full book info.
+        Only extracts minimal metadata (year, author, subjects) without full book info.
         Much faster than collect_all_books_with_metadata.
         """
-        if self._year_index is not None and self._author_index is not None:
+        if self._year_index is not None and self._author_index is not None and self._genre_index is not None:
             return
         
         if self._all_paths_cache is None:
@@ -518,15 +536,19 @@ class BookScanner:
         
         year_index = {}  # {year: [paths...]}
         author_index = {}  # {author: [paths...]}
+        genre_index = {}  # {genre key: {'name': ..., 'paths': [...]}}
         
         for path in self._all_paths_cache:
             relative_path = os.path.relpath(path, LIBRARY_DIR)
             if self.security.has_path_traversal(relative_path) or not self.security.is_within_library_dir(path):
                 continue
             
-            _, author, pub_date = self.metadata_extractor.extract_epub_metadata(path)
+            _, author, pub_date, genres = self.metadata_extractor.extract_epub_details(path)
             author = author or 'Unknown'
             year = self._extract_year(pub_date)
+
+            for name in genres:
+                genre_index.setdefault(genre_key(name), {'name': name, 'paths': []})['paths'].append(path)
             
             if year not in year_index:
                 year_index[year] = []
@@ -541,9 +563,12 @@ class BookScanner:
             paths.sort(key=lambda p: os.path.basename(p).lower())
         for paths in author_index.values():
             paths.sort(key=lambda p: os.path.basename(p).lower())
+        for genre in genre_index.values():
+            genre['paths'].sort(key=lambda p: os.path.basename(p).lower())
         
         self._year_index = year_index
         self._author_index = author_index
+        self._genre_index = genre_index
 
     def get_years_with_counts(self) -> list[tuple[str, int]]:
         """Get all publication years with book counts.
@@ -576,6 +601,35 @@ class BookScanner:
             key=lambda x: (x[0] == 'Unknown', x[0].lower())
         )
         return sorted_authors
+
+    def get_genres_with_counts(self, min_books: int = MIN_GENRE_BOOKS) -> list[tuple[str, str, int]]:
+        """Get genres having at least `min_books` books.
+
+        Returns list of (genre key, displayed genre, count) tuples sorted alphabetically.
+        """
+        self._build_year_author_indexes()
+        genres = [
+            (key, genre['name'], len(genre['paths']))
+            for key, genre in self._genre_index.items()
+            if len(genre['paths']) >= min_books
+        ]
+        return sorted(genres, key=lambda g: g[0])
+
+    def get_books_for_genre(self, genre: str, page: int, size: int) -> tuple[str | None, list[dict], int]:
+        """Get paginated books of a genre, matched like the subjects ("sf" finds Science-fiction).
+
+        Returns:
+            tuple: (displayed genre or None when unknown, list of book dicts, total count)
+        """
+        self._build_year_author_indexes()
+        normalized = normalize_genres([genre])
+        entry = self._genre_index.get(normalized[0][0] if normalized else genre_key(genre))
+        if entry is None:
+            return None, [], 0
+        paths = entry['paths']
+        start = (page - 1) * size
+        books = [self._create_book_info_from_path(path) for path in paths[start:start + size]]
+        return entry['name'], books, len(paths)
 
     def get_letters_with_author_counts(self) -> list[str]:
         """Get all letters A-Z plus '#' for navigation.
@@ -850,6 +904,14 @@ class OPDSController:
         """Display books for a specific year."""
         self._handle_year_books()
 
+    def show_by_genre_catalog(self):
+        """Display catalog of genres with book counts."""
+        self._handle_by_genre_catalog()
+
+    def show_genre_books(self):
+        """Display books of a specific genre."""
+        self._handle_genre_books()
+
     def show_by_author_catalog(self):
         """Display catalog of letters for author navigation."""
         self._handle_by_author_catalog()
@@ -943,6 +1005,17 @@ class OPDSController:
                     (
                         'subsection',
                         '/opds/by-author',
+                        'application/atom+xml;profile=opds-catalog;kind=navigation',
+                    )
+                ],
+            },
+            {
+                'title': 'By Genre',
+                'id': 'urn:by-genre',
+                'links': [
+                    (
+                        'subsection',
+                        '/opds/by-genre',
                         'application/atom+xml;profile=opds-catalog;kind=navigation',
                     )
                 ],
@@ -1139,6 +1212,75 @@ class OPDSController:
             title = f'{title} (Page {page} of {total_pages})'
 
         xml = self.feed_generator.generate_feed(title, f'urn:year:{year}', links, entries)
+        self._send_xml_response(xml, 'acquisition')
+
+    def _handle_by_genre_catalog(self):
+        """Handle display of genres catalog."""
+        links = [
+            (
+                'self',
+                '/opds/by-genre',
+                'application/atom+xml;profile=opds-catalog;kind=navigation',
+            ),
+            (
+                'start',
+                '/opds',
+                'application/atom+xml;profile=opds-catalog;kind=navigation',
+            ),
+        ]
+
+        entries = []
+        for key, name, count in self.book_scanner.get_genres_with_counts():
+            entries.append({
+                'title': f'{name} ({count} books)',
+                'id': f'urn:genre:{quote(key)}',
+                'links': [
+                    (
+                        'subsection',
+                        f'/opds/by-genre/{quote(name)}?page=1',
+                        'application/atom+xml;profile=opds-catalog;kind=acquisition',
+                    )
+                ],
+            })
+
+        xml = self.feed_generator.generate_feed('By Genre', 'urn:by-genre', links, entries)
+        self._send_xml_response(xml, 'navigation')
+
+    def _handle_genre_books(self):
+        """Handle display of books for a specific genre."""
+        page, size, parsed_url = self._parse_url_params()
+        genre = unquote(parsed_url.path[len('/opds/by-genre/'):])
+        path_base = parsed_url.path
+
+        name, paginated_books, total_count = self.book_scanner.get_books_for_genre(genre, page, size)
+        if name is None:
+            self._send_error(404, 'Genre not found')
+            return
+
+        links = self._get_pagination_links(path_base, page, size, total_count)
+        links.append(
+            (
+                'start',
+                '/opds',
+                'application/atom+xml;profile=opds-catalog;kind=navigation',
+            )
+        )
+        links.append(
+            (
+                'up',
+                '/opds/by-genre',
+                'application/atom+xml;profile=opds-catalog;kind=navigation',
+            )
+        )
+
+        entries = self._create_book_entries(paginated_books)
+
+        total_pages = self._get_total_pages(total_count, size)
+        title = f'Genre {name}'
+        if total_pages > 1:
+            title = f'{title} (Page {page} of {total_pages})'
+
+        xml = self.feed_generator.generate_feed(title, f'urn:genre:{quote(genre_key(name))}', links, entries)
         self._send_xml_response(xml, 'acquisition')
 
     def _handle_by_author_catalog(self):

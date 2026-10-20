@@ -55,7 +55,7 @@ class TestCrossPointSync(unittest.TestCase):
         cls.previous_library_dir = os.environ.get('LIBRARY_DIR')
         os.environ['LIBRARY_DIR'] = cls.library_dir.name
         cls.book_path = os.path.join(cls.library_dir.name, 'Le Rouge et le Noir.epub')
-        create_epub(cls.book_path, 'Le Rouge et le Noir', 'Stendhal', date='1830-11-01')
+        create_epub(cls.book_path, 'Le Rouge et le Noir', 'Stendhal', date='1830-11-01', subjects=['romans historiques', 'lang:fr'])
         cls.novel_path = os.path.join(cls.library_dir.name, 'Roman.epub')
         create_novel_epub(cls.novel_path, [9000, 9000])
 
@@ -220,6 +220,7 @@ class TestCrossPointSync(unittest.TestCase):
         self.assertEqual(book['title'], 'Le Rouge et le Noir')
         self.assertEqual(book['author'], 'Stendhal')
         self.assertEqual(book['filename'], 'Le Rouge et le Noir.epub')
+        self.assertEqual(book['genres'], ['Roman historique'])
         self.assertEqual(book['status'], 'reading')
 
     def test_print_pages_estimated_from_library_epub(self):

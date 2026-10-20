@@ -35,6 +35,7 @@ Le projet suit une architecture de type MVC (Modèle-Vue-Contrôleur) simplifié
     * `crosspoint_sync.py` : Extensions CrossPoint Sync (`/api/v1`) utilisées par les liseuses CrossPoint et l'app CrossPoint Sync.
     * `sync_storage.py` : Stockage SQLite de la synchronisation (progression par appareil, documents, alias, stats, clippings).
     * `reading_activity.py` : Calculs purs des statistiques et de l'activité de lecture.
+    * `genres.py` : Normalisation des sujets EPUB (`dc:subject`) en genres pour la navigation « By Genre ».
     * `library_index.py` : Correspondance entre les hash de documents KoReader et les EPUB de la bibliothèque.
 * `static/` : Fichiers statiques (XSLT pour l'affichage navigateur).
 * `tests/` : Tests unitaires (`unittest`).

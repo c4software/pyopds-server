@@ -80,6 +80,8 @@ def register_routes(router):
     router.get('/opds/by-author', (OPDSController, 'show_by_author_catalog'), name='opds.by-author')
     router.get(r'/opds/by-author/letter/.*', (OPDSController, 'show_author_letter_catalog'), name='opds.author-letter')
     router.get(r'/opds/by-author/.*', (OPDSController, 'show_author_books'), name='opds.author')
+    router.get('/opds/by-genre', (OPDSController, 'show_by_genre_catalog'), name='opds.by-genre')
+    router.get(r'/opds/by-genre/.*', (OPDSController, 'show_genre_books'), name='opds.genre')
     router.get(r'/opds/folder/.*', (OPDSController, 'show_folder_catalog'), name='opds.folder')
     router.get('/opds/refresh', (OPDSController, 'refresh_cache'), name='opds.refresh')
     router.get('/opds/opensearch.xml', (OPDSController, 'serve_opensearch_description'), name='opds.opensearch')

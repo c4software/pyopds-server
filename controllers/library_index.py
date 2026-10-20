@@ -142,16 +142,17 @@ class LibraryIndex:
         return None
 
     def details(self, path: str) -> dict:
-        """Title, author, cover presence and estimated print pages, cached per file modification time."""
+        """Title, author, genres, cover presence and estimated print pages, cached per file modification time."""
         mtime = os.path.getmtime(path)
         cached = self._details_cache.get(path)
         if cached and cached[0] == mtime:
             return cached[1]
-        title, author, _ = BookMetadata.extract_epub_metadata(path)
+        title, author, _, genres = BookMetadata.extract_epub_details(path)
         cover, _ = BookMetadata.extract_epub_cover(path)
         details = {
             'title': title,
             'author': author,
+            'genres': genres,
             'has_cover': cover is not None,
             'page_count': estimate_print_pages(path),
             'relative_path': os.path.relpath(path, LIBRARY_DIR).replace(os.sep, '/'),
