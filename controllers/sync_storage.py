@@ -854,14 +854,15 @@ class SyncStorage:
             for r in rows
         ]
 
-    def activity_inputs(self, user: str) -> tuple[list[dict], dict[str, dict], dict[str, list[dict]]]:
-        """Progress history, document info and book statistics grouped by canonical document."""
+    def activity_inputs(self, user: str) -> tuple[list[dict], dict[str, dict], dict[str, list[dict]], dict[str, list[str]]]:
+        """Progress history, document info, book statistics grouped by canonical document, and aliases."""
         with self._get_connection() as conn:
             log_rows = [dict(r) for r in conn.execute('SELECT document, percentage, at FROM progress_log WHERE user = ?', (user,))]
             documents = {
                 r['document']: dict(r)
                 for r in conn.execute(
-                    'SELECT document, page_count, status, status_at, start_date, finished_date FROM documents WHERE user = ?', (user,)
+                    'SELECT document, filename, page_count, status, status_at, start_date, finished_date '
+                    'FROM documents WHERE user = ?', (user,)
                 )
             }
             alias_map = {
@@ -871,7 +872,8 @@ class SyncStorage:
             book_stats: dict[str, list[dict]] = {}
             for r in conn.execute('SELECT document, payload FROM stats_device_book WHERE user = ?', (user,)):
                 book_stats.setdefault(alias_map.get(r['document'], r['document']), []).append(json.loads(r['payload']))
-        return log_rows, documents, book_stats
+            aliases = self._aliases_by_document(conn, user)
+        return log_rows, documents, book_stats, aliases
 
     # --------------------------------------------------------------- clippings
 

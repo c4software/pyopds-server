@@ -327,13 +327,15 @@ class CrossPointSyncController(SyncControllerBase):
         for row in rows:
             document_aliases = aliases.get(row['document'], [])
             title, author, filename, cover_url = row['title'], row['author'], row['filename'], row['cover_url']
-            if not (title and author and filename and cover_url):
+            page_count = row['page_count']
+            if not (title and author and filename and cover_url and page_count):
                 library_book = self._library_book([row['document'], *document_aliases], filename)
                 if library_book:
                     title = title or library_book['title']
                     author = author or library_book['author']
                     filename = filename or library_book['filename']
                     cover_url = cover_url or library_book['cover_url']
+                    page_count = page_count or library_book['page_count']
             position = None
             if row['position']:
                 try:
@@ -349,7 +351,7 @@ class CrossPointSyncController(SyncControllerBase):
                 'status_at': row['status_at'],
                 'pause_reason': row['pause_reason'],
                 'cover_url': cover_url,
-                'page_count': row['page_count'],
+                'page_count': page_count,
                 'hardcover_slug': None,
                 'moods': [],
                 'genres': [],
@@ -548,11 +550,13 @@ class CrossPointSyncController(SyncControllerBase):
         if not document:
             return
         row = self.sync_storage.get_document(user, document) or {}
-        url = row.get('cover_url')
-        if not url:
+        url, pages = row.get('cover_url'), row.get('page_count')
+        if not url or not pages:
             library_book = self._library_book([self.sync_storage.resolve_document(user, document), document], row.get('filename'))
-            url = library_book['cover_url'] if library_book else None
-        self._send_json_response({'url': url, 'pages': row.get('page_count')})
+            if library_book:
+                url = url or library_book['cover_url']
+                pages = pages or library_book['page_count']
+        self._send_json_response({'url': url, 'pages': pages})
 
     def document_cover_candidates(self) -> None:
         """GET /api/v1/documents/{document}/cover/candidates: the library EPUB's cover, if any."""
@@ -728,7 +732,14 @@ class CrossPointSyncController(SyncControllerBase):
         if not math.isfinite(tz) or abs(tz) > 840:
             tz = 0
         tz = int(tz) if float(tz).is_integer() else tz
-        log_rows, documents, book_stats = self.sync_storage.activity_inputs(user)
+        log_rows, documents, book_stats, aliases = self.sync_storage.activity_inputs(user)
+        # Print pages estimated from the library EPUB when the reader did not set them
+        for document in {row['document'] for row in log_rows}:
+            info = documents.setdefault(document, {})
+            if not info.get('page_count'):
+                library_book = self._library_book([document, *aliases.get(document, [])], info.get('filename'))
+                if library_book:
+                    info['page_count'] = library_book['page_count']
         finished_dates, start_dates = {}, {}
         for document, snapshots in book_stats.items():
             combined = combine_book_stats(snapshots)

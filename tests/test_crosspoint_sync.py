@@ -11,12 +11,32 @@ import tempfile
 import threading
 import time
 import unittest
+import zipfile
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from test_opds import create_epub  # noqa: E402
+
+
+def create_novel_epub(path, chapter_chars, spine=True):
+    """EPUB whose chapters each hold `chapter_chars` characters of visible text."""
+    manifest = ''.join(f'<item id="c{i}" href="text/ch{i}.xhtml" media-type="application/xhtml+xml"/>' for i in range(len(chapter_chars)))
+    itemrefs = ''.join(f'<itemref idref="c{i}"/>' for i in range(len(chapter_chars))) if spine else ''
+    with zipfile.ZipFile(path, 'w') as zf:
+        zf.writestr('mimetype', 'application/epub+zip')
+        zf.writestr('META-INF/container.xml', '<?xml version="1.0"?><container version="1.0" '
+                    'xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles>'
+                    '<rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>'
+                    '</rootfiles></container>')
+        zf.writestr('OEBPS/content.opf', '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0">'
+                    '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Roman</dc:title>'
+                    f'<dc:creator>Auteur</dc:creator></metadata><manifest>{manifest}</manifest><spine>{itemrefs}</spine></package>')
+        for i, chars in enumerate(chapter_chars):
+            paragraphs = ''.join(f'<p>{"x" * 99} </p>\n' for _ in range(chars // 100))
+            zf.writestr(f'OEBPS/text/ch{i}.xhtml', '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Titre</title>'
+                        f'<style>p {{ margin: 0 }}</style></head><body>{paragraphs}</body></html>')
 
 
 class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
@@ -36,6 +56,8 @@ class TestCrossPointSync(unittest.TestCase):
         os.environ['LIBRARY_DIR'] = cls.library_dir.name
         cls.book_path = os.path.join(cls.library_dir.name, 'Le Rouge et le Noir.epub')
         create_epub(cls.book_path, 'Le Rouge et le Noir', 'Stendhal', date='1830-11-01')
+        cls.novel_path = os.path.join(cls.library_dir.name, 'Roman.epub')
+        create_novel_epub(cls.novel_path, [9000, 9000])
 
         for module in ('controllers.opds', 'controllers.sync_storage', 'controllers.koreader_sync',
                        'controllers.library_index', 'controllers.reading_activity', 'controllers.crosspoint_sync'):
@@ -199,6 +221,29 @@ class TestCrossPointSync(unittest.TestCase):
         self.assertEqual(book['author'], 'Stendhal')
         self.assertEqual(book['filename'], 'Le Rouge et le Noir.epub')
         self.assertEqual(book['status'], 'reading')
+
+    def test_print_pages_estimated_from_library_epub(self):
+        user = self.create_user('pages')
+        document = self.library_index.koreader_partial_md5(self.novel_path)
+        self.put_progress(user, document, 0.1, device_id='koreader')
+        self.put_progress(user, document, 0.5, device_id='koreader')
+        self.assertEqual(self.books(user)[document]['page_count'], 10)
+        self.assertEqual(self.request('GET', f'/api/v1/documents/{document}/cover', user=user)[1]['pages'], 10)
+
+        status, activity = self.request('GET', '/api/v1/stats/activity?tz=0', user=user)
+        self.assertEqual((activity['books'][0]['page_count'], activity['books'][0]['pages_read']), (10, 5))
+        self.assertEqual(sum(day['pages'] for day in activity['days']), 4)
+
+        # A page count set in the app wins over the estimate
+        self.request('PUT', f'/api/v1/documents/{document}/info', {'page_count': 300}, user=user)
+        self.assertEqual(self.books(user)[document]['page_count'], 300)
+
+    def test_print_pages_without_spine(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'nospine.epub')
+            create_novel_epub(path, [3600], spine=False)
+            self.assertEqual(self.library_index.estimate_print_pages(path), 2)
+            self.assertIsNone(self.library_index.estimate_print_pages(os.path.join(tmp, 'missing.epub')))
 
     def test_reader_metadata_and_filename_hash(self):
         user = self.create_user('metadata')
@@ -422,7 +467,7 @@ class TestSyncStorageMigration(unittest.TestCase):
             row = storage.latest_progress('alice', 'doc1')
             self.assertEqual((row['device_id'], row['percentage'], row['updated_at']), ('Kobo', 0.4, 1790000000))
             self.assertEqual(storage.authenticate('alice', md5('secret')), 'alice')
-            log_rows, _, _ = storage.activity_inputs('alice')
+            log_rows, _, _, _ = storage.activity_inputs('alice')
             self.assertEqual(len(log_rows), 1)
 
 

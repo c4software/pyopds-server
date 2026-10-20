@@ -1,12 +1,19 @@
 """Map KOReader document hashes to EPUB files of the library."""
 import hashlib
 import os
+import posixpath
 import time
+import zipfile
+from html.parser import HTMLParser
+from urllib.parse import unquote
 
 from controllers.opds import LIBRARY_DIR, BookMetadata, BookScanner
 
 CHUNK_SIZE = 1024
 INDEX_TTL = 300
+# Characters of text per printed page (~300 words, a typical paperback novel page)
+CHARS_PER_PAGE = 1800
+HTML_EXTENSIONS = ('.xhtml', '.html', '.htm')
 
 
 def koreader_partial_md5(path: str) -> str | None:
@@ -29,6 +36,61 @@ def koreader_partial_md5(path: str) -> str | None:
 def filename_md5(path: str) -> str:
     """KOReader's filename document id: MD5 of the file name."""
     return hashlib.md5(os.path.basename(path).encode('utf-8')).hexdigest()
+
+
+class _TextLengthParser(HTMLParser):
+    """Count the visible text characters of an (X)HTML document, whitespace collapsed."""
+
+    def __init__(self):
+        super().__init__()
+        self.length = 0
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ('script', 'style', 'head'):
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag):
+        if tag in ('script', 'style', 'head') and self._skip_depth:
+            self._skip_depth -= 1
+
+    def handle_data(self, data):
+        if not self._skip_depth:
+            self.length += len(' '.join(data.split()))
+
+
+def _content_documents(zf: zipfile.ZipFile) -> list[str]:
+    """Reading-order (spine) content documents of an EPUB, or every (X)HTML file without a spine."""
+    names = set(zf.namelist())
+    opf_root, opf_dir = BookMetadata._parse_opf_from_epub(zf)
+    if opf_root is not None:
+        ns = {'opf': 'http://www.idpf.org/2007/opf'}
+        hrefs = {item.get('id'): item.get('href') for item in opf_root.findall('.//opf:manifest/opf:item', ns)}
+        documents = []
+        for itemref in opf_root.findall('.//opf:spine/opf:itemref', ns):
+            href = hrefs.get(itemref.get('idref'))
+            if href:
+                path = posixpath.normpath(posixpath.join(opf_dir or '', unquote(href)))
+                if path in names:
+                    documents.append(path)
+        if documents:
+            return documents
+    return sorted(name for name in names if name.lower().endswith(HTML_EXTENSIONS))
+
+
+def estimate_print_pages(path: str) -> int | None:
+    """Estimate the printed page count of an EPUB from the length of its text."""
+    try:
+        with zipfile.ZipFile(path) as zf:
+            length = 0
+            for name in _content_documents(zf):
+                parser = _TextLengthParser()
+                parser.feed(zf.read(name).decode('utf-8', errors='replace'))
+                parser.close()
+                length += parser.length
+    except (OSError, zipfile.BadZipFile, KeyError, ValueError):
+        return None
+    return max(1, round(length / CHARS_PER_PAGE)) if length else None
 
 
 class LibraryIndex:
@@ -80,7 +142,7 @@ class LibraryIndex:
         return None
 
     def details(self, path: str) -> dict:
-        """Title, author and whether a cover exists, cached per file modification time."""
+        """Title, author, cover presence and estimated print pages, cached per file modification time."""
         mtime = os.path.getmtime(path)
         cached = self._details_cache.get(path)
         if cached and cached[0] == mtime:
@@ -91,6 +153,7 @@ class LibraryIndex:
             'title': title,
             'author': author,
             'has_cover': cover is not None,
+            'page_count': estimate_print_pages(path),
             'relative_path': os.path.relpath(path, LIBRARY_DIR).replace(os.sep, '/'),
         }
         self._details_cache[path] = (mtime, details)
@@ -99,6 +162,7 @@ class LibraryIndex:
 
 __all__ = [
     'LibraryIndex',
+    'estimate_print_pages',
     'filename_md5',
     'koreader_partial_md5',
 ]
