@@ -4,4 +4,4 @@ docker-compose.yml
 koreader_sync.db
 books/
 __pycache__/
-.pytest_cache/
+.pytest_cache/config/
