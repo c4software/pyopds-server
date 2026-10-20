@@ -31,7 +31,11 @@ Le projet suit une architecture de type MVC (Modèle-Vue-Contrôleur) simplifié
 * `routes.py` : Système de routage inspiré de Laravel. C'est ici que **toutes** les nouvelles routes URL doivent être déclarées.
 * `controllers/` : Contient la logique métier.
     * `opds.py` : Gestion du catalogue OPDS, scan des fichiers EPUB, génération XML.
-    * `koreader_sync.py` : API de synchronisation pour KoReader (Authentification + Stockage SQLite).
+    * `koreader_sync.py` : API KOSync (KoReader, liseuses CrossPoint) et classe de base commune des contrôleurs de synchronisation.
+    * `crosspoint_sync.py` : Extensions CrossPoint Sync (`/api/v1`) utilisées par les liseuses CrossPoint et l'app CrossPoint Sync.
+    * `sync_storage.py` : Stockage SQLite de la synchronisation (progression par appareil, documents, alias, stats, clippings).
+    * `reading_activity.py` : Calculs purs des statistiques et de l'activité de lecture.
+    * `library_index.py` : Correspondance entre les hash de documents KoReader et les EPUB de la bibliothèque.
 * `static/` : Fichiers statiques (XSLT pour l'affichage navigateur).
 * `tests/` : Tests unitaires (`unittest`).
 
@@ -80,7 +84,7 @@ Le projet suit une architecture de type MVC (Modèle-Vue-Contrôleur) simplifié
 
 * **Exécution :** Lancer les tests avant toute soumission avec `pytest` ou `python -m unittest discover tests`.
 * **Concurrence :** Les tests lancent un serveur HTTP réel dans un thread séparé. Assurez-vous de bien gérer la fermeture des sockets (`server_close`) dans le `tearDownClass`.
-* **Couverture :** Tout nouveau endpoint API doit avoir un test correspondant dans `tests/test_opds.py` ou `tests/test_koreader_sync.py`.
+* **Couverture :** Tout nouveau endpoint API doit avoir un test correspondant dans `tests/test_opds.py`, `tests/test_koreader_sync.py` ou `tests/test_crosspoint_sync.py`.
 
 ## 7. Variables d'Environnement
 
@@ -88,4 +92,5 @@ L'application doit respecter ces variables de configuration :
 * `LIBRARY_DIR` : Dossier racine des livres (défaut: `books`).
 * `PORT` : Port d'écoute (défaut: `8080`).
 * `KOREADER_SYNC_DB_PATH` : Chemin de la DB SQLite.
+* `REGISTRATION_DISABLED` : `true` pour refuser la création de comptes de synchronisation.
 * `PAGE_SIZE` : Nombre de livres par page dans le flux OPDS.

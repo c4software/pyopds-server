@@ -3,7 +3,6 @@ import os
 import socketserver
 from urllib.parse import urlparse
 
-from controllers.koreader_sync import KoReaderSyncController
 from controllers.opds import LIBRARY_DIR, OPDSController, PAGE_SIZE
 from routes import Router, register_routes
 
@@ -14,6 +13,9 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
     """
     Unified HTTP request handler with explicit Laravel-style routing.
     """
+
+    # Drop clients that stall (e.g. announce a body they never send) instead of blocking the server
+    timeout = 60
 
     # Initialize router with all routes
     router = register_routes(Router())
@@ -34,13 +36,8 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
         # Controllers are created on demand to have access to self
 
     def _get_controller(self, controller_class):
-        """Get or create controller instance."""
-        if controller_class == OPDSController:
-            return OPDSController(self)
-        elif controller_class == KoReaderSyncController:
-            return KoReaderSyncController(self)
-        else:
-            raise ValueError(f"Unknown controller: {controller_class}")
+        """Create a controller instance bound to this request."""
+        return controller_class(self)
 
     def _handle_request(self, method):
         """Handle request by routing to appropriate controller action."""
@@ -51,6 +48,8 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
         route = self.router.find_route(method, path)
 
         if route:
+            # Named groups of the route pattern (e.g. {document}) are exposed to controllers
+            self.route_params = route.pattern.match(path).groupdict()
             # Get controller and call action
             controller = self._get_controller(route.controller_class)
             action_method = getattr(controller, route.action)
@@ -70,6 +69,10 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         """Handle POST requests through router."""
         self._handle_request('POST')
+
+    def do_DELETE(self):
+        """Handle DELETE requests through router."""
+        self._handle_request('DELETE')
 
 
 def main():

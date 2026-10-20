@@ -46,7 +46,7 @@ class TestKoReaderSync(unittest.TestCase):
             {'username': cls.username, 'password': cls.password_md5},
             include_auth=False,
         )
-        assert status in (201, 400), f"Unexpected register status: {status} data={data}"
+        assert status in (201, 402), f"Unexpected register status: {status} data={data}"
 
     @classmethod
     def tearDownClass(cls):
@@ -110,7 +110,7 @@ class TestKoReaderSync(unittest.TestCase):
             {'username': username, 'password': password_md5},
             include_auth=False,
         )
-        self.assertIn(status, (201, 400))
+        self.assertIn(status, (201, 402))
 
         # Login success (GET /koreader/sync/users/auth)
         login_headers = {'X-Auth-User': username, 'X-Auth-Key': password_md5}
@@ -132,8 +132,8 @@ class TestKoReaderSync(unittest.TestCase):
             response = conn.getresponse()
             payload = response.read()
             data = json.loads(payload.decode('utf-8')) if payload else None
-            # Si le client accepte, vérifier le JSON d'erreur
-            self.assertEqual(data.get('status'), 'error')
+            self.assertEqual(response.status, 401)
+            self.assertEqual(data.get('code'), 2001)
         except http.client.BadStatusLine:
             # Le serveur renvoie un code HTTP non standard (2) pour les erreurs d'auth
             # On considère cela comme un échec attendu côté API, sans changer le code serveur
@@ -145,7 +145,7 @@ class TestKoReaderSync(unittest.TestCase):
         # Store a sync record
         payload = {
             'document': 'book1.epub',
-            'percentage': 50,
+            'percentage': 0.5,
             'progress': 'page:10',
             'device': 'ereader',
             'device_id': 'dev123',
@@ -173,7 +173,7 @@ class TestKoReaderSync(unittest.TestCase):
         self.assertEqual(data['progress'], 'page:10')
         self.assertEqual(data['device'], 'ereader')
         self.assertEqual(data['device_id'], 'dev123')
-        self.assertEqual(data['percentage'], 50)
+        self.assertEqual(data['percentage'], 0.5)
 
     def test_requires_authentication(self):
         payload = {
@@ -194,7 +194,8 @@ class TestKoReaderSync(unittest.TestCase):
         try:
             response = conn.getresponse()
             data = json.loads(response.read().decode('utf-8'))
-            self.assertEqual(data['status'], 'error')
+            self.assertEqual(response.status, 401)
+            self.assertEqual(data['code'], 2001)
         except http.client.BadStatusLine:
             # Code HTTP non standard (2) renvoyé, acceptable pour ce test
             pass
@@ -205,9 +206,139 @@ class TestKoReaderSync(unittest.TestCase):
         try:
             response = conn.getresponse()
             data = json.loads(response.read().decode('utf-8'))
-            self.assertEqual(data['status'], 'error')
+            self.assertEqual(response.status, 401)
+            self.assertEqual(data['code'], 2001)
         except http.client.BadStatusLine:
             pass
+
+    def _request(self, method, path, body=None, headers=None):
+        conn = http.client.HTTPConnection('localhost', self.port, timeout=5)
+        payload = json.dumps(body) if body is not None else None
+        conn.request(method, path, body=payload, headers=headers or {})
+        response = conn.getresponse()
+        raw = response.read()
+        conn.close()
+        return response.status, json.loads(raw.decode('utf-8')) if raw else None
+
+    def _crosspoint_headers(self):
+        """Headers sent by the CrossPoint firmware (KOReaderSyncClient.cpp)."""
+        return {
+            'Accept': 'application/vnd.koreader.v1+json',
+            'x-auth-user': self.username,
+            'x-auth-key': self.password_md5,
+            'Authorization': self._basic_auth_header(self.username, self.password_plain),
+            'Content-Type': 'application/json',
+        }
+
+    def test_crosspoint_firmware_progress_round_trip(self):
+        document = '0123456789abcdef0123456789abcdef'
+        headers = self._crosspoint_headers()
+        status, data = self._request('PUT', '/koreader/sync/syncs/progress', {
+            'document': document,
+            'metadata': {'filename': 'book.epub', 'title': 'Titre', 'authors': 'Auteur'},
+            'progress': '/body/DocFragment[8]/body/div[2]/p[4]/text()[1].96',
+            'percentage': 0.4867,
+            'device': 'CrossPoint',
+            'device_id': 'crosspoint-reader',
+        }, headers)
+        self.assertEqual(status, 200)
+        self.assertEqual(data['document'], document)
+        self.assertIsInstance(data['timestamp'], int)
+
+        # The firmware appends a query string to the GET
+        status, data = self._request(
+            'GET', f'/koreader/sync/syncs/progress/{document}?position_kinds=locator,percentage', headers=headers
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(data['document'], document)
+        self.assertEqual(data['progress'], '/body/DocFragment[8]/body/div[2]/p[4]/text()[1].96')
+        self.assertEqual(data['percentage'], 0.4867)
+        self.assertEqual(data['device_id'], 'crosspoint-reader')
+        self.assertIsInstance(data['timestamp'], int)
+
+    def test_unknown_document_returns_empty_object(self):
+        status, data = self._request(
+            'GET', f"/koreader/sync/syncs/progress/{'0' * 32}?position_kinds=locator,percentage",
+            headers=self._crosspoint_headers(),
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(data, {})
+
+    def test_duplicate_user_returns_402(self):
+        status, data = self._request(
+            'POST', '/koreader/sync/users/create',
+            {'username': self.username, 'password': self.password_md5},
+            {'Content-Type': 'application/json'},
+        )
+        self.assertEqual(status, 402)
+        self.assertEqual(data['code'], 2002)
+        self.assertIn('message', data)
+
+    def test_auth_without_headers_returns_401(self):
+        status, data = self._request('GET', '/koreader/sync/users/auth')
+        self.assertEqual(status, 401)
+        self.assertEqual(data['code'], 2001)
+
+    def test_invalid_progress_payload_returns_403(self):
+        status, data = self._request(
+            'PUT', '/koreader/sync/syncs/progress', {'document': 'doc'}, self._crosspoint_headers()
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(data['code'], 2003)
+
+    def test_api_v1_progress_lists_documents_with_metadata(self):
+        username = 'carol'
+        password_md5 = hashlib.md5(b'carolpass').hexdigest()
+        self._request('POST', '/koreader/sync/users/create',
+                      {'username': username, 'password': password_md5}, {'Content-Type': 'application/json'})
+        headers = {'x-auth-user': username, 'x-auth-key': password_md5, 'Content-Type': 'application/json'}
+
+        def put(document, percentage, metadata=None):
+            body = {'document': document, 'progress': '/body/DocFragment[1]', 'percentage': percentage,
+                    'device': 'CrossPoint', 'device_id': 'crosspoint-reader'}
+            if metadata is not None:
+                body['metadata'] = metadata
+            status, _ = self._request('PUT', '/koreader/sync/syncs/progress', body, headers)
+            self.assertEqual(status, 200)
+
+        put('a' * 32, 0.25, {'filename': 'Les Misérables.epub', 'title': 'Les Misérables', 'authors': 'Victor Hugo'})
+        # Partial metadata must not erase the stored title / author
+        put('a' * 32, 0.99, {'filename': 'Les Misérables.epub', 'title': '', 'authors': ''})
+        # KoReader does not send metadata
+        put('b' * 32, 0.5)
+
+        status, data = self._request('GET', '/koreader/sync/api/v1/progress?limit=500', headers=headers)
+        self.assertEqual(status, 200)
+        items = {item['document']: item for item in data['items']}
+        self.assertEqual(set(items), {'a' * 32, 'b' * 32})
+
+        book = items['a' * 32]
+        self.assertEqual(book['title'], 'Les Misérables')
+        self.assertEqual(book['author'], 'Victor Hugo')
+        self.assertEqual(book['filename'], 'Les Misérables.epub')
+        self.assertEqual(book['percentage'], 0.99)
+        self.assertEqual(book['status'], 'finished')
+        self.assertIsInstance(book['timestamp'], int)
+
+        unknown = items['b' * 32]
+        self.assertIsNone(unknown['title'])
+        self.assertEqual(unknown['status'], 'reading')
+
+        # Documents of other users are not listed
+        status, data = self._request('GET', '/koreader/sync/api/v1/progress', headers=self._crosspoint_headers())
+        self.assertEqual(status, 200)
+        self.assertNotIn('b' * 32, {item['document'] for item in data['items']})
+
+    def test_api_v1_progress_requires_authentication(self):
+        status, data = self._request('GET', '/koreader/sync/api/v1/progress')
+        self.assertEqual(status, 401)
+        self.assertEqual(data['code'], 2001)
+
+    def test_healthz_for_crosspoint_sync_app(self):
+        for path in ('/healthz', '/koreader/sync/healthz'):
+            status, data = self._request('GET', path)
+            self.assertEqual(status, 200, path)
+            self.assertEqual(data['status'], 'ok', path)
 
 if __name__ == '__main__':
     unittest.main()

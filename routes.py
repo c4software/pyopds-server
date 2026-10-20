@@ -5,6 +5,7 @@ Defines routes and router inspired by Laravel routing.
 
 import re
 
+from controllers.crosspoint_sync import CrossPointSyncController
 from controllers.koreader_sync import KoReaderSyncController
 from controllers.opds import OPDSController
 
@@ -53,6 +54,11 @@ class Router:
         self.routes.append(Route('PUT', pattern, controller_action, name))
         return self
 
+    def delete(self, pattern, controller_action, name=None):
+        """Register a DELETE route."""
+        self.routes.append(Route('DELETE', pattern, controller_action, name))
+        return self
+
     def find_route(self, method, path):
         """Find matching route for given method and path."""
         for route in self.routes:
@@ -82,17 +88,75 @@ def register_routes(router):
     router.get(r'/download/.*', (OPDSController, 'download_book'), name='opds.download')
     router.get(r'/cover/.*', (OPDSController, 'download_cover'), name='opds.cover')
 
-    # KoReader Sync Routes
-    router.get('/koreader/sync/syncs/progress/.*', (KoReaderSyncController, 'get_sync_records'), name='koreader.sync.get')
-    router.put('/koreader/sync/syncs/progress', (KoReaderSyncController, 'store_sync_records'), name='koreader.sync.store')
-    router.post('/koreader/sync/users/create', (KoReaderSyncController, 'register'), name='koreader.register')
-    router.get('/koreader/sync/users/auth', (KoReaderSyncController, 'login'), name='koreader.login')
+    # Sync API, mounted at the root (CrossPoint Sync app: "host:port") and under /koreader/sync (KoReader)
+    for prefix in ('', '/koreader/sync'):
+        register_sync_routes(router, prefix)
 
     return router
+
+
+DOC = r'(?P<document>[^/]+)'
+
+
+def register_sync_routes(router, prefix):
+    """Register the KOSync and CrossPoint Sync (/api/v1) routes under a URL prefix."""
+    name = f"sync{prefix.replace('/', '.')}"
+    api = f'{prefix}/api/v1'
+
+    # KOSync (KoReader, CrossPoint readers)
+    router.get(f'{prefix}/healthz', (KoReaderSyncController, 'health'), name=f'{name}.healthz')
+    router.post(f'{prefix}/users/create', (KoReaderSyncController, 'register'), name=f'{name}.register')
+    router.get(f'{prefix}/users/auth', (KoReaderSyncController, 'login'), name=f'{name}.login')
+    router.put(f'{prefix}/syncs/progress', (KoReaderSyncController, 'store_sync_records'), name=f'{name}.progress.store')
+    router.get(f'{prefix}/syncs/progress/{DOC}', (KoReaderSyncController, 'get_sync_records'), name=f'{name}.progress.get')
+
+    # CrossPoint Sync extensions (literal segments before {document} patterns)
+    router.put(f'{api}/progress', (CrossPointSyncController, 'progress_put'), name=f'{name}.api.progress.put')
+    router.put(f'{api}/progress/batch', (CrossPointSyncController, 'progress_batch'), name=f'{name}.api.progress.batch')
+    router.get(f'{api}/progress', (CrossPointSyncController, 'progress_list'), name=f'{name}.api.progress.list')
+    router.get(f'{api}/progress/changes', (CrossPointSyncController, 'progress_changes'), name=f'{name}.api.progress.changes')
+    router.get(f'{api}/progress/{DOC}', (CrossPointSyncController, 'progress_show'), name=f'{name}.api.progress.show')
+    router.delete(f'{api}/progress/{DOC}', (CrossPointSyncController, 'progress_delete'), name=f'{name}.api.progress.delete')
+
+    router.put(f'{api}/documents', (CrossPointSyncController, 'documents_put'), name=f'{name}.api.documents.put')
+    router.get(f'{api}/documents', (CrossPointSyncController, 'documents_list'), name=f'{name}.api.documents.list')
+    router.post(f'{api}/documents/merge', (CrossPointSyncController, 'documents_merge'), name=f'{name}.api.documents.merge')
+    router.delete(f'{api}/documents/merge/(?P<alias>[^/]+)', (CrossPointSyncController, 'documents_unmerge'), name=f'{name}.api.documents.unmerge')
+    router.put(f'{api}/documents/{DOC}/status', (CrossPointSyncController, 'document_status'), name=f'{name}.api.documents.status')
+    router.put(f'{api}/documents/{DOC}/dates', (CrossPointSyncController, 'document_dates'), name=f'{name}.api.documents.dates')
+    router.put(f'{api}/documents/{DOC}/info', (CrossPointSyncController, 'document_info'), name=f'{name}.api.documents.info')
+    router.get(f'{api}/documents/{DOC}/cover', (CrossPointSyncController, 'document_cover'), name=f'{name}.api.documents.cover')
+    router.get(f'{api}/documents/{DOC}/cover/candidates', (CrossPointSyncController, 'document_cover_candidates'), name=f'{name}.api.documents.cover.candidates')
+    router.get(f'{api}/documents/{DOC}/about', (CrossPointSyncController, 'document_about'), name=f'{name}.api.documents.about')
+    router.get(f'{api}/documents/{DOC}/next', (CrossPointSyncController, 'document_next'), name=f'{name}.api.documents.next')
+    router.get(f'{api}/documents/{DOC}/matches', (CrossPointSyncController, 'document_matches'), name=f'{name}.api.documents.matches')
+
+    router.put(f'{api}/stats/global', (CrossPointSyncController, 'stats_global_put'), name=f'{name}.api.stats.global.put')
+    router.get(f'{api}/stats/global', (CrossPointSyncController, 'stats_global_get'), name=f'{name}.api.stats.global')
+    router.put(f'{api}/stats/books', (CrossPointSyncController, 'stats_books_put'), name=f'{name}.api.stats.books.put')
+    router.get(f'{api}/stats/books/{DOC}', (CrossPointSyncController, 'stats_book_get'), name=f'{name}.api.stats.book')
+    router.get(f'{api}/stats/summary', (CrossPointSyncController, 'stats_summary'), name=f'{name}.api.stats.summary')
+    router.get(f'{api}/stats/activity', (CrossPointSyncController, 'stats_activity'), name=f'{name}.api.stats.activity')
+
+    router.get(f'{api}/clippings', (CrossPointSyncController, 'clippings_all'), name=f'{name}.api.clippings.all')
+    router.get(f'{api}/clippings/{DOC}', (CrossPointSyncController, 'clippings_get'), name=f'{name}.api.clippings.get')
+    router.put(f'{api}/clippings/{DOC}', (CrossPointSyncController, 'clippings_put'), name=f'{name}.api.clippings.put')
+    router.get(f'{api}/bookmarks/{DOC}', (CrossPointSyncController, 'bookmarks_get'), name=f'{name}.api.bookmarks.get')
+    router.put(f'{api}/bookmarks/{DOC}', (CrossPointSyncController, 'bookmarks_put'), name=f'{name}.api.bookmarks.put')
+
+    router.post(f'{api}/account/password', (CrossPointSyncController, 'account_password'), name=f'{name}.api.account.password')
+    router.delete(f'{api}/account/data', (CrossPointSyncController, 'account_data_delete'), name=f'{name}.api.account.data')
+    router.delete(f'{api}/account', (CrossPointSyncController, 'account_delete'), name=f'{name}.api.account.delete')
+
+    router.get(f'{api}/connectors', (CrossPointSyncController, 'connectors_list'), name=f'{name}.api.connectors')
+    for method in (router.get, router.put, router.post, router.delete):
+        method(f'{api}/connectors/.+', (CrossPointSyncController, 'connector_unknown'), name=f'{name}.api.connectors.unknown')
+        method(f'{api}/.*', (CrossPointSyncController, 'not_found'), name=f'{name}.api.not_found')
 
 
 __all__ = [
     'Route',
     'Router',
     'register_routes',
+    'register_sync_routes',
 ]

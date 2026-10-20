@@ -17,7 +17,7 @@ If you browse your OPDS feed in a web browser, it will display a simple HTML rep
 - **Subdirectory Support**: Scans EPUB files in the configured directory and its subdirectories.
 - **Sorted by Most Recent**: Books are listed in the OPDS feed sorted by modification date, with the most recently modified files appearing first.
 - **Metadata Extraction**: Extracts title and author from EPUB files for rich display in the catalog.
-- **KoReader Sync API**: Optional JSON endpoints that store and replay reading progress shared by KoReader devices.
+- **Reading Sync API**: KOSync-compatible progress sync for KoReader and CrossPoint readers, plus the CrossPoint Sync extensions (statistics, clippings, library) used by the CrossPoint Sync app.
 - **Docker Deployment**: Includes a `Dockerfile` and `docker-compose.yml` for easy containerized deployment.
 - **Visual HTML Representation**: Provides a simple HTML view of the OPDS feed for easy browsing in web browsers (using XSLT transformation).
 
@@ -76,6 +76,7 @@ The following environment variables can be set:
 
 - **LIBRARY_DIR**: Path to the directory containing EPUB files (default: `books`).
 - **KOREADER_SYNC_DB_PATH**: Path to the SQLite database file used by the KoReader sync helper (default: `koreader_sync.db`).
+- **REGISTRATION_DISABLED**: Set to `true` to refuse new sync accounts (default: registration open).
 
 For Docker, modify these variables in the `docker-compose.yml` file:
 
@@ -106,16 +107,36 @@ services:
 2. Browse the book list at the `/opds/books` endpoint.
 3. Download books via the links provided in the OPDS feed.
 
-## KoReader Sync API
+## Sync API (KoReader, CrossPoint)
 
-The server exposes lightweight sync endpoints that allow KoReader clients to upload and download reading progress.
+The server includes a KOSync-compatible progress sync server, plus the CrossPoint Sync extensions (`/api/v1`) used by CrossPoint / CrossInk readers and the CrossPoint Sync app. Every endpoint is available both at the server root and under `/koreader/sync`.
 
-### Endpoints
+Data is stored in a local SQLite database (`KOREADER_SYNC_DB_PATH`). Databases created by older versions are migrated automatically on startup.
 
-- `PUT /koreader/sync/syncs/progress`: Accepts JSON payloads containing reading progress data from KoReader devices.
-- `GET /koreader/sync/syncs/progress/{book_id}`: Retrieves stored progress data for a specific book.
+### KOSync endpoints
 
-Data is stored in a local SQLite database (`KOREADER_SYNC_DB_PATH`) and deduplicated by the combination of user, device, and document identifier.
+- `POST /users/create`, `GET /users/auth`: account creation and login (`x-auth-user` / `x-auth-key` headers, key = MD5 of the password).
+- `PUT /syncs/progress`: stores a device's position. Each device keeps its own record; the most recent one wins.
+- `GET /syncs/progress/{document}`: newest position of a book across devices.
+- `GET /healthz`: health probe.
+
+Errors, status codes and timestamps follow the reference KOSync server.
+
+### Configuring the readers
+
+- **KoReader**: *Tools → Progress sync → Custom sync server* = `http://<your-ip>:8080/koreader/sync`.
+- **CrossPoint / CrossInk**: *Settings → KOReader Sync → Sync Server URL* = `http://<your-ip>:8080/koreader/sync` (or the root URL). Rich positions and clippings are synced as well.
+- **CrossPoint Sync app** (*Self-hosted*): `http://<your-ip>:8080`. Library, statuses, reading dates, merge of duplicate copies, reading statistics and activity, clippings and account management work. When a synced book matches an EPUB of the library (KoReader content hash, file name hash or file name), its title, author and cover come from the library.
+
+### CrossPoint Sync extensions (`/api/v1`)
+
+- Progress: `PUT /progress`, `PUT /progress/batch`, `GET /progress`, `GET /progress/changes`, `GET|DELETE /progress/{document}`.
+- Documents: `PUT|GET /documents`, `PUT /documents/{document}/status|dates|info`, `GET /documents/{document}/cover|cover/candidates|about|next|matches`, `POST /documents/merge`, `DELETE /documents/merge/{alias}`.
+- Statistics: `PUT|GET /stats/global`, `PUT /stats/books`, `GET /stats/books/{document}`, `GET /stats/summary`, `GET /stats/activity?tz=`.
+- Clippings and bookmarks: `GET /clippings`, `GET|PUT /clippings/{document}`, `GET|PUT /bookmarks/{document}`.
+- Account: `POST /account/password`, `DELETE /account/data`, `DELETE /account`.
+
+External services of crosspoint-sync (Hardcover, Spotify, Readwise... connectors, online cover and description lookups) are not provided: `GET /api/v1/connectors` returns an empty list and the app hides those features.
 
 ## Security Consideration
 
