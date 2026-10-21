@@ -19,7 +19,7 @@ If you browse your OPDS feed in a web browser, it will display a simple HTML rep
 - **Subdirectory Support**: Scans EPUB files in the configured directory and its subdirectories.
 - **Sorted by Most Recent**: Books are listed in the OPDS feed sorted by modification date, with the most recently modified files appearing first.
 - **Metadata Extraction**: Extracts title and author from EPUB files for rich display in the catalog.
-- **Browse by Year, Author and Genre**: Genres come from the EPUB subjects (`dc:subject`); spelling variants are merged (SF, science-fiction...), technical tags and series names are ignored, and genres with fewer than 3 books are hidden.
+- **Browse by Year, Author and Genre**: Genres come from the EPUB subjects (`dc:subject`); spelling variants are merged (SF, science-fiction...), technical tags and series names are ignored, and genres with fewer than 3 books are hidden. These rules live in [`genres.toml`](genres.toml) (see Configuration).
 - **Book Covers**: Covers are extracted from the EPUB files and declared in the feed, so they show up in OPDS clients.
 - **Reading Sync API**: KOSync-compatible progress sync for KoReader and CrossPoint / CrossInk readers.
 - **CrossPoint Sync Compatible**: Implements the [crosspoint-sync](https://github.com/crosspoint-reader/crosspoint-sync) extensions (`/api/v1`): the CrossPoint Sync app shows your library, reading statuses, statistics, activity and clippings, and CrossPoint readers sync rich positions and clippings.
@@ -82,6 +82,7 @@ The following environment variables can be set:
 - **LIBRARY_DIR**: Path to the directory containing EPUB files (default: `books`).
 - **KOREADER_SYNC_DB_PATH**: Path to the SQLite database file used by the KoReader sync helper (default: `koreader_sync.db`).
 - **REGISTRATION_DISABLED**: Set to `true` to refuse new sync accounts (default: registration open).
+- **GENRES_CONFIG_PATH**: Path to a custom genre file replacing [`genres.toml`](genres.toml): subject-to-genre aliases, ignored subjects and minimum number of books per genre. Copy the default file as a starting point (for example into the mounted `config/` folder) and restart the server after editing it.
 
 For Docker, modify these variables in the `docker-compose.yml` file:
 

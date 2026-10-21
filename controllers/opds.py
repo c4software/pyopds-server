@@ -9,7 +9,7 @@ from xml.sax.saxutils import escape as xml_escape
 import zipfile
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from controllers.genres import MIN_GENRE_BOOKS, genre_key, normalize_genres
+from controllers.genres import genre_key, get_genre_config, normalize_genres
 
 LIBRARY_DIR = os.environ.get('LIBRARY_DIR', 'books')
 PAGE_SIZE = int(os.environ.get('PAGE_SIZE', 25))
@@ -602,12 +602,14 @@ class BookScanner:
         )
         return sorted_authors
 
-    def get_genres_with_counts(self, min_books: int = MIN_GENRE_BOOKS) -> list[tuple[str, str, int]]:
-        """Get genres having at least `min_books` books.
+    def get_genres_with_counts(self, min_books: int | None = None) -> list[tuple[str, str, int]]:
+        """Get genres having at least `min_books` books (default: `min_books` of the genre configuration).
 
         Returns list of (genre key, displayed genre, count) tuples sorted alphabetically.
         """
         self._build_year_author_indexes()
+        if min_books is None:
+            min_books = get_genre_config().min_books
         genres = [
             (key, genre['name'], len(genre['paths']))
             for key, genre in self._genre_index.items()

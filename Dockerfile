@@ -6,6 +6,7 @@ COPY routes.py /app/routes.py
 COPY server.py /app/server.py
 COPY controllers/ /app/controllers/
 COPY static/ /app/static/
+COPY genres.toml /app/genres.toml
 
 ENV LIBRARY_DIR=/books
 

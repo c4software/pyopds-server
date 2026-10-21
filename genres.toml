@@ -1,0 +1,55 @@
+# Genre navigation ("By Genre") built from the EPUB subjects (dc:subject).
+#
+# To customize it, copy this file (for example to config/genres.toml) and point
+# the GENRES_CONFIG_PATH environment variable to the copy; it then replaces this
+# file entirely. Restart the server to apply changes.
+#
+# Subjects are compared without case, accents or punctuation:
+# "Science fiction", "science-fiction" and "SCIENCE FICTION" are the same subject.
+
+# Genres listed in the catalog need at least this many books (hides series names and typos)
+min_books = 3
+
+# Subjects carrying no genre information
+ignored = [
+    "fiction", "roman", "romans", "general", "generalites", "litterature", "literature",
+    "ebook", "ebooks", "epub", "livre", "livres", "book", "books", "french", "francais",
+    "non classifiable", "divers", "autre", "autres", "unknown", "inconnu",
+    # Reading states and library bookkeeping
+    "lu", "non lu", "a lire", "fait maison", "readers", "fr roman",
+]
+
+# Displayed genre = subjects merged into it
+[aliases]
+"Science-fiction" = [
+    "sf", "science fiction", "sciencefiction", "science fiction fantasy", "fr scifi",
+    "anticipation", "space opera",
+]
+"Policier" = [
+    "policier", "policiers", "polar", "polars", "roman policier", "romans policiers",
+    "crime", "mystery", "detective", "policier crime mystere", "policier mystere",
+    "policier thriller",
+]
+"Policier historique" = ["policier historique"]
+"Fantasy" = ["fantasy"]
+"Heroic fantasy" = ["heroic fantasy", "heroique fantaisie", "fr heroique"]
+"Fantastique" = ["fantastique", "roman fantastique"]
+"Urban fantasy" = ["urban fantasy", "urban", "fantastique urban"]
+"Horreur" = ["horreur", "horror", "terreur"]
+"Roman historique" = [
+    "roman historique", "romans historiques", "historique", "recit historique",
+    "historical fiction",
+]
+"Aventure" = ["aventure", "aventures", "adventure", "action aventure"]
+"Biographie" = ["biographie", "biography", "autobiographie"]
+"Littérature française" = ["litterature francaise", "litt francaise", "lit fr", "french fiction"]
+"Littérature étrangère" = ["litterature etrangere", "litt etrangere"]
+"Littérature américaine" = ["litterature americaine", "auteur e americain e"]
+"Jeunesse" = ["jeunesse", "juvenile fiction"]
+"Thriller" = ["thriller", "thrillers"]
+"Humour" = ["humour", "humor"]
+"Nouvelles" = ["nouvelles", "short stories"]
+"Roman noir" = ["roman noir"]
+"Bit-lit" = ["bit lit", "bitlit"]
+"Romance" = ["romance", "sentimental"]
+"Espionnage" = ["espionnage"]

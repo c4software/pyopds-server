@@ -35,8 +35,9 @@ Le projet suit une architecture de type MVC (Modèle-Vue-Contrôleur) simplifié
     * `crosspoint_sync.py` : Extensions CrossPoint Sync (`/api/v1`) utilisées par les liseuses CrossPoint et l'app CrossPoint Sync.
     * `sync_storage.py` : Stockage SQLite de la synchronisation (progression par appareil, documents, alias, stats, clippings).
     * `reading_activity.py` : Calculs purs des statistiques et de l'activité de lecture.
-    * `genres.py` : Normalisation des sujets EPUB (`dc:subject`) en genres pour la navigation « By Genre ».
+    * `genres.py` : Normalisation des sujets EPUB (`dc:subject`) en genres pour la navigation « By Genre », selon les règles de `genres.toml`.
     * `library_index.py` : Correspondance entre les hash de documents KoReader et les EPUB de la bibliothèque.
+* `genres.toml` : Correspondances sujets → genres, sujets ignorés et seuil d'affichage (remplaçable via `GENRES_CONFIG_PATH`).
 * `static/` : Fichiers statiques (XSLT pour l'affichage navigateur).
 * `tests/` : Tests unitaires (`unittest`).
 
@@ -94,4 +95,5 @@ L'application doit respecter ces variables de configuration :
 * `PORT` : Port d'écoute (défaut: `8080`).
 * `KOREADER_SYNC_DB_PATH` : Chemin de la DB SQLite.
 * `REGISTRATION_DISABLED` : `true` pour refuser la création de comptes de synchronisation.
+* `GENRES_CONFIG_PATH` : Fichier TOML de genres remplaçant `genres.toml`.
 * `PAGE_SIZE` : Nombre de livres par page dans le flux OPDS.

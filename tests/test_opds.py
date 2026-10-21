@@ -1,5 +1,7 @@
+import contextlib
 import http.client
 import importlib
+import io
 import os
 import socketserver
 import sys
@@ -9,6 +11,7 @@ import time
 import unittest
 import xml.etree.ElementTree as ET
 import zipfile
+from unittest import mock
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if PROJECT_ROOT not in sys.path:
@@ -334,6 +337,34 @@ class TestGenres(unittest.TestCase):
         )
         self.assertEqual(genres.normalize_genres(['  ', '1999', 'interest:3']), [])
         self.assertEqual(genres.normalize_genres(['Fantastique', 'fantastique']), [('fantastique', 'Fantastique')])
+
+    def test_custom_genre_config_file(self):
+        genres = importlib.import_module('controllers.genres')
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'genres.toml')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write('min_books = 5\nignored = ["Divers"]\n[aliases]\n"Imaginaire" = ["SF", "Fantasy"]\n')
+            config = genres.load_genre_config(path)
+            self.assertEqual(config.min_books, 5)
+            self.assertEqual(
+                genres.normalize_genres(['sf', 'fantasy', 'imaginaire', 'divers', 'Polar'], config=config),
+                [('imaginaire', 'Imaginaire'), ('polar', 'Polar')],
+            )
+
+            genres.get_genre_config.cache_clear()
+            try:
+                with mock.patch.dict(os.environ, {'GENRES_CONFIG_PATH': path}):
+                    self.assertEqual(genres.get_genre_config(), config)
+                genres.get_genre_config.cache_clear()
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write('min_books = "trois"\n')
+                with mock.patch.dict(os.environ, {'GENRES_CONFIG_PATH': path}), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    # Invalid custom file: the default rules still apply
+                    self.assertEqual(genres.get_genre_config(),
+                                     genres.load_genre_config(genres.DEFAULT_GENRES_CONFIG_PATH))
+            finally:
+                genres.get_genre_config.cache_clear()
 
 
 class TestGenreCatalog(unittest.TestCase):
