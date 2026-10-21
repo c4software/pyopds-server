@@ -30,13 +30,13 @@ Le projet suit une architecture de type MVC (Modèle-Vue-Contrôleur) simplifié
 * `server.py` : Point d'entrée. Configure le `TCPServer` et le `UnifiedHandler`. Ne contient pas de logique métier.
 * `routes.py` : Système de routage inspiré de Laravel. C'est ici que **toutes** les nouvelles routes URL doivent être déclarées.
 * `controllers/` : Contient la logique métier.
-    * `opds.py` : Gestion du catalogue OPDS, scan des fichiers EPUB, génération XML.
+    * `opds.py` : Gestion du catalogue OPDS, scan des fichiers EPUB, génération XML (entrées de livres enrichies : résumé, genres, année, série via `LibraryIndex.book_meta`).
     * `koreader_sync.py` : API KOSync (KoReader, liseuses CrossPoint) et classe de base commune des contrôleurs de synchronisation.
     * `crosspoint_sync.py` : Extensions CrossPoint Sync (`/api/v1`) utilisées par les liseuses CrossPoint et l'app CrossPoint Sync.
     * `sync_storage.py` : Stockage SQLite de la synchronisation (progression par appareil, documents, alias, stats, clippings).
     * `reading_activity.py` : Calculs purs des statistiques et de l'activité de lecture.
     * `genres.py` : Normalisation des sujets EPUB (`dc:subject`) en genres pour la navigation « By Genre », selon les règles de `genres.toml`.
-    * `library_index.py` : Correspondance entre les hash de documents KoReader et les EPUB de la bibliothèque.
+    * `library_index.py` : Correspondance entre les hash de documents KoReader et les EPUB de la bibliothèque, métadonnées légères cachées par mtime (`book_meta`) et index des séries (`series_books`, `next_in_series`).
     * `opds_auth.py` : Comptes du catalogue : middleware des routes `auth='opds'` (lecteur identifié si des identifiants sont fournis, obligatoire si `OPDS_AUTH=true`) et `auth='user'` (compte toujours requis), HTTP Basic ou cookie de session ; page de connexion / création de compte `/login` et `/logout` des navigateurs.
     * `recommendations.py` : Recommandations « À lire ensuite » locales (fonctions de scoring pures + service avec cache par utilisateur).
     * `online_metadata.py` : Détails de livres en ligne optionnels (iTunes, Open Library, Hardcover) en repli de la bibliothèque : cache SQLite `catalog_cache` partagé, recherches dans un thread de fond (jamais dans le chemin d'une requête, sauf `cover/candidates`).

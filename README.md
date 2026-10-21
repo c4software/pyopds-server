@@ -15,13 +15,13 @@ If you browse your OPDS feed in a web browser, it will display a simple HTML rep
 ## Features
 
 - **OPDS Catalog**: Exposes EPUB books via an OPDS feed accessible at the `/opds` endpoint.
-- **OpenSearch**: Integrated search functionality compliant with OpenSearch specification, allowing users to search books by title or author.
+- **OpenSearch**: Integrated search functionality compliant with OpenSearch specification, allowing users to search books by title, author or series.
 - **Subdirectory Support**: Scans EPUB files in the configured directory and its subdirectories.
 - **Sorted by Most Recent**: Books are listed in the OPDS feed sorted by modification date, with the most recently modified files appearing first.
 - **Metadata Extraction**: Extracts title and author from EPUB files for rich display in the catalog.
 - **Browse by Year, Author and Genre**: Genres come from the EPUB subjects (`dc:subject`); spelling variants are merged (SF, science-fiction...), technical tags and series names are ignored, and genres with fewer than 3 books are hidden. These rules live in [`genres.toml`](genres.toml) (see Configuration).
 - **Book Covers**: Covers are extracted from the EPUB files and declared in the feed, so they show up in OPDS clients.
-- **Book Details**: Series and volume, description, publication year and rating are read from the EPUBs (`calibre:series`, EPUB 3 collections, `dc:description`…) and served to the CrossPoint Sync app, including the next volume of a series. Optional online lookups (Open Library, iTunes, Hardcover) fill the gaps for books outside the library.
+- **Book Details**: Series and volume, description, publication year and rating are read from the EPUBs (`calibre:series`, EPUB 3 collections, `dc:description`…) and shown in every book feed of the catalog (see [Book details in the feeds](#book-details-in-the-feeds)) and in the web UI book sheet, and served to the CrossPoint Sync app, including the next volume of a series. A series feed (`/opds/series?name=…`) lists the volumes of a series in order. Optional online lookups (Open Library, iTunes, Hardcover) fill the gaps for books outside the library.
 - **Reading Sync API**: KOSync-compatible progress sync for KoReader and CrossPoint / CrossInk readers.
 - **CrossPoint Sync Compatible**: Implements the [crosspoint-sync](https://github.com/crosspoint-reader/crosspoint-sync) extensions (`/api/v1`): the CrossPoint Sync app shows your library, reading statuses, statistics, activity and clippings, and CrossPoint readers sync rich positions and clippings.
 - **Accounts**: the catalog is public; readers can sign in (or create an account) from the web UI or with HTTP Basic in their reading app, with the same account as the sync. `OPDS_AUTH=true` makes the whole catalog private.
@@ -135,6 +135,18 @@ Check the merged configuration with `docker compose config`.
 2. Browse the book list at the `/opds/books` endpoint.
 3. Download books via the links provided in the OPDS feed.
 
+### Book details in the feeds
+
+Every book entry (all books, recent, folders, years, authors, genres, search, « À lire ensuite », series) carries the metadata of its EPUB, read from the OPF only (no cover, no text) for the books of the current page, and cached per file modification time:
+
+- `<summary type="text">`: the description (`dc:description`, HTML turned into text, paragraphs kept). In « À lire ensuite », the reasons of the suggestion come first, then a blank line and the description.
+- `<category term="…" label="…"/>`: the genres (see « By Genre »).
+- `<dc:issued>`: the publication year (`xmlns:dc="http://purl.org/dc/terms/"`).
+- Series: a standard Atom link `<link rel="related" href="/opds/series?name=…" type="…kind=acquisition" title="Série : … (tome N)"/>` to the other volumes, plus `<pyopds:series index="N">name</pyopds:series>` and `<pyopds:rating>` (0-5) in the server's namespace `urn:pyopds:metadata`. OPDS 1.x has no element for series and rating and clients share no convention for them (Calibre's own feed only writes them as text), so other clients just ignore these two.
+- `GET /opds/series?name=<series>`: the library books of that series, sorted by volume (books without a volume last), series names compared ignoring case, accents and punctuation; 404 when no book has it.
+
+Navigation entries only list the links clients need: the cover mosaic links of the web view (`rel="urn:pyopds:mosaic-cover"`) are only sent to browsers (`Accept: text/html`), never to OPDS clients, which may list every link of a navigation entry as a section.
+
 ### Web interface
 
 Opening the catalog URL in a browser shows it as a web page (the feed is turned into HTML by [`static/opds_to_html.xslt`](static/opds_to_html.xslt)). The header holds the search field and these buttons:
@@ -143,6 +155,8 @@ Opening the catalog URL in a browser shows it as a web page (the feed is turned 
 - **Se connecter** / **logout**: optional sign-in (see below), which shows the « À lire ensuite » tile.
 - **Cover mosaic** (image icon): fills the navigation tiles (collections, authors, years, genres, folders) with an animated mosaic of the covers of their books, under a veil that keeps the text readable. It is off by default and remembered per browser. Covers are only requested while it is on; small thumbnails, books without a cover and the covers last shown on each tile are cached in the browser (IndexedDB, 7 days), so tiles fill at once on the next visits.
 - **Theme**: light or dark, remembered per browser.
+
+A click on a book opens its **book sheet** (a dialog closed with Escape, a click outside or the close button) instead of downloading it: large cover, title, author (link to the author's books), « Tome N · Série » (link to the series feed), year, rating (stars), genres (links to the genre feeds), description (« Lire la suite » when long) and a **Télécharger** button. A middle click or Ctrl/⌘-click still downloads the book, as does a click without JavaScript; the address of an opened sheet (`#book=…`) can be shared. Series books show their volume (« T2 ») on their tile.
 
 ### Accounts and sign-in
 

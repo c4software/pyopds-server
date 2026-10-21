@@ -2,7 +2,9 @@
 <xsl:stylesheet version="1.0"
     xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
     xmlns:atom="http://www.w3.org/2005/Atom"
-    exclude-result-prefixes="atom">
+    xmlns:dc="http://purl.org/dc/terms/"
+    xmlns:pyopds="urn:pyopds:metadata"
+    exclude-result-prefixes="atom dc pyopds">
 
     <xsl:output method="html" encoding="UTF-8" indent="yes"/>
 
@@ -141,6 +143,65 @@
                     .dark .has-mosaic > :not(.tile-mosaic) {
                         color: #f1f5f9 !important; /* slate-100 */
                         text-shadow: 0 0 6px rgba(15, 23, 42, 0.9), 0 1px 2px rgba(15, 23, 42, 0.9);
+                    }
+
+                    /* Book details dialog */
+                    .book-dialog {
+                        width: min(52rem, calc(100% - 1.5rem));
+                        max-width: none;
+                        max-height: calc(100% - 1.5rem);
+                        padding: 0;
+                        border-radius: 1rem;
+                        overflow-y: auto;
+                        overscroll-behavior: contain;
+                    }
+
+                    .book-dialog::backdrop {
+                        background: rgba(15, 23, 42, 0.6);
+                        backdrop-filter: blur(3px);
+                    }
+
+                    .book-dialog[open] {
+                        animation: book-dialog-in 0.18s ease-out;
+                    }
+
+                    @keyframes book-dialog-in {
+                        from { opacity: 0; transform: translateY(12px) scale(0.98); }
+                        to { opacity: 1; transform: none; }
+                    }
+
+                    .book-description {
+                        white-space: pre-line;
+                        overflow-wrap: anywhere;
+                    }
+
+                    .book-description.clamped {
+                        display: -webkit-box;
+                        -webkit-line-clamp: 8;
+                        -webkit-box-orient: vertical;
+                        overflow: hidden;
+                    }
+
+                    /* Rating: grey stars with the amber ones on top, cut at the rating */
+                    .book-stars {
+                        position: relative;
+                        display: inline-block;
+                        line-height: 1;
+                        font-size: 1.125rem;
+                        letter-spacing: 0.1em;
+                        color: #cbd5e1; /* slate-300 */
+                    }
+
+                    .dark .book-stars {
+                        color: #475569; /* slate-600 */
+                    }
+
+                    .book-stars-on {
+                        position: absolute;
+                        inset: 0 auto 0 0;
+                        overflow: hidden;
+                        white-space: nowrap;
+                        color: #f59e0b; /* amber-500 */
                     }
                 </style>
             </head>
@@ -314,6 +375,44 @@
                     </div>
                 </xsl:if>
 
+                <!-- Book details: filled from the data-* attributes of the clicked book tile -->
+                <dialog id="book-dialog" class="book-dialog bg-white text-slate-800 shadow-2xl dark:bg-slate-800 dark:text-slate-100" aria-labelledby="book-dialog-title">
+                    <div class="relative p-5 sm:p-7">
+                        <button type="button" id="book-dialog-close" class="absolute top-3 right-3 p-2 rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-100" title="Fermer" aria-label="Fermer">
+                            <i data-lucide="x" class="w-5 h-5"></i>
+                        </button>
+                        <div class="flex flex-col sm:flex-row gap-5 sm:gap-7">
+                            <div class="flex-shrink-0 mx-auto sm:mx-0 w-40 sm:w-56">
+                                <div class="relative aspect-[2/3] rounded-r-md rounded-l-sm overflow-hidden shadow-lg bg-slate-200 dark:bg-slate-700">
+                                    <div id="book-dialog-cover-fallback" class="absolute inset-0 flex flex-col items-center justify-center p-4 text-center">
+                                        <div class="absolute top-0 left-0 w-3 h-full bg-black/10 dark:bg-black/20"></div>
+                                        <div id="book-dialog-cover-title" class="font-bold text-slate-700 dark:text-slate-200"></div>
+                                    </div>
+                                    <img id="book-dialog-cover" class="absolute inset-0 w-full h-full object-cover" alt="" hidden="hidden"/>
+                                </div>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <h2 id="book-dialog-title" class="text-xl sm:text-2xl font-semibold leading-tight pr-8 text-slate-900 dark:text-slate-50"></h2>
+                                <a id="book-dialog-author" class="inline-block mt-1 text-slate-600 hover:text-slate-900 hover:underline dark:text-slate-300 dark:hover:text-white"></a>
+                                <div id="book-dialog-series-row" class="mt-3 flex items-center gap-1.5 text-sm" hidden="hidden">
+                                    <i data-lucide="library" class="w-4 h-4 text-slate-400"></i>
+                                    <a id="book-dialog-series" class="text-indigo-700 hover:underline dark:text-indigo-300"></a>
+                                </div>
+                                <div id="book-dialog-facts" class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600 dark:text-slate-300"></div>
+                                <div id="book-dialog-genres" class="mt-3 flex flex-wrap gap-1.5"></div>
+                                <a id="book-dialog-download" class="mt-5 inline-flex items-center justify-center gap-2 w-full sm:w-auto px-5 py-2.5 rounded-lg bg-slate-800 text-white font-medium shadow hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white" download="">
+                                    <i data-lucide="download" class="w-4 h-4"></i>
+                                    <span>Télécharger</span>
+                                </a>
+                                <div id="book-dialog-description-block" class="mt-6" hidden="hidden">
+                                    <p id="book-dialog-description" class="book-description text-sm leading-relaxed text-slate-700 dark:text-slate-300"></p>
+                                    <button type="button" id="book-dialog-more" class="mt-2 text-sm font-medium text-indigo-700 hover:underline dark:text-indigo-300" hidden="hidden">Lire la suite</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </dialog>
+
                 <script>
                     // On page load or when changing themes, best to add inline in `head` to avoid FOUC
                     if (localStorage.getItem('color-theme') === 'dark' || (!('color-theme' in localStorage) &amp;&amp; window.matchMedia('(prefers-color-scheme: dark)').matches)) {
@@ -358,7 +457,7 @@
                         } else {
                             parentPath = '/opds/by-author';
                         }
-                    } else if (currentPath === '/opds/search') {
+                    } else if (currentPath === '/opds/search' || currentPath === '/opds/series') {
                         parentPath = '/opds';
                     }
 
@@ -956,6 +1055,175 @@
                         });
                     }
 
+                    // Book details dialog: a plain click on a book opens it, modified clicks still download
+                    const bookDialog = document.getElementById('book-dialog');
+
+                    function bookField(link, name) {
+                        return (link.getAttribute('data-' + name) || '').trim();
+                    }
+
+                    function formatRating(value) {
+                        return (Math.round(value * 10) / 10).toString().replace('.', ',');
+                    }
+
+                    function chip(text, href) {
+                        const el = document.createElement(href ? 'a' : 'span');
+                        if (href) el.href = href;
+                        el.className = 'px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600';
+                        el.textContent = text;
+                        return el;
+                    }
+
+                    function fillBookDialog(link) {
+                        const title = bookField(link, 'title');
+                        const author = bookField(link, 'author');
+                        document.getElementById('book-dialog-title').textContent = title;
+                        document.getElementById('book-dialog-cover-title').textContent = title;
+
+                        const authorEl = document.getElementById('book-dialog-author');
+                        authorEl.textContent = author;
+                        if (author) {
+                            if (author !== 'Unknown') {
+                                authorEl.href = '/opds/by-author/' + encodeURIComponent(author);
+                            } else {
+                                authorEl.removeAttribute('href');
+                            }
+                        }
+
+                        // Large cover, title block when the EPUB has none
+                        const cover = document.getElementById('book-dialog-cover');
+                        const coverSrc = bookField(link, 'cover');
+                        cover.hidden = true;
+                        cover.onload = function() { cover.hidden = false; };
+                        cover.onerror = function() { cover.hidden = true; };
+                        cover.alt = title;
+                        if (coverSrc) {
+                            cover.src = coverSrc;
+                        } else {
+                            cover.removeAttribute('src');
+                        }
+
+                        const series = bookField(link, 'series');
+                        const seriesIndex = bookField(link, 'series-index');
+                        const seriesRow = document.getElementById('book-dialog-series-row');
+                        const seriesEl = document.getElementById('book-dialog-series');
+                        seriesRow.hidden = !series;
+                        seriesEl.textContent = seriesIndex ? 'Tome ' + seriesIndex + ' · ' + series : series;
+                        seriesEl.href = bookField(link, 'series-href') || ('/opds/series?name=' + encodeURIComponent(series));
+
+                        const facts = document.getElementById('book-dialog-facts');
+                        facts.replaceChildren();
+                        const year = bookField(link, 'year');
+                        if (year) {
+                            const yearEl = document.createElement('span');
+                            yearEl.textContent = year;
+                            facts.appendChild(yearEl);
+                        }
+                        const rating = parseFloat(bookField(link, 'rating'));
+                        if (rating > 0) {
+                            const label = 'Note : ' + formatRating(rating) + ' sur 5';
+                            const stars = document.createElement('span');
+                            stars.className = 'book-stars';
+                            stars.setAttribute('role', 'img');
+                            stars.setAttribute('aria-label', label);
+                            stars.title = label;
+                            stars.textContent = '★★★★★';
+                            const on = document.createElement('span');
+                            on.className = 'book-stars-on';
+                            on.setAttribute('aria-hidden', 'true');
+                            on.style.width = Math.min(100, rating * 20) + '%';
+                            on.textContent = '★★★★★';
+                            stars.appendChild(on);
+                            facts.appendChild(stars);
+                        }
+
+                        const genres = document.getElementById('book-dialog-genres');
+                        genres.replaceChildren();
+                        bookField(link, 'genres').split('\n').filter(Boolean).forEach(function(genre) {
+                            genres.appendChild(chip(genre, '/opds/by-genre/' + encodeURIComponent(genre) + '?page=1'));
+                        });
+
+                        const download = document.getElementById('book-dialog-download');
+                        download.href = link.getAttribute('href');
+
+                        const summary = bookField(link, 'summary');
+                        const block = document.getElementById('book-dialog-description-block');
+                        const description = document.getElementById('book-dialog-description');
+                        const more = document.getElementById('book-dialog-more');
+                        block.hidden = !summary;
+                        description.textContent = summary;
+                        description.classList.add('clamped');
+                        more.hidden = true;
+                        more.textContent = 'Lire la suite';
+                    }
+
+                    function openBookDialog(link, fromHash) {
+                        if (!bookDialog || typeof bookDialog.showModal !== 'function') {
+                            return false;
+                        }
+                        fillBookDialog(link);
+                        bookDialog.showModal();
+                        document.documentElement.style.overflow = 'hidden';
+                        bookDialog.scrollTop = 0;
+                        // "Lire la suite" only when the description is actually cut
+                        const description = document.getElementById('book-dialog-description');
+                        document.getElementById('book-dialog-more').hidden = description.scrollHeight - description.clientHeight &lt;= 2;
+                        // Shareable link to the opened details
+                        const id = link.getAttribute('data-id');
+                        if (id &amp;&amp; !fromHash) {
+                            history.replaceState(null, '', '#book=' + encodeURIComponent(id));
+                        }
+                        return true;
+                    }
+
+                    if (bookDialog) {
+                        document.addEventListener('click', function(event) {
+                            const link = event.target.closest ? event.target.closest('a.book-link') : null;
+                            if (!link || event.defaultPrevented || event.button !== 0
+                                || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+                                return;
+                            }
+                            if (openBookDialog(link, false)) {
+                                event.preventDefault();
+                            }
+                        });
+
+                        document.getElementById('book-dialog-close').addEventListener('click', function() {
+                            bookDialog.close();
+                        });
+
+                        // Click on the backdrop (outside the content) closes; Escape closes natively
+                        bookDialog.addEventListener('click', function(event) {
+                            if (event.target === bookDialog) {
+                                bookDialog.close();
+                            }
+                        });
+
+                        bookDialog.addEventListener('close', function() {
+                            document.documentElement.style.overflow = '';
+                            if (location.hash.indexOf('#book=') === 0) {
+                                history.replaceState(null, '', location.pathname + location.search);
+                            }
+                        });
+
+                        document.getElementById('book-dialog-more').addEventListener('click', function() {
+                            const description = document.getElementById('book-dialog-description');
+                            const clamped = description.classList.toggle('clamped');
+                            this.textContent = clamped ? 'Lire la suite' : 'Réduire';
+                        });
+
+                        // Opened from a shared link (#book=urn:book:…)
+                        if (location.hash.indexOf('#book=') === 0) {
+                            const wanted = decodeURIComponent(location.hash.slice('#book='.length));
+                            const target = Array.prototype.find.call(document.querySelectorAll('a.book-link'), function(link) {
+                                return link.getAttribute('data-id') === wanted;
+                            });
+                            if (target) {
+                                openBookDialog(target, true);
+                            }
+                        }
+                    }
+
                     // Setup lazy loading and pagination when DOM is ready
                     if (document.readyState === 'loading') {
                         document.addEventListener('DOMContentLoaded', function() {
@@ -1070,6 +1338,36 @@
                     <xsl:attribute name="href">
                         <xsl:value-of select="atom:link[@rel='http://opds-spec.org/acquisition/open-access']/@href"/>
                     </xsl:attribute>
+                    <!-- Book details for the details dialog (the link still downloads without JavaScript) -->
+                    <xsl:attribute name="data-id"><xsl:value-of select="atom:id"/></xsl:attribute>
+                    <xsl:attribute name="data-title"><xsl:value-of select="atom:title"/></xsl:attribute>
+                    <xsl:attribute name="data-author"><xsl:value-of select="atom:author/atom:name"/></xsl:attribute>
+                    <xsl:attribute name="data-cover"><xsl:value-of select="atom:link[@rel='http://opds-spec.org/image']/@href"/></xsl:attribute>
+                    <xsl:if test="atom:summary">
+                        <xsl:attribute name="data-summary"><xsl:value-of select="atom:summary"/></xsl:attribute>
+                    </xsl:if>
+                    <xsl:if test="dc:issued">
+                        <xsl:attribute name="data-year"><xsl:value-of select="dc:issued"/></xsl:attribute>
+                    </xsl:if>
+                    <xsl:if test="pyopds:rating">
+                        <xsl:attribute name="data-rating"><xsl:value-of select="pyopds:rating"/></xsl:attribute>
+                    </xsl:if>
+                    <xsl:if test="pyopds:series">
+                        <xsl:attribute name="data-series"><xsl:value-of select="pyopds:series"/></xsl:attribute>
+                        <xsl:attribute name="data-series-index"><xsl:value-of select="pyopds:series/@index"/></xsl:attribute>
+                        <xsl:attribute name="data-series-href"><xsl:value-of select="atom:link[@rel='related']/@href"/></xsl:attribute>
+                    </xsl:if>
+                    <xsl:if test="atom:category">
+                        <xsl:attribute name="data-genres">
+                            <xsl:for-each select="atom:category">
+                                <xsl:if test="position() &gt; 1"><xsl:text>&#10;</xsl:text></xsl:if>
+                                <xsl:choose>
+                                    <xsl:when test="@label"><xsl:value-of select="@label"/></xsl:when>
+                                    <xsl:otherwise><xsl:value-of select="@term"/></xsl:otherwise>
+                                </xsl:choose>
+                            </xsl:for-each>
+                        </xsl:attribute>
+                    </xsl:if>
                     <div class="book h-full flex flex-col p-4 text-center relative rounded-r-md shadow-md group-hover:shadow-xl transition-shadow duration-300 overflow-hidden">
                         <!-- Cover declared by the feed: thumbnail first, full image otherwise -->
                         <xsl:variable name="coverPath">
@@ -1094,6 +1392,15 @@
                             </xsl:attribute>
                         </img>
                         
+                        <!-- Volume badge of a series book -->
+                        <xsl:if test="pyopds:series/@index">
+                            <span class="absolute top-1.5 right-1.5 z-10 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none bg-slate-900/70 text-white shadow-sm backdrop-blur-sm">
+                                <xsl:attribute name="title">
+                                    <xsl:value-of select="concat('Tome ', pyopds:series/@index, ' · ', pyopds:series)"/>
+                                </xsl:attribute>
+                                <xsl:value-of select="concat('T', pyopds:series/@index)"/>
+                            </span>
+                        </xsl:if>
                         <div class="book-cover-fallback absolute inset-0 flex flex-col">
                             <div class="absolute top-0 left-0 w-3 h-full bg-black/10 rounded-l-sm dark:bg-black/20" style="border-right: 1px solid rgba(0,0,0,0.1);"></div>
                             <div class="flex-grow flex items-center justify-center px-2">

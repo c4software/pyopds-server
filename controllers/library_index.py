@@ -13,6 +13,8 @@ from controllers.opds import LIBRARY_DIR, BookMetadata, BookScanner, SecurityUti
 
 CHUNK_SIZE = 1024
 INDEX_TTL = 300
+# Books whose light metadata (book_meta) stays cached; the oldest entries are dropped beyond it
+META_CACHE_MAX = 4096
 # Characters of text per printed page (~300 words, a typical paperback novel page)
 CHARS_PER_PAGE = 1800
 HTML_EXTENSIONS = ('.xhtml', '.html', '.htm')
@@ -180,10 +182,12 @@ class LibraryIndex:
         self._by_key: dict[str, str] = {}
         self._hash_cache: dict[str, tuple[float, int, str | None]] = {}
         self._details_cache: dict[str, tuple[float, dict]] = {}
+        # {path: (mtime, book_meta)}: light OPF metadata of the books shown in the feeds
+        self._meta_cache: dict[str, tuple[float, dict]] = {}
         self._built_at = 0.0
-        # {path: (mtime, series, series index)} and {series key: [(series index, path)]}
+        # {path: (mtime, series, series index)} and {series key: [(series index or None, path)]}
         self._series_cache: dict[str, tuple[float, str | None, int | float | None]] = {}
-        self._series_index: dict[str, list[tuple[int | float, str]]] = {}
+        self._series_index: dict[str, list[tuple[int | float | None, str]]] = {}
         self._series_built_at = 0.0
 
     def _refresh(self) -> None:
@@ -226,17 +230,20 @@ class LibraryIndex:
                 return self._by_key[key]
         return None
 
-    def details(self, path: str) -> dict:
-        """Title, author, genres, series, description, year, rating, cover presence and estimated
-        print pages, cached per file modification time."""
+    def book_meta(self, path: str) -> dict:
+        """Light metadata of a library EPUB, read from its OPF only (no cover, no page estimate).
+
+        Keys: title, author, genres, series, series_index, description (plain text), year and
+        rating (0-5, None when not rated). Cached per file modification time; raises OSError when
+        the file is missing.
+        """
         mtime = os.path.getmtime(path)
-        cached = self._details_cache.get(path)
+        cached = self._meta_cache.get(path)
         if cached and cached[0] == mtime:
             return cached[1]
         info = BookMetadata.extract_epub_info(path) or {}
-        cover, _ = BookMetadata.extract_epub_cover(path)
         rating = info.get('rating')
-        details = {
+        meta = {
             'title': info.get('title'),
             'author': info.get('author'),
             'genres': info.get('genres', []),
@@ -246,12 +253,29 @@ class LibraryIndex:
             'year': release_year(info.get('date')),
             # calibre:rating counts half stars (0-10); 0 means "not rated"
             'rating': min(5.0, rating / 2) if rating and rating > 0 else None,
+        }
+        self._meta_cache.pop(path, None)
+        if len(self._meta_cache) >= META_CACHE_MAX:
+            del self._meta_cache[next(iter(self._meta_cache))]
+        self._meta_cache[path] = (mtime, meta)
+        self._series_cache[path] = (mtime, meta['series'], meta['series_index'])
+        return meta
+
+    def details(self, path: str) -> dict:
+        """Title, author, genres, series, description, year, rating (see `book_meta`), cover presence
+        and estimated print pages, cached per file modification time."""
+        mtime = os.path.getmtime(path)
+        cached = self._details_cache.get(path)
+        if cached and cached[0] == mtime:
+            return cached[1]
+        cover, _ = BookMetadata.extract_epub_cover(path)
+        details = {
+            **self.book_meta(path),
             'has_cover': cover is not None,
             'page_count': estimate_print_pages(path),
             'relative_path': os.path.relpath(path, LIBRARY_DIR).replace(os.sep, '/'),
         }
         self._details_cache[path] = (mtime, details)
-        self._series_cache[path] = (mtime, details['series'], details['series_index'])
         return details
 
     def _refresh_series(self) -> None:
@@ -259,23 +283,44 @@ class LibraryIndex:
         if time.time() - self._series_built_at < INDEX_TTL:
             return
         series_cache: dict[str, tuple[float, str | None, int | float | None]] = {}
-        index: dict[str, list[tuple[int | float, str]]] = {}
+        index: dict[str, list[tuple[int | float | None, str]]] = {}
         for path in BookScanner.get_instance().collect_all_epub_paths():
             try:
                 mtime = os.path.getmtime(path)
             except OSError:
                 continue
+            # Shared with book_meta: an OPF read by a feed is not read again here, and conversely
             cached = self._series_cache.get(path)
             if not cached or cached[0] != mtime:
                 info = BookMetadata.extract_epub_info(path) or {}
                 cached = (mtime, info.get('series'), info.get('series_index'))
             series_cache[path] = cached
             _, series, position = cached
-            if series_key(series) and position is not None:
+            if series_key(series):
                 index.setdefault(series_key(series), []).append((position, path))
         self._series_cache = series_cache
         self._series_index = index
         self._series_built_at = time.time()
+
+    def invalidate(self) -> None:
+        """Rebuild the hash and series indexes on their next use (cached metadata stays, checked by mtime)."""
+        self._built_at = 0.0
+        self._series_built_at = 0.0
+
+    @staticmethod
+    def _series_order(book: tuple[int | float | None, str]) -> tuple:
+        """Sort key of a (position, path) series book: by position (unnumbered last), then file name."""
+        return (book[0] is None, book[0] or 0, os.path.basename(book[1]).lower())
+
+    def series_books(self, series: str) -> list[tuple[int | float | None, str]]:
+        """(position, path) of the library books of `series` (names compared normalized), sorted by
+        position then file name; books without a position come last."""
+        key = series_key(series)
+        if not key:
+            return []
+        self._refresh_series()
+        books = [book for book in self._series_index.get(key, []) if os.path.exists(book[1])]
+        return sorted(books, key=self._series_order)
 
     def next_in_series(self, series: str, position: int | float, exclude: str | None = None) -> tuple[int | float, str] | None:
         """(position, path) of the library book coming after `position` in `series` (names compared
@@ -290,8 +335,9 @@ class LibraryIndex:
             return excluded is not None and os.path.realpath(path) == excluded
 
         later = sorted(
-            (book for book in self._series_index.get(key, []) if book[0] > position and not same(book[1])),
-            key=lambda book: (book[0], os.path.basename(book[1]).lower()),
+            (book for book in self._series_index.get(key, [])
+             if book[0] is not None and book[0] > position and not same(book[1])),
+            key=self._series_order,
         )
         later = [book for book in later if os.path.exists(book[1])]
         return next((book for book in later if float(book[0]).is_integer()), later[0] if later else None)

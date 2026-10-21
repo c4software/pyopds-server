@@ -18,6 +18,20 @@ PAGE_SIZE = int(os.environ.get('PAGE_SIZE', 25))
 # (always listed; the web view only loads them when the viewer enables the mosaic)
 MOSAIC_REL = 'urn:pyopds:mosaic-cover'
 MOSAIC_SIZE = 12
+ATOM_NS = 'http://www.w3.org/2005/Atom'
+DC_TERMS_NS = 'http://purl.org/dc/terms/'
+# Series, series index and rating of the book entries: OPDS 1.x (Atom) has no element for them and
+# no client convention exists (Calibre's own feed writes them as text in <content>), so they use a
+# namespace of this server, ignored by the other clients; the series is also a rel="related" link
+PYOPDS_NS = 'urn:pyopds:metadata'
+ACQUISITION_FEED = 'application/atom+xml;profile=opds-catalog;kind=acquisition'
+
+
+def format_series_index(index: int | float | None) -> str | None:
+    """Displayed series position ("2", "1.5"), None when unknown."""
+    if index is None:
+        return None
+    return str(int(index)) if float(index).is_integer() else f'{index:g}'
 
 
 def mosaic_links(paths: list[str]) -> list[tuple[str, str, str]]:
@@ -252,15 +266,40 @@ class SecurityUtils:
 
 
 class OPDSFeedGenerator:
+    """Atom/OPDS feed writer."""
+
+    def __init__(self, include_mosaic: bool = True):
+        """`include_mosaic`: keep the mosaic cover links (MOSAIC_REL), only wanted by the web view.
+
+        OPDS clients must not get them: some (CrossPoint Sync app) list every link of a navigation
+        entry as a section of their own.
+        """
+        self.include_mosaic = include_mosaic
+
     @staticmethod
-    def generate_feed(title: str, feed_id: str, links: list[tuple[str, str, str]], entries: list[dict],
+    def _link(parent: ET.Element, link: tuple) -> None:
+        """Append a (rel, href, type[, title]) link to an element."""
+        rel, href, type_, *rest = link
+        attrs = {'rel': rel, 'href': href, 'type': type_}
+        if rest and rest[0]:
+            attrs['title'] = rest[0]
+        ET.SubElement(parent, 'link', attrs)
+
+    def generate_feed(self, title: str, feed_id: str, links: list[tuple], entries: list[dict],
                       subtitle: str | None = None) -> str:
-        """Build an Atom/OPDS feed; entries may carry an optional 'summary' text."""
+        """Build an Atom/OPDS feed.
+
+        Links are (rel, href, type) tuples, with an optional fourth item: the link title. Entries may
+        carry optional book metadata: 'summary' (text), 'categories' ([(term, label)]), 'issued'
+        (year, dc:issued), 'series' ((name, index)) and 'rating' (0-5).
+        """
         feed = ET.Element(
             'feed',
             {
-                'xmlns': 'http://www.w3.org/2005/Atom',
+                'xmlns': ATOM_NS,
                 'xmlns:opds': 'http://opds-spec.org/2010/catalog',
+                'xmlns:dc': DC_TERMS_NS,
+                'xmlns:pyopds': PYOPDS_NS,
             },
         )
 
@@ -272,8 +311,8 @@ class OPDSFeedGenerator:
             datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         )
 
-        for rel, href, type_ in links:
-            ET.SubElement(feed, 'link', {'rel': rel, 'href': href, 'type': type_})
+        for link in links:
+            self._link(feed, link)
 
         for entry_data in entries:
             entry = ET.SubElement(feed, 'entry')
@@ -284,11 +323,29 @@ class OPDSFeedGenerator:
                 author = ET.SubElement(entry, 'author')
                 ET.SubElement(author, 'name').text = entry_data['author']
 
+            if entry_data.get('issued'):
+                ET.SubElement(entry, 'dc:issued').text = str(entry_data['issued'])
+
+            for term, label in entry_data.get('categories', []):
+                ET.SubElement(entry, 'category', {'term': term, 'label': label})
+
+            if entry_data.get('series'):
+                name, index = entry_data['series']
+                series = ET.SubElement(entry, 'pyopds:series')
+                series.text = name
+                if index is not None:
+                    series.set('index', format_series_index(index))
+
+            if entry_data.get('rating'):
+                ET.SubElement(entry, 'pyopds:rating').text = f"{entry_data['rating']:g}"
+
             if entry_data.get('summary'):
                 ET.SubElement(entry, 'summary', {'type': 'text'}).text = entry_data['summary']
 
-            for rel, href, type_ in entry_data['links']:
-                ET.SubElement(entry, 'link', {'rel': rel, 'href': href, 'type': type_})
+            for link in entry_data['links']:
+                if link[0] == MOSAIC_REL and not self.include_mosaic:
+                    continue
+                self._link(entry, link)
 
         xml_string = ET.tostring(feed, encoding='unicode', method='xml')
         xml_declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -334,7 +391,9 @@ class BookScanner:
         self._path_index = None
         self._recent_books_cache = None
         self._recent_books_cache_time = 0
-        # Recommendations are derived from the library indexes
+        # Series feeds and recommendations are derived from the library indexes
+        from controllers.library_index import LibraryIndex
+        LibraryIndex.get_instance().invalidate()
         from controllers.recommendations import RecommendationService
         RecommendationService.get_instance().invalidate()
     
@@ -456,6 +515,7 @@ class BookScanner:
                     'id': book_id,
                     'type': 'book',
                     'author': file_info['author'],
+                    'file_info': file_info,
                     'links': [
                         (
                             'http://opds-spec.org/acquisition/open-access',
@@ -886,9 +946,9 @@ class BookScanner:
         return paginated_books, total_count
 
     def search_books(self, query: str, page: int, size: int) -> tuple[list[dict], int]:
-        """Search books by title or author.
+        """Search books by title, author or series.
         
-        Performs case-insensitive search across both title and author fields.
+        Performs case-insensitive search across the title, author and series fields.
         Uses the same pattern as get_all_books_paginated: 
         only extracts full metadata for the current page's books.
         
@@ -917,13 +977,14 @@ class BookScanner:
             if self.security.has_path_traversal(relative_path) or not self.security.is_within_library_dir(path):
                 continue
             
-            # Extract metadata to check if it matches
-            title, author, pub_date = self.metadata_extractor.extract_epub_metadata(path)
-            title = title or os.path.basename(path)
-            author = author or 'Unknown'
-            
-            # Case-insensitive partial match in title or author
-            if query_lower in title.lower() or query_lower in author.lower():
+            # Extract metadata to check if it matches (one OPF read)
+            info = self.metadata_extractor.extract_epub_info(path) or {}
+            title = info.get('title') or os.path.basename(path)
+            author = info.get('author') or 'Unknown'
+            series = info.get('series') or ''
+
+            # Case-insensitive partial match in title, author or series
+            if query_lower in title.lower() or query_lower in author.lower() or query_lower in series.lower():
                 matching_paths.append(path)
         
         total_count = len(matching_paths)
@@ -957,9 +1018,18 @@ class OPDSController:
 
     def __init__(self, request_handler):
         self.request = request_handler
-        self.feed_generator = OPDSFeedGenerator()
+        self.feed_generator = OPDSFeedGenerator(include_mosaic=self._is_browser(request_handler))
         self.book_scanner = BookScanner.get_instance()  # Use singleton
         self.security = SecurityUtils()
+
+    @staticmethod
+    def _is_browser(request_handler) -> bool:
+        """Whether the request comes from a browser (web view through XSLT) rather than an OPDS client."""
+        from controllers.opds_auth import wants_html
+        try:
+            return wants_html(request_handler)
+        except AttributeError:
+            return False
 
     def _parse_url_params(self):
         """Parse URL parameters for pagination."""
@@ -997,6 +1067,10 @@ class OPDSController:
     def show_recent_books(self):
         """Display recently added books."""
         self._handle_recent_books()
+
+    def show_series_books(self):
+        """Display the library books of a series (?name=), sorted by position."""
+        self._handle_series_books()
 
     def show_recommendations(self):
         """Display the "read next" recommendations of the authenticated sync user.
@@ -1229,6 +1303,57 @@ class OPDSController:
 
         self._send_xml_response(xml, 'acquisition')
 
+    def _handle_series_books(self):
+        """Books of the series given by ?name=, sorted by position: 404 when no library book has it."""
+        page, size, parsed_url = self._parse_url_params()
+        name = (parse_qs(parsed_url.query).get('name', [''])[0]).strip()
+        from controllers.library_index import LibraryIndex
+        library = LibraryIndex.get_instance()
+        # Paths come from the library scan; the name is only a lookup key, never a path
+        books = [
+            (position, path) for position, path in library.series_books(name)
+            if self.security.is_within_library_dir(path)
+        ] if name else []
+        if not books:
+            self._send_error(404, 'Series not found')
+            return
+
+        total_count = len(books)
+        total_pages = self._get_total_pages(total_count, size)
+        page = min(page, total_pages)
+        path_base = f'/opds/series?name={quote(name)}'
+        links = [
+            ('self', f'{path_base}&page={page}', ACQUISITION_FEED),
+            ('start', '/opds', 'application/atom+xml;profile=opds-catalog;kind=navigation'),
+        ]
+        if page < total_pages:
+            links.append(('next', f'{path_base}&page={page + 1}', ACQUISITION_FEED))
+        if page > 1:
+            links.append(('previous', f'{path_base}&page={page - 1}', ACQUISITION_FEED))
+
+        file_list = []
+        display_name = name
+        for _, path in books[(page - 1) * size:page * size]:
+            try:
+                meta = library.book_meta(path)
+            except OSError:
+                continue
+            display_name = meta.get('series') or display_name
+            file_list.append({
+                'path': path,
+                'relative_path': os.path.relpath(path, LIBRARY_DIR),
+                'title': meta.get('title') or os.path.basename(path),
+                'author': meta.get('author') or 'Unknown',
+            })
+        entries = self._create_book_entries(file_list)
+
+        title = f'Série : {display_name}'
+        if total_pages > 1:
+            title = f'{title} (Page {page} of {total_pages})'
+        feed_id = f'urn:series:{hashlib.md5(name.casefold().encode()).hexdigest()}'
+        xml = self.feed_generator.generate_feed(title, feed_id, links, entries)
+        self._send_xml_response(xml, 'acquisition')
+
     def _current_user_recommendations(self):
         """Recommendations of the signed-in reader, None without one."""
         user = getattr(self.request, 'opds_user', None)
@@ -1290,7 +1415,8 @@ class OPDSController:
         ]
         entries = self._create_book_entries(result.books)
         for entry, book in zip(entries, result.books):
-            entry['summary'] = ' · '.join(book['reasons'])
+            # Why the book is suggested first (one line), then its description
+            entry['summary'] = '\n\n'.join(part for part in (' · '.join(book['reasons']), entry.get('summary')) if part)
         xml = self.feed_generator.generate_feed(
             'À lire ensuite', 'urn:recommendations', links, entries, subtitle=result.message
         )
@@ -1325,14 +1451,8 @@ class OPDSController:
                     }
                 )
             else:
-                formatted_entries.append(
-                    {
-                        'title': entry['title'],
-                        'id': entry['id'],
-                        'links': entry['links'],
-                        'author': entry['author'],
-                    }
-                )
+                # Books get the same entry (cover, details, series) as the other feeds
+                formatted_entries.extend(self._create_book_entries([entry['file_info']]))
 
         links = self._get_pagination_links(path_base, page, size, total_count)
         links.append(
@@ -1672,7 +1792,9 @@ class OPDSController:
             return False
         return True
 
-    def _create_book_entries(self, file_list):
+    def _create_book_entries(self, file_list: list[dict]) -> list[dict]:
+        """Feed entries of books (dicts with title, author, relative_path and path): acquisition and
+        cover links, plus the light metadata of each book (`_book_metadata_fields`)."""
         entries = []
         for file_info in file_list:
             book_id = f'urn:book:{hashlib.md5(file_info["relative_path"].encode()).hexdigest()}'
@@ -1690,16 +1812,50 @@ class OPDSController:
                 ('http://opds-spec.org/image/thumbnail', f'/cover/{encoded_path}', 'image/jpeg'),
             ]
 
-            entries.append(
-                {
-                    'title': file_info['title'],
-                    'id': book_id,
-                    'links': entry_links,
-                    'author': file_info['author'],
-                }
-            )
+            entry = {
+                'title': file_info['title'],
+                'id': book_id,
+                'links': entry_links,
+                'author': file_info['author'],
+            }
+            fields = self._book_metadata_fields(file_info.get('path'))
+            entry_links.extend(fields.pop('extra_links', []))
+            entry.update(fields)
+            entries.append(entry)
 
         return entries
+
+    @staticmethod
+    def _book_metadata_fields(path: str | None) -> dict:
+        """Entry fields from the cached OPF metadata of a book (LibraryIndex.book_meta): summary,
+        categories (genres), issued (year), series, rating and a rel="related" link to the series feed.
+
+        Only the books of the current page are read; a missing or unreadable book gives no field.
+        """
+        if not path:
+            return {}
+        from controllers.library_index import LibraryIndex
+        try:
+            meta = LibraryIndex.get_instance().book_meta(path)
+        except OSError:
+            return {}
+        fields: dict = {}
+        if meta.get('description'):
+            fields['summary'] = meta['description']
+        if meta.get('genres'):
+            fields['categories'] = [(genre, genre) for genre in meta['genres']]
+        if meta.get('year'):
+            fields['issued'] = meta['year']
+        if meta.get('rating'):
+            fields['rating'] = meta['rating']
+        series = (meta.get('series') or '').strip()
+        if series:
+            index = meta.get('series_index')
+            fields['series'] = (series, index)
+            position = format_series_index(index)
+            title = f'Série : {series} (tome {position})' if position else f'Série : {series}'
+            fields['extra_links'] = [('related', f'/opds/series?name={quote(series)}', ACQUISITION_FEED, title)]
+        return fields
 
     def _handle_download(self):
         filename = unquote(self.request.path.split('/download/')[1])

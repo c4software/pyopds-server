@@ -6,7 +6,9 @@ import importlib
 import io
 import json
 import os
+import shutil
 import socketserver
+import subprocess
 import sys
 import tempfile
 import threading
@@ -145,8 +147,8 @@ class TestOPDSCatalog(unittest.TestCase):
     def test_navigation_tiles_list_mosaic_covers(self):
         ns = {'atom': 'http://www.w3.org/2005/Atom'}
 
-        def mosaic_covers(path):
-            _, _, body = self._get(path)
+        def mosaic_covers(path, headers={'Accept': 'text/html,application/xhtml+xml'}):
+            _, _, body = self._get(path, headers=headers)
             return {
                 entry.find('atom:title', ns).text: {
                     link.get('href') for link in entry.findall('atom:link[@rel="urn:pyopds:mosaic-cover"]', ns)
@@ -159,6 +161,13 @@ class TestOPDSCatalog(unittest.TestCase):
         self.assertEqual(root['Subfolder'], {'/cover/Subfolder/beta.epub'})
         self.assertEqual(mosaic_covers('/opds/by-year')['2023 (1 books)'], {'/cover/alpha.epub'})
         self.assertEqual(mosaic_covers('/opds/by-author/letter/A?page=1')['Author One (1 livres)'], {'/cover/alpha.epub'})
+
+    def test_opds_clients_get_no_mosaic_covers(self):
+        # Mosaic covers are for the web view only: some OPDS clients list every link of a navigation entry
+        for path in ('/opds', '/opds/by-year', '/opds/by-author/letter/A?page=1'):
+            _, _, body = self._get(path, headers={'Accept': 'application/atom+xml'})
+            rels = {link.get('rel') for link in self._parse_feed(body).iter('{http://www.w3.org/2005/Atom}link')}
+            self.assertNotIn('urn:pyopds:mosaic-cover', rels, path)
 
     def test_all_books_feed_paginates_and_lists_books(self):
         ns = {'atom': 'http://www.w3.org/2005/Atom'}
@@ -480,6 +489,180 @@ class TestGenreCatalog(unittest.TestCase):
         self.assertEqual(self._feed('/opds/by-genre/Inconnu')[0], 404)
 
 
+def create_rich_epub(path, title, author, date=None, subjects=(), series=None, series_index=None,
+                     rating=None, description=None):
+    """EPUB with Calibre metadata (series, series index, rating) and an escaped HTML description."""
+    from xml.sax.saxutils import escape
+    metadata = [f'<dc:title>{escape(title)}</dc:title>', f'<dc:creator>{escape(author)}</dc:creator>']
+    if date:
+        metadata.append(f'<dc:date>{date}</dc:date>')
+    metadata += [f'<dc:subject>{escape(subject)}</dc:subject>' for subject in subjects]
+    if description:
+        metadata.append(f'<dc:description>{escape(description)}</dc:description>')
+    if series:
+        metadata.append(f'<meta name="calibre:series" content="{escape(series)}"/>')
+        if series_index is not None:
+            metadata.append(f'<meta name="calibre:series_index" content="{series_index}"/>')
+    if rating is not None:
+        metadata.append(f'<meta name="calibre:rating" content="{rating}"/>')
+    opf = (
+        "<?xml version='1.0' encoding='UTF-8'?>"
+        "<package xmlns='http://www.idpf.org/2007/opf' version='2.0'>"
+        "<metadata xmlns:dc='http://purl.org/dc/elements/1.1/' xmlns:opf='http://www.idpf.org/2007/opf'>"
+        + ''.join(metadata) + "</metadata><manifest/><spine/></package>"
+    )
+    container = ("<?xml version='1.0'?><container version='1.0' xmlns='urn:oasis:names:tc:opendocument:xmlns:container'>"
+                 "<rootfiles><rootfile full-path='content.opf' media-type='application/oebps-package+xml'/></rootfiles></container>")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with zipfile.ZipFile(path, 'w') as zf:
+        zf.writestr('mimetype', 'application/epub+zip')
+        zf.writestr('META-INF/container.xml', container)
+        zf.writestr('content.opf', opf)
+
+
+class TestBookDetailsInFeeds(unittest.TestCase):
+    """Description, genres, year, series and rating of the book entries, and the series feed."""
+
+    ns = {'atom': 'http://www.w3.org/2005/Atom', 'dc': 'http://purl.org/dc/terms/', 'pyopds': 'urn:pyopds:metadata'}
+
+    @classmethod
+    def setUpClass(cls):
+        cls._orig_env = {'LIBRARY_DIR': os.environ.get('LIBRARY_DIR'), 'PAGE_SIZE': os.environ.get('PAGE_SIZE')}
+        cls.library_dir = tempfile.TemporaryDirectory()
+        os.environ['LIBRARY_DIR'] = cls.library_dir.name
+        os.environ['PAGE_SIZE'] = '10'
+        root = cls.library_dir.name
+        # File names in the reverse order of the volumes: the series feed sorts by position
+        create_rich_epub(os.path.join(root, 'a-fondation-2.epub'), 'Fondation et Empire', 'Isaac Asimov',
+                         date='1952-01-01', subjects=['Science Fiction'], series='La Fondation', series_index='2',
+                         rating='9', description='<p>Un <b>roman</b> &amp; plus</p><p>Suite</p>')
+        create_rich_epub(os.path.join(root, 'b-fondation-1-5.epub'), 'Nouvelle', 'Isaac Asimov',
+                         series='La Fondation', series_index='1.5')
+        create_rich_epub(os.path.join(root, 'Cycle', 'c-fondation-1.epub'), 'Fondation', 'Isaac Asimov',
+                         date='1951', series='La Fondation', series_index='1.0', rating='0')
+        create_rich_epub(os.path.join(root, 'd-seul.epub'), 'Livre seul', 'Autre Auteur')
+        for module in ('controllers.opds', 'controllers.library_index'):
+            importlib.reload(importlib.import_module(module))
+        importlib.reload(importlib.import_module('routes'))
+        cls.server = importlib.reload(importlib.import_module('server'))
+        cls.httpd = ThreadedTCPServer(('localhost', 0), cls.server.UnifiedHandler)
+        cls.port = cls.httpd.server_address[1]
+        cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
+        cls.thread.start()
+        time.sleep(0.1)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+        cls.thread.join(timeout=1)
+        cls.library_dir.cleanup()
+        for key, value in cls._orig_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        importlib.reload(importlib.import_module('controllers.opds'))
+        importlib.reload(importlib.import_module('controllers.library_index'))
+        importlib.reload(importlib.import_module('server'))
+
+    def _feed(self, path):
+        status, _, body = http_request(self.port, 'GET', path)
+        if status != 200:
+            return status, None
+        return status, ET.fromstring(body)
+
+    def _entries(self, feed):
+        return {entry.find('atom:title', self.ns).text: entry for entry in feed.findall('atom:entry', self.ns)}
+
+    def test_book_entry_carries_details(self):
+        status, feed = self._feed('/opds/books?page=1')
+        self.assertEqual(status, 200)
+        entry = self._entries(feed)['Fondation et Empire']
+        self.assertEqual(entry.find('atom:summary', self.ns).get('type'), 'text')
+        self.assertEqual(entry.find('atom:summary', self.ns).text, 'Un roman & plus\n\nSuite')
+        self.assertEqual([(c.get('term'), c.get('label')) for c in entry.findall('atom:category', self.ns)],
+                         [('Science-fiction', 'Science-fiction')])
+        self.assertEqual(entry.find('dc:issued', self.ns).text, '1952')
+        series = entry.find('pyopds:series', self.ns)
+        self.assertEqual((series.text, series.get('index')), ('La Fondation', '2'))
+        self.assertEqual(entry.find('pyopds:rating', self.ns).text, '4.5')
+        related = entry.find('atom:link[@rel="related"]', self.ns)
+        self.assertEqual(related.get('href'), '/opds/series?name=La%20Fondation')
+        self.assertEqual(related.get('title'), 'Série : La Fondation (tome 2)')
+        self.assertIn('kind=acquisition', related.get('type'))
+        # Book without metadata: nothing invented
+        alone = self._entries(feed)['Livre seul']
+        for path in ('atom:summary', 'atom:category', 'dc:issued', 'pyopds:series', 'pyopds:rating',
+                     'atom:link[@rel="related"]'):
+            self.assertIsNone(alone.find(path, self.ns), path)
+        # A rating of 0 means "not rated"
+        self.assertIsNone(self._entries(feed)['Fondation'].find('pyopds:rating', self.ns))
+
+    def test_details_in_other_book_feeds(self):
+        for path in ('/opds/recent', '/opds/by-year/1952', '/opds/by-author/Isaac%20Asimov',
+                     '/opds/by-genre/Science-fiction', '/opds/search?q=empire', '/opds/folder/'):
+            status, feed = self._feed(path)
+            self.assertEqual(status, 200, path)
+            entry = self._entries(feed)['Fondation et Empire']
+            self.assertEqual(entry.find('pyopds:series', self.ns).text, 'La Fondation', path)
+            self.assertIsNotNone(entry.find('atom:summary', self.ns), path)
+        # Folder feeds now list covers like the other feeds
+        _, feed = self._feed('/opds/folder/Cycle')
+        rels = {link.get('rel') for link in self._entries(feed)['Fondation'].findall('atom:link', self.ns)}
+        self.assertIn('http://opds-spec.org/image', rels)
+        self.assertIn('related', rels)
+
+    def test_series_feed_sorted_by_position(self):
+        status, feed = self._feed('/opds/series?name=La%20Fondation')
+        self.assertEqual(status, 200)
+        self.assertEqual(feed.find('atom:title', self.ns).text, 'Série : La Fondation')
+        titles = [entry.find('atom:title', self.ns).text for entry in feed.findall('atom:entry', self.ns)]
+        self.assertEqual(titles, ['Fondation', 'Nouvelle', 'Fondation et Empire'])
+        # Names compared normalized (case, accents)
+        _, feed = self._feed('/opds/series?name=la%20fondation')
+        self.assertEqual(len(feed.findall('atom:entry', self.ns)), 3)
+
+    def test_series_feed_unknown_or_invalid(self):
+        for name in ('Inconnue', '', '../../etc/passwd', '..%2F..%2Fa-fondation-2.epub'):
+            self.assertEqual(self._feed(f'/opds/series?name={name}')[0], 404, name)
+        self.assertEqual(self._feed('/opds/series')[0], 404)
+
+    def test_search_finds_series(self):
+        _, feed = self._feed('/opds/search?q=fondation')
+        self.assertEqual(len(feed.findall('atom:entry', self.ns)), 3)
+        _, feed = self._feed('/opds/search?q=la%20fondation')
+        self.assertEqual(len(feed.findall('atom:entry', self.ns)), 3)
+
+    def test_book_meta_is_cached_by_mtime(self):
+        library_index = importlib.import_module('controllers.library_index')
+        library = library_index.LibraryIndex.get_instance()
+        path = os.path.join(self.library_dir.name, 'a-fondation-2.epub')
+        meta = library.book_meta(path)
+        self.assertEqual((meta['year'], meta['rating'], meta['series_index']), (1952, 4.5, 2))
+        opds = importlib.import_module('controllers.opds')
+        with mock.patch.object(opds.BookMetadata, 'extract_epub_info', side_effect=AssertionError('read again')):
+            self.assertIs(library.book_meta(path), meta)
+            # details() reuses it: only the cover and the page estimate are read
+            self.assertEqual(library.details(path)['description'], meta['description'])
+        self.assertEqual([os.path.basename(p) for _, p in library.series_books('LA FONDATION')],
+                         ['c-fondation-1.epub', 'b-fondation-1-5.epub', 'a-fondation-2.epub'])
+
+    def test_xslt_is_valid_xml(self):
+        tree = ET.parse(os.path.join(PROJECT_ROOT, 'static', 'opds_to_html.xslt'))
+        node = shutil.which('node')
+        if node is None:
+            self.skipTest('node is not installed: inline scripts not checked')
+        scripts = [element.text for element in tree.iter('script') if element.text and element.text.strip()]
+        with tempfile.TemporaryDirectory() as tmp:
+            for number, script in enumerate(scripts):
+                path = os.path.join(tmp, f'script{number}.js')
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write(script)
+                result = subprocess.run([node, '--check', path], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+
 def basic_header(user: str, password: str) -> dict:
     """Authorization header for HTTP Basic, UTF-8 encoded."""
     token = base64.b64encode(f'{user}:{password}'.encode('utf-8')).decode('ascii')
@@ -720,8 +903,8 @@ class TestOPDSAuthAndRecommendations(unittest.TestCase):
             links = {link.get('rel'): link.get('href') for link in entries[0].findall('atom:link', self.ns)}
             self.assertEqual(links['http://opds-spec.org/acquisition/open-access'], '/download/messiah.epub')
             self.assertEqual(links['http://opds-spec.org/image'], '/cover/messiah.epub')
-            # Root tile: mosaic of the recommended covers
-            _, _, body = self._request('GET', '/opds', headers=good)
+            # Root tile: mosaic of the recommended covers (web view only)
+            _, _, body = self._request('GET', '/opds', headers={**good, 'Accept': 'text/html'})
             tile = next(entry for entry in self._feed(body).findall('atom:entry', self.ns)
                         if entry.find('atom:id', self.ns).text == 'urn:recommendations')
             mosaic = {link.get('href') for link in tile.findall('atom:link', self.ns)

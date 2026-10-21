@@ -252,7 +252,7 @@ class RecommendationService:
                 if not path or path in opened:
                     continue
                 opened.add(path)
-                details = library.details(path)
+                details = library.book_meta(path)
             except OSError:
                 continue
             history.append({
@@ -284,7 +284,7 @@ class RecommendationService:
             if profile.series and normalize_author(author) in profile.authors and series_lookups < MAX_SERIES_LOOKUPS:
                 series_lookups += 1
                 try:
-                    details = library.details(path)
+                    details = library.book_meta(path)
                     candidate['series'] = details.get('series')
                     candidate['series_index'] = details.get('series_index')
                 except OSError:

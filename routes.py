@@ -92,6 +92,7 @@ def register_routes(router):
     router.get(r'/opds/by-author/.*', (OPDSController, 'show_author_books'), name='opds.author', auth=opds)
     router.get('/opds/by-genre', (OPDSController, 'show_by_genre_catalog'), name='opds.by-genre', auth=opds)
     router.get(r'/opds/by-genre/.*', (OPDSController, 'show_genre_books'), name='opds.genre', auth=opds)
+    router.get('/opds/series', (OPDSController, 'show_series_books'), name='opds.series', auth=opds)
     router.get(r'/opds/folder/.*', (OPDSController, 'show_folder_catalog'), name='opds.folder', auth=opds)
     router.get('/opds/refresh', (OPDSController, 'refresh_cache'), name='opds.refresh', auth=opds)
     router.get('/opds/opensearch.xml', (OPDSController, 'serve_opensearch_description'), name='opds.opensearch', auth=opds)
