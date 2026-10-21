@@ -3,6 +3,7 @@ import datetime
 import hashlib
 import heapq
 import os
+import random
 import time
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape as xml_escape
@@ -13,6 +14,21 @@ from controllers.genres import genre_key, get_genre_config, normalize_genres
 
 LIBRARY_DIR = os.environ.get('LIBRARY_DIR', 'books')
 PAGE_SIZE = int(os.environ.get('PAGE_SIZE', 25))
+# Covers shown as an animated mosaic in the background of the web view navigation tiles
+MOSAIC_REL = 'urn:pyopds:mosaic-cover'
+MOSAIC_SIZE = 12
+
+
+def mosaic_links(paths: list[str]) -> list[tuple[str, str, str]]:
+    """Links to the covers of a random sample of books, for the background of a navigation tile.
+
+    Covers are not checked (that would open every EPUB): the web view skips those answering 404.
+    """
+    sample = random.sample(paths, min(MOSAIC_SIZE, len(paths)))
+    return [
+        (MOSAIC_REL, f'/cover/{quote(os.path.relpath(path, LIBRARY_DIR).replace(os.sep, "/"))}', 'image/jpeg')
+        for path in sample
+    ]
 
 
 class BookMetadata:
@@ -346,7 +362,8 @@ class BookScanner:
                             'subsection',
                             f'/opds/folder/{encoded_subfolder}?page=1',
                             'application/atom+xml;profile=opds-catalog;kind=acquisition',
-                        )
+                        ),
+                        *mosaic_links(self.get_folder_paths(subfolder_relative)),
                     ],
                 }
             )
@@ -569,6 +586,22 @@ class BookScanner:
         self._year_index = year_index
         self._author_index = author_index
         self._genre_index = genre_index
+
+    def get_folder_paths(self, folder_relative: str) -> list[str]:
+        """Get the paths of all EPUB files under a library folder, subfolders included."""
+        if self._all_paths_cache is None:
+            self._all_paths_cache = self.collect_all_epub_paths()
+        prefix = os.path.normpath(os.path.join(LIBRARY_DIR, folder_relative)) + os.sep
+        return [path for path in self._all_paths_cache if os.path.normpath(path).startswith(prefix)]
+
+    def get_indexed_paths(self, kind: str, key: str) -> list[str]:
+        """Get the paths of the books of a year, an author or a genre key (kind: 'year', 'author' or 'genre')."""
+        self._build_year_author_indexes()
+        if kind == 'genre':
+            entry = self._genre_index.get(key)
+            return entry['paths'] if entry else []
+        index = self._year_index if kind == 'year' else self._author_index
+        return index.get(key, [])
 
     def get_years_with_counts(self) -> list[tuple[str, int]]:
         """Get all publication years with book counts.
@@ -966,6 +999,8 @@ class OPDSController:
         self._send_xml_response(xml, 'navigation')
 
     def _get_root_entries(self):
+        all_paths = self.book_scanner.get_folder_paths('')
+        recent_paths = [book['path'] for book in self.book_scanner.scan_recent_books(LIBRARY_DIR, limit=25)]
         entries = [
             {
                 'title': 'All Books',
@@ -975,7 +1010,8 @@ class OPDSController:
                         'subsection',
                         '/opds/books?page=1',
                         'application/atom+xml;profile=opds-catalog;kind=acquisition',
-                    )
+                    ),
+                    *mosaic_links(all_paths),
                 ],
             },
             {
@@ -986,7 +1022,8 @@ class OPDSController:
                         'subsection',
                         '/opds/recent',
                         'application/atom+xml;profile=opds-catalog;kind=acquisition',
-                    )
+                    ),
+                    *mosaic_links(recent_paths),
                 ],
             },
             {
@@ -997,7 +1034,8 @@ class OPDSController:
                         'subsection',
                         '/opds/by-year',
                         'application/atom+xml;profile=opds-catalog;kind=navigation',
-                    )
+                    ),
+                    *mosaic_links(all_paths),
                 ],
             },
             {
@@ -1008,7 +1046,8 @@ class OPDSController:
                         'subsection',
                         '/opds/by-author',
                         'application/atom+xml;profile=opds-catalog;kind=navigation',
-                    )
+                    ),
+                    *mosaic_links(all_paths),
                 ],
             },
             {
@@ -1019,7 +1058,8 @@ class OPDSController:
                         'subsection',
                         '/opds/by-genre',
                         'application/atom+xml;profile=opds-catalog;kind=navigation',
-                    )
+                    ),
+                    *mosaic_links(all_paths),
                 ],
             },
         ]
@@ -1039,7 +1079,8 @@ class OPDSController:
                                 'subsection',
                                 f'/opds/folder/{encoded_folder}?page=1',
                                 'application/atom+xml;profile=opds-catalog;kind=acquisition',
-                            )
+                            ),
+                            *mosaic_links(self.book_scanner.get_folder_paths(folder)),
                         ],
                     }
                 )
@@ -1175,7 +1216,8 @@ class OPDSController:
                         'subsection',
                         f'/opds/by-year/{encoded_year}?page=1',
                         'application/atom+xml;profile=opds-catalog;kind=acquisition',
-                    )
+                    ),
+                    *mosaic_links(self.book_scanner.get_indexed_paths('year', year)),
                 ],
             })
 
@@ -1241,7 +1283,8 @@ class OPDSController:
                         'subsection',
                         f'/opds/by-genre/{quote(name)}?page=1',
                         'application/atom+xml;profile=opds-catalog;kind=acquisition',
-                    )
+                    ),
+                    *mosaic_links(self.book_scanner.get_indexed_paths('genre', key)),
                 ],
             })
 
@@ -1369,7 +1412,8 @@ class OPDSController:
                         'subsection',
                         f'/opds/by-author/{encoded_author}?page=1',
                         'application/atom+xml;profile=opds-catalog;kind=acquisition',
-                    )
+                    ),
+                    *mosaic_links(self.book_scanner.get_indexed_paths('author', author)),
                 ],
             })
 

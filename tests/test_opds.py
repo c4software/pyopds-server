@@ -138,6 +138,24 @@ class TestOPDSCatalog(unittest.TestCase):
         self.assertIn('By Author', entry_titles)
         self.assertIn('Subfolder', entry_titles)
 
+    def test_navigation_tiles_list_mosaic_covers(self):
+        ns = {'atom': 'http://www.w3.org/2005/Atom'}
+
+        def mosaic_covers(path):
+            _, _, body = self._get(path)
+            return {
+                entry.find('atom:title', ns).text: {
+                    link.get('href') for link in entry.findall('atom:link[@rel="urn:pyopds:mosaic-cover"]', ns)
+                }
+                for entry in self._parse_feed(body).findall('atom:entry', ns)
+            }
+
+        root = mosaic_covers('/opds')
+        self.assertEqual(root['All Books'], {'/cover/alpha.epub', '/cover/french.epub', '/cover/Subfolder/beta.epub'})
+        self.assertEqual(root['Subfolder'], {'/cover/Subfolder/beta.epub'})
+        self.assertEqual(mosaic_covers('/opds/by-year')['2023 (1 books)'], {'/cover/alpha.epub'})
+        self.assertEqual(mosaic_covers('/opds/by-author/letter/A?page=1')['Author One (1 livres)'], {'/cover/alpha.epub'})
+
     def test_all_books_feed_paginates_and_lists_books(self):
         ns = {'atom': 'http://www.w3.org/2005/Atom'}
         status, headers, body = self._get('/opds/books?page=1')

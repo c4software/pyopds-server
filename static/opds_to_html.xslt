@@ -58,6 +58,58 @@
                     .book-cover.loaded ~ .book-cover-fallback {
                         opacity: 0;
                     }
+
+                    /* Navigation tiles: animated mosaic of the covers of their books */
+                    .tile-mosaic {
+                        position: absolute;
+                        inset: 0;
+                        display: grid;
+                        grid-template-columns: repeat(2, 1fr);
+                        grid-template-rows: repeat(2, 1fr);
+                        opacity: 0;
+                        transition: opacity 0.8s ease-in-out;
+                    }
+
+                    .tile-mosaic.single {
+                        grid-template-columns: 1fr;
+                        grid-template-rows: 1fr;
+                    }
+
+                    .tile-mosaic::after {
+                        content: '';
+                        position: absolute;
+                        inset: 0;
+                        background: radial-gradient(circle at center, rgba(15, 23, 42, 0.7), rgba(15, 23, 42, 0.25));
+                    }
+
+                    .has-mosaic .tile-mosaic {
+                        opacity: 1;
+                    }
+
+                    .tile-mosaic-cell {
+                        position: relative;
+                        overflow: hidden;
+                    }
+
+                    .tile-mosaic-cover {
+                        position: absolute;
+                        inset: 0;
+                        width: 100%;
+                        height: 100%;
+                        object-fit: cover;
+                        opacity: 0;
+                        transition: opacity 1.5s ease-in-out;
+                    }
+
+                    .tile-mosaic-cover.loaded {
+                        opacity: 1;
+                    }
+
+                    .has-mosaic > :not(.tile-mosaic) {
+                        position: relative;
+                        color: #fff !important;
+                        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+                    }
                 </style>
             </head>
             <body class="bg-slate-50 font-sans dark:bg-slate-900">
@@ -395,6 +447,111 @@
                         });
                     }
 
+                    // Fill the navigation tiles with a mosaic of covers, one cell changing every few seconds
+                    function setupTileMosaics() {
+                        const CELLS = 4;
+                        const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+                        // Resolve with the loaded URL, or null when the EPUB has no cover
+                        function loadCover(src) {
+                            return new Promise(function(resolve) {
+                                const img = new Image();
+                                img.onload = function() { resolve(img.src); };
+                                img.onerror = function() { resolve(null); };
+                                img.src = src;
+                            });
+                        }
+
+                        // Next cover of the pool that exists
+                        async function nextCover(state) {
+                            while (state.pending.length) {
+                                const src = await loadCover(state.pending.shift());
+                                if (src) {
+                                    state.covers.push(src);
+                                    return src;
+                                }
+                            }
+                            return null;
+                        }
+
+                        // Fade a cover in above the previous one, then drop the previous one
+                        function showCover(cell, src) {
+                            const img = document.createElement('img');
+                            img.className = 'tile-mosaic-cover';
+                            img.alt = '';
+                            img.src = src;
+                            cell.appendChild(img);
+                            void img.offsetWidth; // Start the transition from opacity 0
+                            img.classList.add('loaded');
+                            img.addEventListener('transitionend', function() {
+                                while (cell.firstChild !== img) cell.firstChild.remove();
+                            }, { once: true });
+                        }
+
+                        async function startMosaic(mosaic, state) {
+                            const first = (await Promise.all(state.pending.splice(0, CELLS).map(loadCover))).filter(Boolean);
+                            state.covers.push(...first);
+                            while (first.length &lt; CELLS) {
+                                const src = await nextCover(state);
+                                if (!src) break;
+                                first.push(src);
+                            }
+                            if (!first.length) return;
+
+                            // Too few covers for a grid: a single cover filling the tile
+                            const shown = first.length &lt; CELLS ? first.slice(0, 1) : first;
+                            mosaic.classList.toggle('single', shown.length === 1);
+                            const cells = shown.map(function(src) {
+                                const cell = document.createElement('div');
+                                cell.className = 'tile-mosaic-cell';
+                                mosaic.appendChild(cell);
+                                showCover(cell, src);
+                                return cell;
+                            });
+                            mosaic.parentElement.classList.add('has-mosaic');
+                            if (reduceMotion) return;
+
+                            let lastCell = -1;
+                            async function rotate() {
+                                if (!document.hidden &amp;&amp; state.visible) {
+                                    // Discover the rest of the pool first, then reuse the known covers
+                                    let src = await nextCover(state);
+                                    if (!src) {
+                                        const hidden = state.covers.filter(function(cover) { return !shown.includes(cover); });
+                                        src = hidden.length ? hidden[Math.floor(Math.random() * hidden.length)] : null;
+                                    }
+                                    if (!src) return; // Every cover is already on screen
+                                    let index = Math.floor(Math.random() * cells.length);
+                                    if (index === lastCell &amp;&amp; cells.length > 1) index = (index + 1) % cells.length;
+                                    lastCell = index;
+                                    shown[index] = src;
+                                    showCover(cells[index], src);
+                                }
+                                setTimeout(rotate, 5000 + Math.random() * 4000);
+                            }
+                            setTimeout(rotate, 3000 + Math.random() * 5000);
+                        }
+
+                        // Load covers only once a tile is near the viewport, and animate only visible tiles
+                        const states = new Map();
+                        const observer = new IntersectionObserver(function(entries) {
+                            entries.forEach(function(entry) {
+                                let state = states.get(entry.target);
+                                if (!state) {
+                                    if (!entry.isIntersecting) return;
+                                    state = { pending: entry.target.getAttribute('data-covers').split(' ').filter(Boolean), covers: [], visible: true };
+                                    states.set(entry.target, state);
+                                    startMosaic(entry.target, state);
+                                }
+                                state.visible = entry.isIntersecting;
+                            });
+                        }, { rootMargin: '50px' });
+
+                        document.querySelectorAll('.tile-mosaic[data-covers]').forEach(function(mosaic) {
+                            observer.observe(mosaic);
+                        });
+                    }
+
                     // Setup enhanced pagination with numbered page links
                     function setupPagination() {
                         const pageInfoEl = document.getElementById('page-info');
@@ -496,10 +653,12 @@
                     if (document.readyState === 'loading') {
                         document.addEventListener('DOMContentLoaded', function() {
                             setupLazyCoverLoading();
+                            setupTileMosaics();
                             setupPagination();
                         });
                     } else {
                         setupLazyCoverLoading();
+                        setupTileMosaics();
                         setupPagination();
                     }
                 </script>
@@ -514,7 +673,8 @@
                     <xsl:attribute name="href">
                         <xsl:value-of select="atom:link[@rel='subsection']/@href"/>
                     </xsl:attribute>
-                    <div class="h-full bg-slate-100 flex flex-col items-center justify-center p-4 text-center border border-slate-200 dark:bg-slate-800 dark:border-slate-700">
+                    <div class="h-full relative bg-slate-100 flex flex-col items-center justify-center p-4 text-center border border-slate-200 dark:bg-slate-800 dark:border-slate-700">
+                        <xsl:call-template name="tile-mosaic"/>
                         <xsl:choose>
                             <xsl:when test="atom:id = 'urn:all-books'">
                                 <i data-lucide="library" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
@@ -543,7 +703,8 @@
                     <xsl:attribute name="href">
                         <xsl:value-of select="atom:link[@rel='subsection']/@href"/>
                     </xsl:attribute>
-                    <div class="h-full bg-slate-100 flex flex-col items-center justify-center p-4 text-center border border-slate-200 dark:bg-slate-800 dark:border-slate-700">
+                    <div class="h-full relative bg-slate-100 flex flex-col items-center justify-center p-4 text-center border border-slate-200 dark:bg-slate-800 dark:border-slate-700">
+                        <xsl:call-template name="tile-mosaic"/>
                         <xsl:variable name="letter" select="substring-after(atom:id, 'urn:author-letter:')"/>
                         <div class="text-4xl font-bold text-slate-600 dark:text-slate-300 mb-2">
                             <xsl:value-of select="$letter"/>
@@ -558,7 +719,8 @@
                     <xsl:attribute name="href">
                         <xsl:value-of select="atom:link[@rel='subsection']/@href"/>
                     </xsl:attribute>
-                    <div class="h-full bg-slate-100 flex flex-col items-center justify-center p-4 text-center border border-slate-200 dark:bg-slate-800 dark:border-slate-700">
+                    <div class="h-full relative bg-slate-100 flex flex-col items-center justify-center p-4 text-center border border-slate-200 dark:bg-slate-800 dark:border-slate-700">
+                        <xsl:call-template name="tile-mosaic"/>
                         <i data-lucide="tag" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
                         <div class="font-semibold text-slate-700 transition-colors dark:text-slate-300"><xsl:value-of select="atom:title"/></div>
                         <div class="text-sm text-slate-500 mt-1 dark:text-slate-400">Genre</div>
@@ -571,7 +733,8 @@
                     <xsl:attribute name="href">
                         <xsl:value-of select="atom:link[@rel='subsection']/@href"/>
                     </xsl:attribute>
-                    <div class="h-full bg-slate-100 flex flex-col items-center justify-center p-4 text-center border border-slate-200 dark:bg-slate-800 dark:border-slate-700">
+                    <div class="h-full relative bg-slate-100 flex flex-col items-center justify-center p-4 text-center border border-slate-200 dark:bg-slate-800 dark:border-slate-700">
+                        <xsl:call-template name="tile-mosaic"/>
                         <i data-lucide="user" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
                         <div class="font-semibold text-slate-700 transition-colors dark:text-slate-300"><xsl:value-of select="atom:title"/></div>
                         <div class="text-sm text-slate-500 mt-1 dark:text-slate-400">Auteur</div>
@@ -583,7 +746,8 @@
                     <xsl:attribute name="href">
                         <xsl:value-of select="atom:link[@rel='subsection']/@href"/>
                     </xsl:attribute>
-                    <div class="h-full bg-slate-100 flex flex-col items-center justify-center p-4 text-center border border-slate-200 dark:bg-slate-800 dark:border-slate-700">
+                    <div class="h-full relative bg-slate-100 flex flex-col items-center justify-center p-4 text-center border border-slate-200 dark:bg-slate-800 dark:border-slate-700">
+                        <xsl:call-template name="tile-mosaic"/>
                         <i data-lucide="folder" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
                         <div class="font-semibold text-slate-700 transition-colors dark:text-slate-300 "><xsl:value-of select="atom:title"/></div>
                         <div class="text-sm text-slate-500 mt-1 dark:text-slate-400">Collection</div>
@@ -631,6 +795,20 @@
                 </a>
             </xsl:otherwise>
         </xsl:choose>
+    </xsl:template>
+
+    <!-- Background of a navigation tile: covers listed by the feed, animated by setupTileMosaics -->
+    <xsl:template name="tile-mosaic">
+        <xsl:if test="atom:link[@rel='urn:pyopds:mosaic-cover']">
+            <div class="tile-mosaic" aria-hidden="true">
+                <xsl:attribute name="data-covers">
+                    <xsl:for-each select="atom:link[@rel='urn:pyopds:mosaic-cover']">
+                        <xsl:if test="position() &gt; 1"><xsl:text> </xsl:text></xsl:if>
+                        <xsl:value-of select="@href"/>
+                    </xsl:for-each>
+                </xsl:attribute>
+            </div>
+        </xsl:if>
     </xsl:template>
 
 </xsl:stylesheet>
