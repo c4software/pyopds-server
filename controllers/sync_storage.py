@@ -588,6 +588,23 @@ class SyncStorage:
             ).rowcount
         return rows
 
+    def synced_references(self) -> tuple[set[str], set[str], set[str]]:
+        """Library references of every synced document, all users: document ids (and their
+        aliases), device file names and EPUBs associated by hand (relative to LIBRARY_DIR)."""
+        documents: set[str] = set()
+        filenames: set[str] = set()
+        library_paths: set[str] = set()
+        with self._get_connection() as conn:
+            for row in conn.execute('SELECT document FROM progress UNION SELECT alias FROM document_aliases'):
+                documents.add(row['document'])
+            for row in conn.execute('SELECT document, filename, library_path FROM documents'):
+                documents.add(row['document'])
+                if row['filename']:
+                    filenames.add(row['filename'])
+                if row['library_path']:
+                    library_paths.add(row['library_path'])
+        return documents, filenames, library_paths
+
     # --------------------------------------------------------------- documents
 
     def upsert_documents(self, user: str, items: list[dict]) -> int:

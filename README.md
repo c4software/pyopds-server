@@ -282,6 +282,25 @@ python tools/tailwind.py --watch  # rebuild on every change of static/
 
 [`tools/tailwind.py`](tools/tailwind.py) downloads the pinned CLI version once (checked against its SHA-256) into `.cache/`, then runs it with [`tailwind.config.js`](tailwind.config.js) (dark mode by class, classes scanned in `static/*.xslt|html|js` and `static/catalog/*.js`) and [`styles/tailwind.css`](styles/tailwind.css). Extra arguments go to the Tailwind CLI. The Docker image builds the stylesheet itself (`css` stage of the Dockerfile), and the development compose file rebuilds it on every change.
 
+## Duplicate books
+
+A command line tool finds the duplicate EPUBs of the library (`LIBRARY_DIR`), and can remove them:
+
+```bash
+python -m controllers.duplicates                         # report only
+python -m controllers.duplicates --json                  # report as JSON
+python -m controllers.duplicates --move-to ../doublons   # move the extra copies out of the library
+python -m controllers.duplicates --delete                # delete the extra copies
+# In the Docker image
+docker exec cops python -m controllers.duplicates --move-to /config/doublons
+```
+
+- **Identical files** (same SHA-256), wherever they are stored.
+- **Same book**: different files whose metadata give the same title, author (word order, case, accents and punctuation ignored: "Asimov, Isaac" = "Isaac Asimov") and series position, with texts of similar lengths (`--identical-only` skips them).
+- **To check**: same metadata but texts of very different lengths (one volume of a book published in several, abridged edition…): reported, never removed.
+
+In each group one file is kept: the one already read on a reader (known to the sync database, so its progress stays attached to a library book), then the one with a cover, a readable file name containing the title (not garbled by a wrong encoding), metadata, the largest file, the oldest. Folders left empty are removed. `--move-to` must be outside the library, otherwise the copies would still appear in the catalog.
+
 ## Security Consideration
 
 This server is designed to be lightweight and does not include HTTPS support; the catalog is public unless `OPDS_AUTH=true`, and passwords travel in clear text over plain HTTP. For production use, it is strongly recommended to place the server behind a reverse proxy (e.g., SWAG, Nginx, or Nginx Proxy Manager).
