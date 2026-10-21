@@ -405,8 +405,25 @@ class TestCrossPointSync(unittest.TestCase):
         status, content_type, _ = self.raw_get('/static/reading.css')
         self.assertEqual((status, content_type), (200, 'text/css; charset=utf-8'))
 
+    def test_static_assets_caching(self):
+        # Dotted names (xslt-polyfill.min.js) are served; versioned URLs are immutable, plain ones revalidated
+        conn = http.client.HTTPConnection('localhost', self.port, timeout=5)
+        conn.request('GET', '/static/xslt-polyfill.min.js?v=1')
+        response = conn.getresponse()
+        response.read()
+        conn.close()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.getheader('Cache-Control'), 'public, max-age=31536000, immutable')
+        conn = http.client.HTTPConnection('localhost', self.port, timeout=5)
+        conn.request('GET', '/static/xslt-polyfill.min.js', headers={'If-Modified-Since': response.getheader('Last-Modified')})
+        response = conn.getresponse()
+        conn.close()
+        self.assertEqual(response.status, 304)
+        self.assertEqual(response.getheader('Cache-Control'), 'no-cache')
+
     def test_static_route_refuses_other_files(self):
-        for path in ('/static/missing.js', '/static/opds_to_html.xslt', '/static/..%2Fserver.py', '/static/.hidden.js'):
+        for path in ('/static/missing.js', '/static/opds_to_html.xslt', '/static/..%2Fserver.py', '/static/.hidden.js',
+                     '/static/x..js', '/static/xslt-polyfill.LICENSE'):
             status, _, _ = self.raw_get(path)
             self.assertEqual(status, 404, path)
 

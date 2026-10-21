@@ -24,6 +24,9 @@ DC_TERMS_NS = 'http://purl.org/dc/terms/'
 # no client convention exists (Calibre's own feed writes them as text in <content>), so they use a
 # namespace of this server, ignored by the other clients; the series is also a rel="related" link
 PYOPDS_NS = 'urn:pyopds:metadata'
+XHTML_NS = 'http://www.w3.org/1999/xhtml'
+# XSLT engine in WebAssembly for browsers that dropped native XSLT (github.com/mfreed7/xslt_polyfill, BSD-3)
+XSLT_POLYFILL = 'xslt-polyfill.min.js'
 ACQUISITION_FEED = 'application/atom+xml;profile=opds-catalog;kind=acquisition'
 
 
@@ -303,6 +306,10 @@ class OPDSFeedGenerator:
             },
         )
 
+        # Browsers without native XSLT (Chrome 158+) run the XSLT in WebAssembly from this script; with
+        # native XSLT the page is transformed first and the script never loads. OPDS clients ignore it.
+        from controllers.webui import asset_url
+        ET.SubElement(feed, 'script', {'xmlns': XHTML_NS, 'src': asset_url(XSLT_POLYFILL)})
         ET.SubElement(feed, 'title').text = title
         ET.SubElement(feed, 'id').text = feed_id
         if subtitle:

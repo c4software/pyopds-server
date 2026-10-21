@@ -1,13 +1,25 @@
-"""Web UI pages that are not OPDS feeds: the reading statistics / sync page and its assets."""
+"""Web UI pages that are not OPDS feeds (reading page, sign-in page) and the static assets of the web UI."""
+import email.utils
 import os
 import re
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static')
 
-# Only plain file names with a known web extension are served from static/
-STATIC_NAME_RE = re.compile(r'^[A-Za-z0-9_-]+\.(html|js|css|svg)$')
+# Only plain file names (no folder, no leading dot) with a known web extension are served from static/
+STATIC_NAME_RE = re.compile(r'^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.(html|js|css|svg)$')
 # Asset references in the served pages, versioned so that a proxy caching static files serves the new ones
-ASSET_REF_RE = re.compile(r'(/static/([A-Za-z0-9_-]+\.(?:js|css|svg)))"')
+ASSET_REF_RE = re.compile(r'(/static/([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.(?:js|css|svg)))"')
+# A versioned URL never changes content: cached for a year (the version changes with the file)
+IMMUTABLE = 'public, max-age=31536000, immutable'
+
+
+def asset_url(name: str) -> str:
+    """URL of a static/ asset, versioned by its modification time (see ASSET_REF_RE)."""
+    try:
+        return f'/static/{name}?v={int(os.path.getmtime(os.path.join(STATIC_DIR, name)))}'
+    except OSError:
+        return f'/static/{name}'
+
 CONTENT_TYPES = {
     'html': 'text/html; charset=utf-8',
     'js': 'text/javascript; charset=utf-8',
@@ -42,6 +54,15 @@ class WebUIController:
             self._send_error(404, 'Not found')
             return
         try:
+            mtime = int(os.path.getmtime(path))
+            last_modified = email.utils.formatdate(mtime, usegmt=True)
+            # Unchanged since the browser's copy: no body (the XSLT polyfill weighs 1.5 MB)
+            if match.group(1) != 'html' and self._not_modified_since(mtime):
+                self.request.send_response(304)
+                self.request.send_header('Last-Modified', last_modified)
+                self.request.send_header('Cache-Control', self._cache_control())
+                self.request.end_headers()
+                return
             with open(path, 'rb') as f:
                 data = f.read()
             if match.group(1) == 'html':
@@ -55,9 +76,27 @@ class WebUIController:
         self.request.send_response(200)
         self.request.send_header('Content-Type', CONTENT_TYPES[match.group(1)])
         self.request.send_header('Content-Length', str(len(data)))
-        self.request.send_header('Cache-Control', 'no-cache')
+        if match.group(1) == 'html':
+            self.request.send_header('Cache-Control', 'no-cache')
+        else:
+            self.request.send_header('Last-Modified', last_modified)
+            self.request.send_header('Cache-Control', self._cache_control())
         self.request.end_headers()
         self.request.wfile.write(data)
+
+    def _cache_control(self) -> str:
+        """Versioned asset URLs are immutable; plain ones are revalidated (Last-Modified)."""
+        return IMMUTABLE if 'v=' in self.request.path.partition('?')[2] else 'no-cache'
+
+    def _not_modified_since(self, mtime: int) -> bool:
+        header = self.request.headers.get('If-Modified-Since')
+        if not header:
+            return False
+        try:
+            since = email.utils.parsedate_to_datetime(header).timestamp()
+        except (TypeError, ValueError, IndexError):
+            return False
+        return mtime <= since
 
     @staticmethod
     def _versioned_ref(match: re.Match) -> str:
@@ -76,4 +115,4 @@ class WebUIController:
         self.request.wfile.write(body)
 
 
-__all__ = ['WebUIController']
+__all__ = ['WebUIController', 'asset_url']

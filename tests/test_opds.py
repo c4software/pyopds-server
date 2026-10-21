@@ -169,6 +169,21 @@ class TestOPDSCatalog(unittest.TestCase):
             rels = {link.get('rel') for link in self._parse_feed(body).iter('{http://www.w3.org/2005/Atom}link')}
             self.assertNotIn('urn:pyopds:mosaic-cover', rels, path)
 
+    def test_xslt_polyfill_fetch_still_gets_mosaic_covers(self):
+        # The XSLT polyfill fetches the feed again with fetch(): no text/html, but Fetch metadata headers
+        _, _, body = self._get('/opds', headers={'Accept': '*/*', 'Sec-Fetch-Mode': 'cors'})
+        rels = {link.get('rel') for link in self._parse_feed(body).iter('{http://www.w3.org/2005/Atom}link')}
+        self.assertIn('urn:pyopds:mosaic-cover', rels)
+
+    def test_feeds_load_the_xslt_polyfill(self):
+        # Browsers without native XSLT (Chrome 158+) transform the feed with the polyfill script
+        for path in ('/opds', '/opds/books', '/opds/search?q=alpha'):
+            _, _, body = self._get(path)
+            script = self._parse_feed(body).find('{http://www.w3.org/1999/xhtml}script')
+            self.assertIsNotNone(script, path)
+            self.assertRegex(script.get('src'), r'^/static/xslt-polyfill\.min\.js\?v=\d+$')
+            self.assertIn(b'<?xml-stylesheet type="text/xsl" href="/opds_to_html.xslt"?>', body)
+
     def test_all_books_feed_paginates_and_lists_books(self):
         ns = {'atom': 'http://www.w3.org/2005/Atom'}
         status, headers, body = self._get('/opds/books?page=1')

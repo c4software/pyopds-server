@@ -42,7 +42,8 @@ Le projet suit une architecture de type MVC (Modèle-Vue-Contrôleur) simplifié
     * `online_metadata.py` : Détails de livres en ligne optionnels (iTunes, Open Library, Hardcover) en repli de la bibliothèque : cache SQLite `catalog_cache` partagé, recherches dans un thread de fond (jamais dans le chemin d'une requête, sauf `cover/candidates`).
     * `webui.py` : Pages statiques de l'interface web hors flux OPDS (page « Lecture » `/reading` et ses fichiers `/static/...`).
 * `genres.toml` : Correspondances sujets → genres, sujets ignorés et seuil d'affichage (complétable via `GENRES_CONFIG_PATH`).
-* `static/` : Fichiers statiques (XSLT pour l'affichage navigateur, page `reading.html/js/css` des statistiques qui interroge l'API de synchronisation).
+* `static/` : Fichiers statiques (XSLT pour l'affichage navigateur, pages `reading` et `login`, `account.js`, `tailwind.css` compilé, `xslt-polyfill.min.js` vendorisé).
+* `tools/` : Outils de développement uniquement (configuration Tailwind pour générer `static/tailwind.css`).
 * `tests/` : Tests unitaires (`unittest`).
 
 ### Ajout de fonctionnalités
@@ -77,6 +78,12 @@ Le projet suit une architecture de type MVC (Modèle-Vue-Contrôleur) simplifié
 * Le routeur est "custom". Il supporte les Regex.
 * Format : `router.get(r'/url/pattern', (ControllerClass, 'method_name'), name='route.name')`.
 * Les routes du catalogue et de la webui prennent `auth='opds'` (catalogue public, privé si `OPDS_AUTH=true`) ; celles qui dépendent du lecteur prennent `auth='user'` (compte requis). L'utilisateur identifié est exposé dans `request_handler.opds_user` (`None` sinon).
+
+### Interface web (XSLT côté client)
+* Le même flux sert tous les clients : les navigateurs le transforment en HTML avec `static/opds_to_html.xslt` (instruction `<?xml-stylesheet?>`). Chrome 158+ n'a plus de XSLT natif : chaque flux embarque `<script xmlns="http://www.w3.org/1999/xhtml" src="/static/xslt-polyfill.min.js?v=…"/>` (polyfill WebAssembly, ignoré quand le XSLT natif existe et par les clients OPDS). Ne pas retirer ce script de `generate_feed`.
+* Les scripts de la page doivent fonctionner aussi avec le polyfill : ne pas dépendre uniquement de `DOMContentLoaded` (tester `document.readyState`).
+* Les classes Tailwind viennent de `static/tailwind.css`, **compilé** (pas de CDN, qui ne s'applique pas avec le polyfill). Après avoir ajouté des classes Tailwind dans `static/`, régénérer : `npx tailwindcss@3.4.19 -c tools/tailwind.config.js -i tools/tailwind.input.css -o static/tailwind.css --minify`.
+* `wants_html()` (`controllers/opds_auth.py`) distingue navigateur et client OPDS (`Accept: text/html` ou en-têtes `Sec-Fetch-*`) : les ajouts propres à la webui (liens de mosaïque) ne sont envoyés qu'aux navigateurs.
 
 ## 5. Workflow de Développement
 

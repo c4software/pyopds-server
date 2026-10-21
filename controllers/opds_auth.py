@@ -142,8 +142,13 @@ def _cookie_header(request_handler, name: str, value: str, max_age: int, http_on
 
 
 def wants_html(request_handler) -> bool:
-    """Browser navigation (sent to the sign-in page) rather than an OPDS client (answered with Basic)."""
-    return 'text/html' in (request_handler.headers.get('Accept') or '')
+    """Browser request (web UI) rather than an OPDS client (answered with Basic, no web UI extras).
+
+    Browsers send `Accept: text/html` when navigating, and Fetch metadata (`Sec-Fetch-*`) on every
+    request, including the feed the XSLT polyfill fetches again with `fetch()`; OPDS clients send neither.
+    """
+    headers = request_handler.headers
+    return 'text/html' in (headers.get('Accept') or '') or bool(headers.get('Sec-Fetch-Mode'))
 
 
 def _redirect(request_handler, location: str, cookies: list[str] = ()) -> None:

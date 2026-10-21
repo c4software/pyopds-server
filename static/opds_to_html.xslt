@@ -13,13 +13,9 @@
             <head>
                 <title><xsl:value-of select="atom:title"/></title>
                 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-                <script src="https://cdn.tailwindcss.com"></script>
-                <script>
-                    tailwind.config = {
-                        darkMode: 'class'
-                    }
-                </script>
-                <script src="https://unpkg.com/lucide@latest"></script>
+                <!-- Tailwind compiled once (tools/tailwind.config.js): works with native XSLT and with the polyfill -->
+                <link rel="stylesheet" href="/static/tailwind.css"/>
+                <script src="https://unpkg.com/lucide@1.61.0"></script>
                 <style>
                     .book-link:nth-child(6n+1) .book { background-color: #e0f2f1; } /* Teal */
                     .book-link:nth-child(6n+2) .book { background-color: #fbe9e7; } /* Peach */

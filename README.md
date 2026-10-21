@@ -149,7 +149,9 @@ Navigation entries only list the links clients need: the cover mosaic links of t
 
 ### Web interface
 
-Opening the catalog URL in a browser shows it as a web page (the feed is turned into HTML by [`static/opds_to_html.xslt`](static/opds_to_html.xslt)). The header holds the search field and these buttons:
+Opening the catalog URL in a browser shows it as a web page: the browser turns the feed into HTML with [`static/opds_to_html.xslt`](static/opds_to_html.xslt), so browsers and OPDS clients read the very same feed. Browsers without native XSLT (Chrome removes it in version 158, November 2026) use [xslt-polyfill](https://github.com/mfreed7/xslt_polyfill), the XSLT engine compiled to WebAssembly (BSD-3, `static/xslt-polyfill.min.js`): every feed references it, it is only downloaded when native XSLT is missing (1.5 MB, cached for a year), and OPDS clients ignore it. The styles are a compiled Tailwind stylesheet (`static/tailwind.css`, rebuilt with the command in [`tools/tailwind.config.js`](tools/tailwind.config.js) after changing Tailwind classes).
+
+The header holds the search field and these buttons:
 
 - **Home**, **Reading page** (chart icon, see [Reading page](#reading-page-web-ui)) and **Refresh** (rescans the library and clears the caches).
 - **Se connecter** / **logout**: optional sign-in (see below), which shows the « À lire ensuite » tile.
