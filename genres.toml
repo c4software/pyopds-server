@@ -14,42 +14,88 @@ min_books = 3
 ignored = [
     "fiction", "roman", "romans", "general", "generalites", "litterature", "literature",
     "ebook", "ebooks", "epub", "livre", "livres", "book", "books", "french", "francais",
-    "non classifiable", "divers", "autre", "autres", "unknown", "inconnu",
+    "non classifiable", "divers", "autre", "autres", "unknown", "inconnu", "other",
+    "novels", "general fiction", "literature fiction", "literary", "literary collections",
+    "litterature generale", "litterature moderne", "livre francais", "romans et nouvelles",
+    "contemporain", "contemporains", "prose contemporary", "nouveaux", "collections",
+    # Google Books categories that rarely describe the book itself
+    "literary criticism", "european", "continental european", "europe", "foreign language study",
+    "antiques collectibles", "social science", "man woman relationships", "france", "paris france",
     # Reading states and library bookkeeping
-    "lu", "non lu", "a lire", "fait maison", "readers", "fr roman",
+    "lu", "non lu", "non lus", "a lire", "fait maison", "readers", "fr roman",
 ]
 
 # Displayed genre = subjects merged into it
 [aliases]
 "Science-fiction" = [
-    "sf", "science fiction", "sciencefiction", "science fiction fantasy", "fr scifi",
-    "anticipation", "space opera",
+    "sf", "s f", "science fiction", "sciencefiction", "science fiction fantasy", "fr scifi",
+    "sf space", "fn anticipation", "fantastique science fiction", "anticipation", "space opera",
+    "extraterrestres", "post apocalyptique",
 ]
 "Policier" = [
     "policier", "policiers", "polar", "polars", "roman policier", "romans policiers",
     "crime", "mystery", "detective", "policier crime mystere", "policier mystere",
-    "policier thriller",
+    "policier thriller", "policiier mystere crime", "policer", "policiers mysteres",
+    "mystery detective", "detective and mystery stories", "murder mysteries",
+    "policier serie noire", "romans policiers et espionnage",
 ]
 "Policier historique" = ["policier historique"]
-"Fantasy" = ["fantasy"]
-"Heroic fantasy" = ["heroic fantasy", "heroique fantaisie", "fr heroique"]
-"Fantastique" = ["fantastique", "roman fantastique"]
-"Urban fantasy" = ["urban fantasy", "urban", "fantastique urban"]
-"Horreur" = ["horreur", "horror", "terreur"]
-"Roman historique" = [
-    "roman historique", "romans historiques", "historique", "recit historique",
-    "historical fiction",
+"Thriller" = ["thriller", "thrillers", "techno thriller", "suspense", "suspens", "suspense fiction"]
+"Espionnage" = ["espionnage", "espionage"]
+"Fantasy" = [
+    "fantasy", "fantasy magic", "fantasy fiction", "dark fantasy", "fantaisie", "magie",
+    "creatures fantastiques", "monde paralleles", "autre monde",
 ]
-"Aventure" = ["aventure", "aventures", "adventure", "action aventure"]
-"Biographie" = ["biographie", "biography", "autobiographie"]
+"Heroic fantasy" = ["heroic fantasy", "heroique fantaisie", "fr heroique", "roman heroique", "epique"]
+"Fantastique" = ["fantastique", "roman fantastique", "fantastic", "fr fantastique"]
+"Urban fantasy" = ["urban fantasy", "urban", "fantastique urban"]
+"Bit-lit" = ["bit lit", "bitlit", "vampire"]
+"Horreur" = ["horreur", "horror", "horror tales", "terreur", "epouvante", "zombie"]
+"Roman historique" = [
+    "roman historique", "romans historiques", "romans historique", "historique",
+    "recit historique", "historical fiction", "historical", "historic",
+    "romans historique aventures", "fr roman historique", "roman egyptien",
+]
+"Histoire" = ["histoire", "history", "histoire medievale", "histoire generale et thematique"]
+"Seconde Guerre mondiale" = [
+    "guerre 1939 1945", "1939 1945", "world war", "shoah", "holocauste", "iiieme reich",
+]
+"Aventure" = ["aventure", "aventures", "adventure", "action aventure", "action adventure", "roman d aventures"]
+"Biographie" = [
+    "biographie", "biography", "autobiographie", "autobiography", "biography autobiography",
+    "biographie histoire aventure",
+]
+"Récit" = ["recit", "recits"]
+"Essai" = [
+    "essai", "essays", "essai illustre", "document", "documents essais", "documents et essais",
+    "non fiction", "critique", "critique sociale", "pamphlet",
+]
+"Politique" = ["politique", "political science", "political", "fr politique", "documentaire politique"]
+"Philosophie" = ["philosophie", "philosophy", "fr philosophie", "philosophie spiritualite", "taoist philosophy"]
+"Religion" = ["religion", "religious", "christianity", "christian theology", "taoism"]
+"Ésotérisme" = ["esoterisme", "esoteric"]
+"Sciences" = ["science", "sciences", "science et technologie", "mathematiques", "intelligence artificielle"]
+"Psychologie" = ["psychologie", "psychology"]
+"Classique" = [
+    "classique", "classics", "roman classique", "romans classiques", "les classiques",
+    "classique anglais",
+]
 "Littérature française" = ["litterature francaise", "litt francaise", "lit fr", "french fiction"]
 "Littérature étrangère" = ["litterature etrangere", "litt etrangere"]
-"Littérature américaine" = ["litterature americaine", "auteur e americain e"]
-"Jeunesse" = ["jeunesse", "juvenile fiction"]
-"Thriller" = ["thriller", "thrillers"]
-"Humour" = ["humour", "humor"]
-"Nouvelles" = ["nouvelles", "short stories"]
+"Littérature américaine" = ["litterature americaine", "auteur e americain e", "american fiction", "american"]
+"Littérature anglaise" = ["litterature anglaise", "litterature anglo saxonne"]
+"Littérature allemande" = ["litterature allemande", "litterature germanique"]
+"Littérature italienne" = ["litterature italienne", "litterature it"]
+"Littérature sud-américaine" = ["litterature sud americaine", "lit sud americane"]
+"Littérature japonaise" = ["litterature japonaise", "japonais"]
+"Littérature asiatique" = ["litterature asiatique", "lit asiat"]
+"Jeunesse" = [
+    "jeunesse", "juvenile fiction", "juvenile nonfiction", "young adult", "roman jeunesse",
+    "fr jeunesse", "aventures jeunesse", "13 ans", "enquete par des enfants",
+]
+"Livres-jeux" = ["livres jeux", "livre jeu", "defis fantastiques"]
+"Contes et légendes" = ["contes", "contes de fee", "legendes", "folklore mythologie"]
+"Humour" = ["humour", "humor", "humorous", "humorous stories"]
+"Nouvelles" = ["nouvelles", "nouvelle", "short stories"]
 "Roman noir" = ["roman noir"]
-"Bit-lit" = ["bit lit", "bitlit"]
-"Romance" = ["romance", "sentimental"]
-"Espionnage" = ["espionnage"]
+"Romance" = ["romance", "sentimental", "amour", "litterature sentimentale"]
