@@ -1,0 +1,187 @@
+/* Catalog web UI (static/opds_to_html.xslt): styles that Tailwind utilities cannot express
+   (book tile colors, cover fade-in, cover mosaic, book sheet dialog, rating stars).
+   Served as is (not compiled), linked after static/tailwind.css so that it wins over the utilities
+   of equal specificity, as the former inline <style> did. Dark variants use the `.dark` class of <html>. */
+
+.book-link:nth-child(6n+1) .book { background-color: #e0f2f1; } /* Teal */
+.book-link:nth-child(6n+2) .book { background-color: #fbe9e7; } /* Peach */
+.book-link:nth-child(6n+3) .book { background-color: #e8eaf6; } /* Lavender */
+.book-link:nth-child(6n+4) .book { background-color: #f9fbe7; } /* Lime */
+.book-link:nth-child(6n+5) .book { background-color: #fff3e0; } /* Light Orange */
+.book-link:nth-child(6n+6) .book { background-color: #fce4ec; } /* Light Pink */
+
+/* Dark mode colors for books */
+.dark .book-link:nth-child(6n+1) .book { background-color: #134e4a; } /* Dark Teal */
+.dark .book-link:nth-child(6n+2) .book { background-color: #7c2d12; } /* Dark Peach */
+.dark .book-link:nth-child(6n+3) .book { background-color: #312e81; } /* Dark Lavender */
+.dark .book-link:nth-child(6n+4) .book { background-color: #365314; } /* Dark Lime */
+.dark .book-link:nth-child(6n+5) .book { background-color: #9a3412; } /* Dark Orange */
+.dark .book-link:nth-child(6n+6) .book { background-color: #831843; } /* Dark Pink */
+
+.book-cover {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    object-fit: cover;
+    opacity: 0;
+    transition: opacity 0.3s ease-in-out;
+    height: 100%;
+    width: 100%;
+}
+
+.book-cover.loaded {
+    opacity: 1;
+}
+
+.book-cover-fallback {
+    transition: opacity 0.3s ease-in-out;
+}
+
+.book-cover.loaded ~ .book-cover-fallback {
+    opacity: 0;
+}
+
+/* Navigation tiles: animated mosaic of the covers of their books */
+.tile-mosaic {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: repeat(2, 1fr);
+    opacity: 0;
+    transition: opacity 0.6s ease-out;
+}
+
+.tile-mosaic.single {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr;
+}
+
+/* Readability veil over the covers, matching the theme (slate-50 / slate-900) */
+.tile-mosaic::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(ellipse at center, rgba(248, 250, 252, 0.55), rgba(248, 250, 252, 0) 70%),
+        linear-gradient(to bottom, rgba(248, 250, 252, 0.68), rgba(248, 250, 252, 0.82));
+    transition: opacity 0.3s ease-in-out;
+}
+
+.dark .tile-mosaic::after {
+    background:
+        radial-gradient(ellipse at center, rgba(15, 23, 42, 0.5), rgba(15, 23, 42, 0) 70%),
+        linear-gradient(to bottom, rgba(15, 23, 42, 0.7), rgba(15, 23, 42, 0.86));
+}
+
+/* On hover, the veil recedes slightly to reveal the covers */
+.group:hover .has-mosaic .tile-mosaic::after {
+    opacity: 0.88;
+}
+
+.has-mosaic .tile-mosaic {
+    opacity: 1;
+}
+
+.tile-mosaic-cell {
+    position: relative;
+    overflow: hidden;
+}
+
+.tile-mosaic-cover {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    filter: saturate(0.8);
+    opacity: 0;
+    transition: opacity 1.5s ease-in-out;
+}
+
+/* First covers of a tile: shown at once, the whole mosaic fades in a single time */
+.tile-mosaic-cover.instant {
+    transition: none;
+}
+
+.tile-mosaic-cover.loaded {
+    opacity: 1;
+}
+
+/* Text and icons change color along with the mosaic fade, not at once */
+.relative > .tile-mosaic ~ *,
+.relative > .tile-mosaic ~ * * {
+    transition: color 0.6s ease-out, text-shadow 0.6s ease-out;
+}
+
+.has-mosaic > :not(.tile-mosaic) {
+    position: relative;
+    color: #1e293b !important; /* slate-800 */
+    text-shadow: 0 0 6px rgba(248, 250, 252, 0.9), 0 0 2px rgba(248, 250, 252, 0.9);
+}
+
+.dark .has-mosaic > :not(.tile-mosaic) {
+    color: #f1f5f9 !important; /* slate-100 */
+    text-shadow: 0 0 6px rgba(15, 23, 42, 0.9), 0 1px 2px rgba(15, 23, 42, 0.9);
+}
+
+/* Book details dialog */
+.book-dialog {
+    width: min(52rem, calc(100vw - 1.5rem));
+    max-width: calc(100vw - 1.5rem);
+    max-height: calc(100% - 1.5rem);
+    padding: 0;
+    border-radius: 1rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.book-dialog::backdrop {
+    background: rgba(15, 23, 42, 0.6);
+    backdrop-filter: blur(3px);
+}
+
+.book-dialog[open] {
+    animation: book-dialog-in 0.18s ease-out;
+}
+
+@keyframes book-dialog-in {
+    from { opacity: 0; transform: translateY(12px) scale(0.98); }
+    to { opacity: 1; transform: none; }
+}
+
+.book-description {
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+}
+
+.book-description.clamped {
+    display: -webkit-box;
+    -webkit-line-clamp: 8;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* Rating: grey stars with the amber ones on top, cut at the rating */
+.book-stars {
+    position: relative;
+    display: inline-block;
+    line-height: 1;
+    font-size: 1.125rem;
+    letter-spacing: 0.1em;
+    color: #cbd5e1; /* slate-300 */
+}
+
+.dark .book-stars {
+    color: #475569; /* slate-600 */
+}
+
+.book-stars-on {
+    position: absolute;
+    inset: 0 auto 0 0;
+    overflow: hidden;
+    white-space: nowrap;
+    color: #f59e0b; /* amber-500 */
+}

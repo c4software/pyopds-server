@@ -1,5 +1,6 @@
 import base64
 import contextlib
+import gzip
 import hashlib
 import http.client
 import importlib
@@ -183,6 +184,53 @@ class TestOPDSCatalog(unittest.TestCase):
             self.assertIsNotNone(script, path)
             self.assertRegex(script.get('src'), r'^/static/xslt-polyfill\.min\.js\?v=\d+$')
             self.assertIn(b'<?xml-stylesheet type="text/xsl" href="/opds_to_html.xslt"?>', body)
+
+    def test_served_xslt_versions_its_static_assets(self):
+        # Every /static/ script and stylesheet of the XSLT gets ?v=<mtime>: a deployment changes their URLs
+        status, headers, body = self._get('/opds_to_html.xslt')
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get('Cache-Control'), 'no-cache')
+        tree = ET.fromstring(body)
+        refs = [element.get('src') or element.get('href') for element in tree.iter()
+                if element.tag in ('script', 'link') and (element.get('src') or element.get('href') or '').startswith('/static/')]
+        self.assertIn('/static/catalog/main.js', {ref.partition('?')[0] for ref in refs})
+        self.assertIn('/static/catalog/catalog.css', {ref.partition('?')[0] for ref in refs})
+        for ref in refs:
+            self.assertRegex(ref, r'^/static/[\w./-]+\?v=\d+$')
+            name = ref[len('/static/'):].partition('?')[0]
+            self.assertEqual(ref.partition('=')[2], str(int(os.path.getmtime(os.path.join(PROJECT_ROOT, 'static', name)))))
+            # ... and is served
+            status, _, _ = self._get(ref)
+            self.assertEqual(status, 200, ref)
+
+    def test_catalog_assets_are_served(self):
+        catalog_dir = os.path.join(PROJECT_ROOT, 'static', 'catalog')
+        names = sorted(os.listdir(catalog_dir))
+        self.assertIn('main.js', names)
+        for name in names:
+            content_type = 'text/css; charset=utf-8' if name.endswith('.css') else 'text/javascript; charset=utf-8'
+            with open(os.path.join(catalog_dir, name), 'rb') as f:
+                data = f.read()
+            # Versioned: immutable, gzip-compressed when accepted
+            status, headers, body = self._get(f'/static/catalog/{name}?v=1', headers={'Accept-Encoding': 'gzip'})
+            self.assertEqual((status, headers.get('Content-Type')), (200, content_type), name)
+            self.assertEqual(headers.get('Cache-Control'), 'public, max-age=31536000, immutable')
+            self.assertEqual(headers.get('Content-Encoding'), 'gzip')
+            self.assertEqual(gzip.decompress(body), data)
+            # Plain URL: revalidated, then 304
+            status, headers, body = self._get(f'/static/catalog/{name}')
+            self.assertEqual((status, body, headers.get('Cache-Control')), (200, data, 'no-cache'))
+            status, _, _ = self._get(f'/static/catalog/{name}', headers={'If-Modified-Since': headers['Last-Modified']})
+            self.assertEqual(status, 304)
+
+    def test_static_subfolder_refuses_traversal(self):
+        for path in ('/static/catalog/../server.py', '/static/catalog/..%2Fserver.py', '/static/catalog/%2e%2e/x.js',
+                     '/static/../server.py', '/static/catalog/.hidden.js', '/static/.catalog/main.js',
+                     '/static/catalog/sub/main.js', '/static/catalog/main.py', '/static/catalog/missing.js',
+                     '/static/catalog/', '/static/catalog//main.js', '/static/catalog/main.js/',
+                     '/static/../controllers/webui.py', '/static/catalog/main..js'):
+            status, _, _ = self._get(path)
+            self.assertEqual(status, 404, path)
 
     def test_all_books_feed_paginates_and_lists_books(self):
         ns = {'atom': 'http://www.w3.org/2005/Atom'}
@@ -670,19 +718,32 @@ class TestBookDetailsInFeeds(unittest.TestCase):
         self.assertEqual([os.path.basename(p) for _, p in library.series_books('LA FONDATION')],
                          ['c-fondation-1.epub', 'b-fondation-1-5.epub', 'a-fondation-2.epub'])
 
-    def test_xslt_is_valid_xml(self):
+    def test_xslt_is_valid_xml_without_inline_code(self):
         tree = ET.parse(os.path.join(PROJECT_ROOT, 'static', 'opds_to_html.xslt'))
+        # Page code lives in static/catalog/: no <style>, a single small inline script (theme before the first paint)
+        self.assertEqual(list(tree.iter('style')), [])
+        inline = [element.text for element in tree.iter('script') if element.text and element.text.strip()]
+        self.assertEqual(len(inline), 1)
+        self.assertLessEqual(len(inline[0].strip().splitlines()), 10)
+        self.assertIn("classList.toggle('dark'", inline[0])
+        # Every referenced static file exists
+        for element in tree.iter():
+            ref = element.get('src') or element.get('href') or ''
+            if element.tag in ('script', 'link') and ref.startswith('/static/'):
+                self.assertTrue(os.path.isfile(os.path.join(PROJECT_ROOT, 'static', ref[len('/static/'):])), ref)
         node = shutil.which('node')
         if node is None:
-            self.skipTest('node is not installed: inline scripts not checked')
-        scripts = [element.text for element in tree.iter('script') if element.text and element.text.strip()]
+            self.skipTest('node is not installed: scripts not checked')
+        catalog_dir = os.path.join(PROJECT_ROOT, 'static', 'catalog')
         with tempfile.TemporaryDirectory() as tmp:
-            for number, script in enumerate(scripts):
-                path = os.path.join(tmp, f'script{number}.js')
-                with open(path, 'w', encoding='utf-8') as f:
+            paths = [os.path.join(catalog_dir, name) for name in sorted(os.listdir(catalog_dir)) if name.endswith('.js')]
+            for number, script in enumerate(inline):
+                paths.append(os.path.join(tmp, f'inline{number}.js'))
+                with open(paths[-1], 'w', encoding='utf-8') as f:
                     f.write(script)
+            for path in paths:
                 result = subprocess.run([node, '--check', path], capture_output=True, text=True)
-                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.returncode, 0, f'{path}: {result.stderr}')
 
 
 def basic_header(user: str, password: str) -> dict:

@@ -104,8 +104,9 @@ def register_routes(router):
 
     # Web UI: reading statistics / sync page (data fetched from the sync API by the page)
     router.get('/reading', (WebUIController, 'reading_page'), name='webui.reading', auth=opds)
-    # Page assets only (no library data): public, the sign-in page needs them
-    router.get(r'/static/(?P<name>[^/]+)', (WebUIController, 'static_file'), name='webui.static')
+    # Page assets only (no library data): public, the sign-in page needs them. One level of
+    # sub-folder (static/catalog/: scripts and styles of the catalog XSLT), names checked by the controller
+    router.get(r'/static/(?P<name>[^/]+(?:/[^/]+)?)', (WebUIController, 'static_file'), name='webui.static')
     # Sign-in and sign-up page of the browsers, one session for the catalog and the reading page
     router.get('/login', (AuthController, 'login_page'), name='auth.login.page')
     router.post('/login', (AuthController, 'login'), name='auth.login')

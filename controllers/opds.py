@@ -2058,17 +2058,21 @@ class OPDSController:
         self._send_xml_response(xml, 'acquisition')
 
     def _serve_xslt(self):
+        # Its /static/... scripts and stylesheets get ?v=<mtime> (like the HTML pages): a deployment
+        # changes their URLs, so a proxy caching static files never serves stale ones. The XSLT
+        # itself is revalidated on every use (no-cache), the versions being computed here.
+        from controllers.webui import STATIC_DIR, version_asset_refs
         try:
-            xslt_path = os.path.join('static', 'opds_to_html.xslt')
+            xslt_path = os.path.join(STATIC_DIR, 'opds_to_html.xslt')
             if not os.path.exists(xslt_path):
                 self._send_error(404, "XSLT file not found")
                 return
-
+            with open(xslt_path, 'r', encoding='utf-8') as f:
+                data = version_asset_refs(f.read()).encode('utf-8')
             self.request.send_response(200)
             self.request.send_header('Content-Type', 'application/xml; charset=utf-8')
-            with open(xslt_path, 'rb') as f:
-                data = f.read()
             self.request.send_header('Content-Length', str(len(data)))
+            self.request.send_header('Cache-Control', 'no-cache')
             self.request.end_headers()
             self.request.wfile.write(data)
         except Exception as exc:
