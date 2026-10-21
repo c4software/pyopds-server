@@ -36,12 +36,14 @@ Le projet suit une architecture de type MVC (Modèle-Vue-Contrôleur) simplifié
     * `sync_storage.py` : Stockage SQLite de la synchronisation (progression par appareil, documents, alias, stats, clippings).
     * `reading_activity.py` : Calculs purs des statistiques et de l'activité de lecture.
     * `genres.py` : Normalisation des sujets EPUB (`dc:subject`) en genres pour la navigation « By Genre », selon les règles de `genres.toml`.
+    * `metadata_rules.py` : Normalisation des noms d'auteurs et de séries lus dans les EPUB, selon les règles de `metadata.toml`.
     * `library_index.py` : Correspondance entre les hash de documents KoReader et les EPUB de la bibliothèque, métadonnées légères cachées par mtime (`book_meta`) et index des séries (`series_books`, `next_in_series`).
     * `opds_auth.py` : Comptes du catalogue : middleware des routes `auth='opds'` (lecteur identifié si des identifiants sont fournis, obligatoire si `OPDS_AUTH=true`) et `auth='user'` (compte toujours requis), HTTP Basic ou cookie de session ; page de connexion / création de compte `/login` et `/logout` des navigateurs.
     * `recommendations.py` : Recommandations « À lire ensuite » locales (fonctions de scoring pures + service avec cache par utilisateur).
     * `online_metadata.py` : Détails de livres en ligne optionnels (iTunes, Open Library, Hardcover) en repli de la bibliothèque : cache SQLite `catalog_cache` partagé, recherches dans un thread de fond (jamais dans le chemin d'une requête, sauf `cover/candidates`).
     * `duplicates.py` : Outil en ligne de commande (`python -m controllers.duplicates`, aussi dans l'image Docker) de détection des EPUB en double (fichiers identiques, même livre selon les métadonnées), avec suppression (`--delete`) ou déplacement hors bibliothèque (`--move-to`).
     * `webui.py` : Pages statiques de l'interface web hors flux OPDS (page « Lecture » `/reading`) et fichiers `/static/...` (y compris `/static/catalog/...`), versionnés par `?v=`.
+* `metadata.toml` : Normalisation des auteurs (« Nom, Prénom » → « Prénom Nom », casse, alias) et des séries (séries ignorées, alias), appliquée à l'extraction OPF (complétable via `METADATA_CONFIG_PATH`).
 * `genres.toml` : Correspondances sujets → genres, sujets ignorés et seuil d'affichage (complétable via `GENRES_CONFIG_PATH`).
 * `static/` : Fichiers statiques (XSLT pour l'affichage navigateur, pages `reading` et `login`, `account.js`, `theme.js`, `xslt-polyfill.min.js` vendorisé ; `tailwind.css` est généré, non versionné).
     * `static/catalog/` : scripts (un par fonctionnalité, `main.js` en point d'entrée) et feuille `catalog.css` de la webui du catalogue, chargés par le XSLT.
@@ -120,6 +122,7 @@ L'application doit respecter ces variables de configuration :
 * `OPDS_AUTH` : `true` pour rendre privés le catalogue et la webui (routes `auth='opds'` ; synchro, `/cover/*`, `/static/*` et `/health` restent publics). Par défaut le catalogue est public et la connexion facultative (HTTP Basic pour les clients OPDS, page `/login` et cookie de session pour les navigateurs, une seule connexion pour le catalogue et la page Lecture) ; elle active la tuile/flux « À lire ensuite » (`/opds/recommendations`).
 * `OPDS_SESSION_SECRET` : Clé de signature des cookies de session (par défaut, clé aléatoire écrite dans `session.secret` à côté de la DB de synchro).
 * `GENRES_CONFIG_PATH` : Fichier TOML de genres complétant `genres.toml` (mêmes clés, prioritaire).
+* `METADATA_CONFIG_PATH` : Fichier TOML de règles auteurs/séries complétant `metadata.toml` (mêmes clés, prioritaire).
 * `PAGE_SIZE` : Nombre de livres par page dans le flux OPDS.
 * `ONLINE_METADATA` : `true` pour chercher en ligne, sans clé, couverture (iTunes puis Open Library), nombre de pages imprimées et description (Open Library) des livres synchronisés absents de la bibliothèque (désactivé par défaut).
 * `HARDCOVER_API_KEY` : Clé API Hardcover pour ajouter ambiances, genres, avertissements, note, série/position, année et description, et le livre suivant de la série (désactivé par défaut ; débit limité à 1 requête/1,1 s, 4000/jour, pause de 10 min après un 429).

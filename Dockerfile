@@ -19,7 +19,7 @@ RUN pip install --no-cache-dir watchfiles==1.3.0
 COPY --from=css /opt/tailwindcss /opt/tailwindcss
 WORKDIR /app
 EXPOSE 8080
-CMD ["watchfiles", "python server.py", "controllers", "routes.py", "server.py", "genres.toml"]
+CMD ["watchfiles", "python server.py", "controllers", "routes.py", "server.py", "genres.toml", "metadata.toml"]
 
 # Production image: Python standard library only
 FROM python:3.12-slim
@@ -32,6 +32,7 @@ COPY controllers/ /app/controllers/
 COPY static/ /app/static/
 COPY --from=css /src/static/tailwind.css /app/static/tailwind.css
 COPY genres.toml /app/genres.toml
+COPY metadata.toml /app/metadata.toml
 
 ENV LIBRARY_DIR=/books
 

@@ -102,7 +102,7 @@ docker compose -f docker-compose.dev.yml up --build
 
 The source is mounted into two containers built from the `dev` stage of the [`Dockerfile`](Dockerfile):
 
-- `app` serves `http://localhost:8080` and restarts on every change of the Python code or `genres.toml` ([watchfiles](https://watchfiles.helpmanual.io/)); EPUBs are read from `./books`, the sync database is kept in `./config`. Changes to `static/` (XSLT, pages, scripts) need no restart: reload the page.
+- `app` serves `http://localhost:8080` and restarts on every change of the Python code, `genres.toml` or `metadata.toml` ([watchfiles](https://watchfiles.helpmanual.io/)); EPUBs are read from `./books`, the sync database is kept in `./config`. Changes to `static/` (XSLT, pages, scripts) need no restart: reload the page.
 - `css` rebuilds `static/tailwind.css` whenever Tailwind classes change in `static/` (Tailwind CLI `--watch`).
 
 With rootful Docker, set `DEV_UID` / `DEV_GID` (e.g. in a `.env` file: `DEV_UID=1000`) so that the rebuilt stylesheet belongs to you; rootless Docker needs nothing.
@@ -140,12 +140,24 @@ The following environment variables can be set:
   [aliases]
   "Science-fiction" = ["cyberpunk"]
   ```
+- **METADATA_CONFIG_PATH**: Path to a custom author and series file completing [`metadata.toml`](metadata.toml), with the same format. By default, "Last, First" creators become "First Last", names in capitals or lowercase get title case, a trailing role ("(Auteur)") is dropped and bogus series ("Novels") are ignored; author variants differing only by case or accents are listed once in "By Author". Add aliases for what these rules cannot fix. Restart the server after editing it. Example:
+
+  ```toml
+  [authors.aliases]
+  "Robin Hobb" = ["Hobb Robin"]
+
+  [series]
+  ignored = ["camus"]
+
+  [series.aliases]
+  "L'Assassin royal" = ["Assasin Royal"]
+  ```
 - **ONLINE_METADATA**: Set to `true` to look up, without any API key, the cover ([iTunes Search](https://performance-partners.apple.com/search-api), then [Open Library](https://openlibrary.org/developers/api)), print page count and description (Open Library) of synced books the library does not provide (default: disabled).
 - **HARDCOVER_API_KEY**: [Hardcover](https://hardcover.app/account/api) API key (`read:catalog` is enough) to add moods, genres, content warnings, community rating, series and position, release year and description to synced books, and the next book of a series (`GET /api/v1/documents/{document}/next`) (default: disabled). Requests are throttled (1.1 s apart, 4,000 a day, 10 min pause after a 429).
 
   Online lookups are only a fallback: they run for books that match no EPUB of the library, and their results only fill fields the library and the reader left empty. Only the book's **title, author and ISBN** are sent to those services (with a `PyOPDS-Server` User-Agent), never anything about the user. They run in a background thread (at most 10 books per `GET /api/v1/progress`), never while answering a request, except the cover picker (`GET /api/v1/documents/{document}/cover/candidates`) which searches live. Results are cached for every user in the `catalog_cache` table of the sync database (30 days; misses 7 days for Open Library, 30 days for Hardcover; series 7 days).
 
-For Docker, set these variables in `docker-compose.override.yml` (see above); the base `docker-compose.yml` already mounts `./books` and `./config` (sync database, custom genres, session key). For example:
+For Docker, set these variables in `docker-compose.override.yml` (see above); the base `docker-compose.yml` already mounts `./books` and `./config` (sync database, custom genres and metadata rules, session key). For example:
 
 ```yaml
 services:

@@ -1,0 +1,28 @@
+# Author and series names read from the EPUBs (dc:creator, calibre:series...).
+#
+# To customize them, write your own rules in another file (for example
+# config/metadata.toml) and point the METADATA_CONFIG_PATH environment variable to it.
+# That file completes this one, with the same format: its `reverse_comma` overrides
+# the value below, its aliases and ignored series are added and win over the rules
+# below. Restart the server to apply changes.
+#
+# Names are compared without case, accents or punctuation:
+# "Asimov, Isaac" and "ASIMOV ISAAC" are the same variant.
+
+[authors]
+# "Asimov, Isaac" / "Asimov,Isaac" -> "Isaac Asimov". Names written in capitals or in
+# lowercase ("STEPHEN KING") get title case, and a trailing role ("(Auteur)") is dropped.
+reverse_comma = true
+
+# Displayed author = variants merged into it, for what the rules above cannot fix
+# (first and last names swapped without a comma, typos, pen names...)
+[authors.aliases]
+# "Robin Hobb" = ["Hobb Robin"]
+
+[series]
+# Not real series: added by some metadata tools to every novel
+ignored = ["Novels", "Novel", "Roman", "Romans", "Fiction"]
+
+# Displayed series = variants merged into it
+[series.aliases]
+# "L'Assassin royal" = ["Assasin Royal", "Assassin Royal"]

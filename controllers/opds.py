@@ -11,6 +11,7 @@ import zipfile
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from controllers.genres import genre_key, get_genre_config, normalize_genres
+from controllers.metadata_rules import author_key, normalize_author_name, normalize_series_name
 
 LIBRARY_DIR = os.environ.get('LIBRARY_DIR', 'books')
 PAGE_SIZE = int(os.environ.get('PAGE_SIZE', 25))
@@ -113,9 +114,10 @@ class BookMetadata:
     def opf_metadata(opf_root: ET.Element) -> dict:
         """Metadata of a parsed OPF package.
 
-        Keys: title, author, date (raw dc:date), genres (normalized dc:subject), series and
-        series_index (calibre:series / calibre:series_index, else the EPUB 3 `belongs-to-collection`
-        of collection-type "series" with its group-position), description (raw dc:description,
+        Keys: title, author (normalized dc:creator, see `metadata_rules`), date (raw dc:date),
+        genres (normalized dc:subject), series and series_index (calibre:series / calibre:series_index,
+        else the EPUB 3 `belongs-to-collection` of collection-type "series" with its group-position;
+        normalized, None for an ignored series), description (raw dc:description,
         often escaped HTML) and rating (calibre:rating, 0-10).
         """
         ns_dc = {'dc': 'http://purl.org/dc/elements/1.1/'}
@@ -152,13 +154,15 @@ class BookMetadata:
                     break
 
         subjects = [e.text for e in opf_root.findall('.//dc:subject', ns_dc) if e.text]
+        genres = [name for _, name in normalize_genres(subjects, series)]
+        series = normalize_series_name(series)
         return {
             'title': dc_text('title'),
-            'author': dc_text('creator'),
+            'author': normalize_author_name(dc_text('creator')),
             'date': dc_text('date'),
-            'genres': [name for _, name in normalize_genres(subjects, series)],
+            'genres': genres,
             'series': series,
-            'series_index': series_index,
+            'series_index': series_index if series else None,
             'description': dc_text('description'),
             'rating': BookMetadata._number(calibre.get('calibre:rating')),
         }
@@ -382,6 +386,7 @@ class BookScanner:
         # Lightweight index caches: only store path -> year/author mapping
         self._year_index = None  # {year: [paths...]}
         self._author_index = None  # {author: [paths...]}
+        self._author_names = {}  # {author key: displayed author}
         self._genre_index = None  # {genre key: {'name': displayed genre, 'paths': [paths...]}}
         self._path_index = None  # {path: (author, [genres...])}
         self._recent_books_cache = None
@@ -696,6 +701,7 @@ class BookScanner:
         
         year_index = {}  # {year: [paths...]}
         author_index = {}  # {author: [paths...]}
+        author_groups = {}  # {author key: {'paths': [...], 'names': {spelling: count}}}
         genre_index = {}  # {genre key: {'name': ..., 'paths': [...]}}
         path_index = {}  # {path: (author, [genres...])}
         
@@ -716,10 +722,17 @@ class BookScanner:
                 year_index[year] = []
             year_index[year].append(path)
             
-            if author not in author_index:
-                author_index[author] = []
-            author_index[author].append(path)
-        
+            # Variants differing only by case, accents, punctuation or word order are one author
+            group = author_groups.setdefault(author_key(author) or author, {'paths': [], 'names': {}})
+            group['paths'].append(path)
+            group['names'][author] = group['names'].get(author, 0) + 1
+
+        # Each author is displayed under its most common spelling
+        author_names = {}
+        for key, group in author_groups.items():
+            author_names[key] = max(group['names'], key=lambda name: (group['names'][name], name))
+            author_index[author_names[key]] = group['paths']
+
         # Sort paths within each group by filename for consistent ordering
         for paths in year_index.values():
             paths.sort(key=lambda p: os.path.basename(p).lower())
@@ -730,8 +743,13 @@ class BookScanner:
         
         self._year_index = year_index
         self._author_index = author_index
+        self._author_names = author_names
         self._genre_index = genre_index
         self._path_index = path_index
+
+    def _author_display(self, author: str) -> str:
+        """Displayed name of the author index entry matching `author` (any spelling variant)."""
+        return self._author_names.get(author_key(author) or author, author)
 
     def get_path_metadata_index(self) -> dict[str, tuple[str, list[str]]]:
         """Author and genres of every library EPUB {path: (author, [genres])}, from the cached indexes."""
@@ -755,8 +773,9 @@ class BookScanner:
         if kind == 'genre':
             entry = self._genre_index.get(key)
             return entry['paths'] if entry else []
-        index = self._year_index if kind == 'year' else self._author_index
-        return index.get(key, [])
+        if kind == 'author':
+            return self._author_index.get(self._author_display(key), [])
+        return self._year_index.get(key, [])
 
     def get_years_with_counts(self) -> list[tuple[str, int]]:
         """Get all publication years with book counts.
@@ -926,7 +945,7 @@ class BookScanner:
         """
         self._build_year_author_indexes()
         
-        paths = self._author_index.get(author, [])
+        paths = self._author_index.get(self._author_display(author), [])
         total_count = len(paths)
         
         start = (page - 1) * size

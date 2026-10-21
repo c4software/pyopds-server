@@ -313,7 +313,7 @@ class TestCrossPointSync(unittest.TestCase):
         self.assertEqual((status, data), (200, {'description': None}))
 
         details = self.library_index.LibraryIndex.get_instance().details(self.series_paths[2])
-        self.assertEqual((details['series'], details['series_index'], details['year']), ('la compagnie  NOIRE', 2, 1984))
+        self.assertEqual((details['series'], details['series_index'], details['year']), ('la compagnie NOIRE', 2, 1984))
         self.assertIsNone(details['description'])
 
     def test_next_in_series_from_library(self):
@@ -340,7 +340,7 @@ class TestCrossPointSync(unittest.TestCase):
         second = self.library_index.koreader_partial_md5(self.series_paths[2])
         data = self.request('GET', f'/api/v1/documents/{second}/next', user=user)[1]
         self.assertEqual((data['series'], data['next']['position'], data['next']['title'], data['next']['cover']),
-                         ('la compagnie  NOIRE', 3, 'La Rose blanche', None))
+                         ('la compagnie NOIRE', 3, 'La Rose blanche', None))
         last = self.library_index.koreader_partial_md5(self.series_paths[3])
         self.assertEqual(self.request('GET', f'/api/v1/documents/{last}/next', user=user)[1],
                          {'series': 'La Compagnie Noire', 'next': None})

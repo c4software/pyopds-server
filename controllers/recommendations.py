@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass, field
 
 from controllers.genres import genre_key
+from controllers.metadata_rules import author_key, normalize_author_name
 
 FINISHED_RATIO = 0.9
 RECENCY_HALF_LIFE_DAYS = 180.0
@@ -30,10 +31,11 @@ HISTORY_LIMIT = 100_000
 
 
 def normalize_author(author: str | None) -> str:
-    """Comparison key of an author name (case and spacing insensitive); '' for unknown authors."""
+    """Comparison key of an author name (variants and word order merged, see `metadata_rules.author_key`);
+    '' for unknown authors."""
     if not author:
         return ''
-    key = ' '.join(author.split()).casefold()
+    key = author_key(author)
     return '' if key == 'unknown' else key
 
 
@@ -108,7 +110,7 @@ def build_profile(history: list[dict], now: float) -> ReadingProfile:
         author = normalize_author(book.get('author'))
         if author:
             profile.authors[author] = profile.authors.get(author, 0.0) + weight
-            profile.author_names.setdefault(author, ' '.join(book['author'].split()))
+            profile.author_names.setdefault(author, normalize_author_name(book['author']))
         for name in book.get('genres') or []:
             key = genre_key(name)
             if key:
