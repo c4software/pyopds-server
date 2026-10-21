@@ -82,7 +82,6 @@ The following environment variables can be set:
 - **LIBRARY_DIR**: Path to the directory containing EPUB files (default: `books`).
 - **KOREADER_SYNC_DB_PATH**: Path to the SQLite database file used by the KoReader sync helper (default: `koreader_sync.db`).
 - **REGISTRATION_DISABLED**: Set to `true` to refuse new sync accounts (default: registration open).
-- **COVER_MOSAIC**: Set to `true` to show an animated mosaic of book covers in the background of the web view navigation tiles (default: disabled).
 - **GENRES_CONFIG_PATH**: Path to a custom genre file completing [`genres.toml`](genres.toml), with the same format: its subject-to-genre aliases and ignored subjects are added to the default ones (and win over them), and its `min_books` overrides the default threshold. Restart the server after editing it. Example (for instance in the mounted `config/` folder):
 
   ```toml

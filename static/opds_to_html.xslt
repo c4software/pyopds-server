@@ -75,11 +75,28 @@
                         grid-template-rows: 1fr;
                     }
 
+                    /* Readability veil over the covers, matching the theme (slate-50 / slate-900) */
                     .tile-mosaic::after {
                         content: '';
                         position: absolute;
                         inset: 0;
-                        background: radial-gradient(circle at center, rgba(15, 23, 42, 0.7), rgba(15, 23, 42, 0.25));
+                        background:
+                            radial-gradient(ellipse at center, rgba(248, 250, 252, 0.55), rgba(248, 250, 252, 0) 70%),
+                            linear-gradient(to bottom, rgba(248, 250, 252, 0.68), rgba(248, 250, 252, 0.82));
+                        -webkit-backdrop-filter: blur(1.5px) saturate(0.8);
+                        backdrop-filter: blur(1.5px) saturate(0.8);
+                        transition: opacity 0.3s ease-in-out;
+                    }
+
+                    .dark .tile-mosaic::after {
+                        background:
+                            radial-gradient(ellipse at center, rgba(15, 23, 42, 0.5), rgba(15, 23, 42, 0) 70%),
+                            linear-gradient(to bottom, rgba(15, 23, 42, 0.7), rgba(15, 23, 42, 0.86));
+                    }
+
+                    /* On hover, the veil recedes slightly to reveal the covers */
+                    .group:hover .has-mosaic .tile-mosaic::after {
+                        opacity: 0.88;
                     }
 
                     .has-mosaic .tile-mosaic {
@@ -107,8 +124,13 @@
 
                     .has-mosaic > :not(.tile-mosaic) {
                         position: relative;
-                        color: #fff !important;
-                        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+                        color: #1e293b !important; /* slate-800 */
+                        text-shadow: 0 0 6px rgba(248, 250, 252, 0.9), 0 0 2px rgba(248, 250, 252, 0.9);
+                    }
+
+                    .dark .has-mosaic > :not(.tile-mosaic) {
+                        color: #f1f5f9 !important; /* slate-100 */
+                        text-shadow: 0 0 6px rgba(15, 23, 42, 0.9), 0 1px 2px rgba(15, 23, 42, 0.9);
                     }
                 </style>
             </head>
@@ -151,6 +173,10 @@
                         <a href="/opds/refresh" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center" title="Rafraîchir le cache">
                             <i data-lucide="refresh-cw" class="w-4 h-4"></i>
                         </a>
+                        <button id="mosaic-toggle" type="button" aria-pressed="false" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Activer la mosaïque de couvertures">
+                            <i id="mosaic-toggle-on-icon" class="hidden w-4 h-4" data-lucide="image"></i>
+                            <i id="mosaic-toggle-off-icon" class="w-4 h-4" data-lucide="image-off"></i>
+                        </button>
                         <button id="theme-toggle" type="button" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200">
                             <i id="theme-toggle-dark-icon" class="hidden w-4 h-4" data-lucide="moon"></i>
                             <i id="theme-toggle-light-icon" class="hidden w-4 h-4" data-lucide="sun"></i>
@@ -447,24 +473,94 @@
                         });
                     }
 
+                    // Cover mosaic of the navigation tiles: chosen per browser, disabled by default
+                    const MOSAIC_STORAGE_KEY = 'tile-mosaic';
+                    let mosaicSession = null; // Running mosaic: its observer, timers and cover requests
+                    let mosaicEnabled = (function() {
+                        try {
+                            return localStorage.getItem(MOSAIC_STORAGE_KEY) === 'on';
+                        } catch (e) {
+                            return false;
+                        }
+                    })();
+
+                    function isMosaicEnabled() {
+                        return mosaicEnabled;
+                    }
+
+                    function saveMosaicEnabled(enabled) {
+                        mosaicEnabled = enabled;
+                        try {
+                            localStorage.setItem(MOSAIC_STORAGE_KEY, enabled ? 'on' : 'off');
+                        } catch (e) {
+                            // Storage unavailable: the choice only lasts for this page
+                        }
+                    }
+
+                    function updateMosaicToggle(enabled) {
+                        const button = document.getElementById('mosaic-toggle');
+                        if (!button) return;
+                        button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+                        button.title = enabled ? 'Désactiver la mosaïque de couvertures' : 'Activer la mosaïque de couvertures';
+                        document.getElementById('mosaic-toggle-on-icon').classList.toggle('hidden', !enabled);
+                        document.getElementById('mosaic-toggle-off-icon').classList.toggle('hidden', enabled);
+                    }
+
+                    // Stop the mosaic: no more timers nor cover requests, tiles back to their plain look
+                    function stopTileMosaics() {
+                        document.documentElement.classList.remove('mosaic-enabled');
+                        if (!mosaicSession) return;
+                        const session = mosaicSession;
+                        mosaicSession = null;
+                        session.active = false;
+                        session.observer.disconnect();
+                        session.timers.forEach(clearTimeout);
+                        session.timers.clear();
+                        session.images.forEach(function(img) {
+                            img.onload = img.onerror = null;
+                            img.src = '';
+                        });
+                        session.images.clear();
+                        document.querySelectorAll('.tile-mosaic').forEach(function(mosaic) {
+                            mosaic.replaceChildren();
+                            mosaic.classList.remove('single');
+                            mosaic.parentElement.classList.remove('has-mosaic');
+                        });
+                    }
+
                     // Fill the navigation tiles with a mosaic of covers, one cell changing every few seconds
                     function setupTileMosaics() {
+                        if (mosaicSession || !isMosaicEnabled()) return;
+                        document.documentElement.classList.add('mosaic-enabled');
+                        const session = { observer: null, timers: new Set(), images: new Set(), active: true };
+                        mosaicSession = session;
                         const CELLS = 4;
                         const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-                        // Resolve with the loaded URL, or null when the EPUB has no cover
+                        function schedule(fn, delay) {
+                            if (!session.active) return;
+                            const id = setTimeout(function() {
+                                session.timers.delete(id);
+                                fn();
+                            }, delay);
+                            session.timers.add(id);
+                        }
+
+                        // Resolve with the loaded URL, or null when the EPUB has no cover (or the mosaic was stopped)
                         function loadCover(src) {
+                            if (!session.active) return Promise.resolve(null);
                             return new Promise(function(resolve) {
                                 const img = new Image();
-                                img.onload = function() { resolve(img.src); };
-                                img.onerror = function() { resolve(null); };
+                                session.images.add(img);
+                                img.onload = function() { session.images.delete(img); resolve(session.active ? img.src : null); };
+                                img.onerror = function() { session.images.delete(img); resolve(null); };
                                 img.src = src;
                             });
                         }
 
                         // Next cover of the pool that exists
                         async function nextCover(state) {
-                            while (state.pending.length) {
+                            while (session.active &amp;&amp; state.pending.length) {
                                 const src = await loadCover(state.pending.shift());
                                 if (src) {
                                     state.covers.push(src);
@@ -496,7 +592,7 @@
                                 if (!src) break;
                                 first.push(src);
                             }
-                            if (!first.length) return;
+                            if (!session.active || !first.length) return;
 
                             // Too few covers for a grid: a single cover filling the tile
                             const shown = first.length &lt; CELLS ? first.slice(0, 1) : first;
@@ -513,9 +609,11 @@
 
                             let lastCell = -1;
                             async function rotate() {
+                                if (!session.active) return;
                                 if (!document.hidden &amp;&amp; state.visible) {
                                     // Discover the rest of the pool first, then reuse the known covers
                                     let src = await nextCover(state);
+                                    if (!session.active) return;
                                     if (!src) {
                                         const hidden = state.covers.filter(function(cover) { return !shown.includes(cover); });
                                         src = hidden.length ? hidden[Math.floor(Math.random() * hidden.length)] : null;
@@ -527,9 +625,9 @@
                                     shown[index] = src;
                                     showCover(cells[index], src);
                                 }
-                                setTimeout(rotate, 5000 + Math.random() * 4000);
+                                schedule(rotate, 5000 + Math.random() * 4000);
                             }
-                            setTimeout(rotate, 3000 + Math.random() * 5000);
+                            schedule(rotate, 3000 + Math.random() * 5000);
                         }
 
                         // Load covers only once a tile is near the viewport, and animate only visible tiles
@@ -546,9 +644,26 @@
                                 state.visible = entry.isIntersecting;
                             });
                         }, { rootMargin: '50px' });
+                        session.observer = observer;
 
                         document.querySelectorAll('.tile-mosaic[data-covers]').forEach(function(mosaic) {
                             observer.observe(mosaic);
+                        });
+                    }
+
+                    // Header button switching the mosaic on and off, applied without reloading
+                    updateMosaicToggle(isMosaicEnabled());
+                    const mosaicToggleBtn = document.getElementById('mosaic-toggle');
+                    if (mosaicToggleBtn) {
+                        mosaicToggleBtn.addEventListener('click', function() {
+                            const enabled = !isMosaicEnabled();
+                            saveMosaicEnabled(enabled);
+                            updateMosaicToggle(enabled);
+                            if (enabled) {
+                                setupTileMosaics();
+                            } else {
+                                stopTileMosaics();
+                            }
                         });
                     }
 
