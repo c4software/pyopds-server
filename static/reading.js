@@ -152,10 +152,14 @@
 
     class Unauthorized extends Error {}
 
-    async function api(path, credentials) {
+    async function api(path, credentials, method, body) {
         const auth = credentials || account;
+        const headers = { 'x-auth-user': auth.user, 'x-auth-key': auth.key, 'Accept': 'application/json' };
+        if (body !== undefined) headers['Content-Type'] = 'application/json';
         const response = await fetch(path, {
-            headers: { 'x-auth-user': auth.user, 'x-auth-key': auth.key, 'Accept': 'application/json' },
+            method: method || 'GET',
+            headers: headers,
+            body: body === undefined ? undefined : JSON.stringify(body),
             cache: 'no-store',
         });
         if (response.status === 401) throw new Unauthorized('Identifiants invalides');
@@ -476,13 +480,20 @@
     }
 
     function catalogLinks(item) {
-        if (!item.library_path) return '';
+        const link = 'inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200';
+        // Books the hashes did not match: associate them by hand with a library EPUB
+        if (!item.library_path) {
+            return '<div class="flex flex-wrap gap-3 mt-2"><button type="button" class="' + link + '" data-link-document="' + esc(item.document) + '" data-link-label="' + esc(item.title || item.filename || item.document) + '">' +
+                '<i data-lucide="link" class="w-3.5 h-3.5"></i>Associer à un livre</button></div>';
+        }
         const folder = item.library_path.includes('/') ? item.library_path.slice(0, item.library_path.lastIndexOf('/')) : '';
         const catalog = folder ? '/opds/folder/' + encodePath(folder) : '/opds/search?q=' + encodeURIComponent(item.title || item.filename || '');
-        const link = 'inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200';
+        const unlink = item.library_linked
+            ? '<button type="button" class="' + link + '" data-unlink-document="' + esc(item.document) + '"><i data-lucide="unlink" class="w-3.5 h-3.5"></i>Dissocier</button>'
+            : '';
         return '<div class="flex flex-wrap gap-3 mt-2">' +
             '<a class="' + link + '" href="' + esc(catalog) + '"><i data-lucide="library" class="w-3.5 h-3.5"></i>Voir dans le catalogue</a>' +
-            '<a class="' + link + '" href="/download/' + esc(encodePath(item.library_path)) + '"><i data-lucide="download" class="w-3.5 h-3.5"></i>Télécharger</a></div>';
+            '<a class="' + link + '" href="/download/' + esc(encodePath(item.library_path)) + '"><i data-lucide="download" class="w-3.5 h-3.5"></i>Télécharger</a>' + unlink + '</div>';
     }
 
     function coverPlaceholder() {
@@ -547,6 +558,85 @@
         $('clippings-count').textContent = clippings.length ? '(' + clippings.length + ')' : '';
         show('clippings-section', clippings.length > 0);
     }
+
+    // ------------------------------------------------- manual library association
+
+    const linkDialog = $('link-dialog');
+    let linkDocument = null;
+
+    // Catalog search through the OPDS feed: each acquisition link gives the EPUB path in the library
+    async function searchLibrary(query) {
+        const response = await fetch('/opds/search?q=' + encodeURIComponent(query), { cache: 'no-store' });
+        if (!response.ok) throw new Error('Erreur ' + response.status);
+        const xml = new DOMParser().parseFromString(await response.text(), 'application/xml');
+        const ATOM = 'http://www.w3.org/2005/Atom';
+        const text = function (parent, name) { const el = parent && parent.getElementsByTagNameNS(ATOM, name)[0]; return el ? el.textContent.trim() : ''; };
+        return Array.from(xml.getElementsByTagNameNS(ATOM, 'entry')).map(function (entry) {
+            const download = Array.from(entry.getElementsByTagNameNS(ATOM, 'link'))
+                .map(function (l) { return l.getAttribute('href') || ''; })
+                .find(function (href) { return href.indexOf('/download/') === 0; });
+            return {
+                title: text(entry, 'title'),
+                author: text(entry.getElementsByTagNameNS(ATOM, 'author')[0], 'name'),
+                path: download ? decodeURIComponent(download.slice('/download/'.length)) : null,
+            };
+        }).filter(function (book) { return book.path; });
+    }
+
+    async function setLibraryPath(document, path) {
+        await api('/api/v1/documents/' + encodeURIComponent(document) + '/info', null, 'PUT', { library_path: path });
+        load();
+    }
+
+    $('stats-view').addEventListener('click', function (event) {
+        const linkButton = event.target.closest('[data-link-document]');
+        if (linkButton) {
+            linkDocument = linkButton.dataset.linkDocument;
+            $('link-document').textContent = linkButton.dataset.linkLabel;
+            $('link-results').innerHTML = '';
+            $('link-status').textContent = '';
+            linkDialog.showModal();
+            $('link-query').focus();
+            return;
+        }
+        const unlinkButton = event.target.closest('[data-unlink-document]');
+        if (unlinkButton) {
+            setLibraryPath(unlinkButton.dataset.unlinkDocument, null).catch(function (error) { console.error(error); });
+        }
+    });
+
+    $('link-close').addEventListener('click', function () { linkDialog.close(); });
+
+    $('link-search').addEventListener('submit', async function (event) {
+        event.preventDefault();
+        const query = $('link-query').value.trim();
+        if (!query) return;
+        $('link-status').textContent = 'Recherche…';
+        $('link-results').innerHTML = '';
+        try {
+            const books = await searchLibrary(query);
+            $('link-status').textContent = books.length ? books.length + ' résultat(s)' : 'Aucun livre trouvé.';
+            $('link-results').innerHTML = books.map(function (book) {
+                return '<li><button type="button" class="link-result" data-path="' + esc(book.path) + '">' +
+                    '<span class="block text-sm font-medium">' + esc(book.title) + '</span>' +
+                    '<span class="block text-xs text-slate-500 dark:text-slate-400">' + esc([book.author, book.path].filter(Boolean).join(' · ')) + '</span></button></li>';
+            }).join('');
+        } catch (error) {
+            $('link-status').textContent = 'Recherche impossible : ' + error.message;
+        }
+    });
+
+    $('link-results').addEventListener('click', async function (event) {
+        const result = event.target.closest('[data-path]');
+        if (!result || !linkDocument) return;
+        $('link-status').textContent = 'Association…';
+        try {
+            await setLibraryPath(linkDocument, result.dataset.path);
+            linkDialog.close();
+        } catch (error) {
+            $('link-status').textContent = 'Association impossible : ' + error.message;
+        }
+    });
 
     // ------------------------------------------------------------------- theme
 

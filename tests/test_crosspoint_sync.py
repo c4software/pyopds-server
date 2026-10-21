@@ -226,6 +226,26 @@ class TestCrossPointSync(unittest.TestCase):
         self.put_progress(user, 'e' * 32, 0.2, device_id='koreader')
         self.assertIsNone(self.books(user)['e' * 32]['library_path'])
 
+    def test_document_associated_by_hand_with_library_epub(self):
+        user = self.create_user('associate')
+        document = 'f' * 32
+        self.put_progress(user, document, 0.3, device_id='koreader')
+        path = f'/api/v1/documents/{document}/info'
+        for invalid in ('../secret.epub', 'missing.epub', 'Le Rouge et le Noir.txt', 42):
+            status, _ = self.request('PUT', path, {'library_path': invalid}, user=user)
+            self.assertEqual(status, 403, invalid)
+
+        status, data = self.request('PUT', path, {'library_path': 'Le Rouge et le Noir.epub'}, user=user)
+        self.assertEqual((status, data['library_path']), (200, 'Le Rouge et le Noir.epub'))
+        book = self.books(user)[document]
+        self.assertEqual((book['library_path'], book['library_linked']), ('Le Rouge et le Noir.epub', True))
+        self.assertEqual(book['title'], 'Le Rouge et le Noir')
+
+        status, _ = self.request('PUT', path, {'library_path': None}, user=user)
+        self.assertEqual(status, 200)
+        book = self.books(user)[document]
+        self.assertEqual((book['library_path'], book['library_linked']), (None, False))
+
     # ------------------------------------------------------------------ web UI
 
     def raw_get(self, path):

@@ -259,10 +259,10 @@ class CrossPointSyncController(SyncControllerBase):
         host = (headers.get('X-Forwarded-Host') or headers.get('Host') or 'localhost').split(',')[0].strip()
         return f'{scheme}://{host}'
 
-    def _library_book(self, documents: list[str], filename: str | None) -> dict | None:
-        """Details of the library EPUB matching a synced document, with an absolute cover URL."""
+    def _library_book(self, documents: list[str], filename: str | None, library_path: str | None = None) -> dict | None:
+        """Details of the library EPUB matching a synced document (or associated by hand), with an absolute cover URL."""
         try:
-            path = self.library.find(documents, filename)
+            path = (library_path and self.library.resolve_relative(library_path)) or self.library.find(documents, filename)
             if not path:
                 return None
             details = dict(self.library.details(path))
@@ -330,7 +330,7 @@ class CrossPointSyncController(SyncControllerBase):
             page_count = row['page_count']
             genres: list[str] = []
             library_path = None
-            library_book = self._library_book([row['document'], *document_aliases], filename)
+            library_book = self._library_book([row['document'], *document_aliases], filename, row['library_path'])
             if library_book:
                 genres = library_book['genres']
                 library_path = library_book['relative_path']
@@ -373,6 +373,8 @@ class CrossPointSyncController(SyncControllerBase):
                 'aliases': document_aliases,
                 # Path of the matching library EPUB (relative to LIBRARY_DIR), for the web UI's catalog links
                 'library_path': library_path,
+                # True when the library EPUB was associated by hand (PUT /documents/{document}/info)
+                'library_linked': bool(row['library_path']) and library_path is not None,
             })
         self._send_json_response({'items': items})
 
@@ -510,7 +512,11 @@ class CrossPointSyncController(SyncControllerBase):
         self._send_json_response(result)
 
     def document_info(self) -> None:
-        """PUT /api/v1/documents/{document}/info: cover URL, print page count, title, author."""
+        """PUT /api/v1/documents/{document}/info: cover URL, print page count, title, author, library EPUB.
+
+        `library_path` (relative to LIBRARY_DIR, null to remove) associates the document with a library
+        EPUB when its hashes match none, e.g. after the file was changed or sent by another way.
+        """
         user = self._require_user()
         if not user:
             return
@@ -544,6 +550,12 @@ class CrossPointSyncController(SyncControllerBase):
                 self._invalid()
                 return
             info['author'] = body['author'].strip()[:500]
+        if 'library_path' in body:
+            library_path = body['library_path']
+            if library_path is not None and not (isinstance(library_path, str) and self.library.resolve_relative(library_path)):
+                self._invalid()
+                return
+            info['library_path'] = library_path
         self._send_json_response(self.sync_storage.set_info(user, document, info))
 
     def document_cover(self) -> None:
@@ -557,7 +569,7 @@ class CrossPointSyncController(SyncControllerBase):
         row = self.sync_storage.get_document(user, document) or {}
         url, pages = row.get('cover_url'), row.get('page_count')
         if not url or not pages:
-            library_book = self._library_book([self.sync_storage.resolve_document(user, document), document], row.get('filename'))
+            library_book = self._library_book([self.sync_storage.resolve_document(user, document), document], row.get('filename'), row.get('library_path'))
             if library_book:
                 url = url or library_book['cover_url']
                 pages = pages or library_book['page_count']
@@ -572,7 +584,7 @@ class CrossPointSyncController(SyncControllerBase):
         if not document:
             return
         row = self.sync_storage.get_document(user, document) or {}
-        library_book = self._library_book([self.sync_storage.resolve_document(user, document), document], row.get('filename'))
+        library_book = self._library_book([self.sync_storage.resolve_document(user, document), document], row.get('filename'), row.get('library_path'))
         items = []
         if library_book and library_book['cover_url']:
             items.append({
@@ -742,7 +754,7 @@ class CrossPointSyncController(SyncControllerBase):
         for document in {row['document'] for row in log_rows}:
             info = documents.setdefault(document, {})
             if not info.get('page_count'):
-                library_book = self._library_book([document, *aliases.get(document, [])], info.get('filename'))
+                library_book = self._library_book([document, *aliases.get(document, [])], info.get('filename'), info.get('library_path'))
                 if library_book:
                     info['page_count'] = library_book['page_count']
         finished_dates, start_dates = {}, {}

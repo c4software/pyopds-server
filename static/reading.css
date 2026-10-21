@@ -153,3 +153,33 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
+
+/* Manual association of a synced document with a library EPUB */
+.link-dialog {
+    width: min(32rem, calc(100vw - 2rem));
+    padding: 1rem;
+    border-radius: 0.75rem;
+    border: 1px solid #e2e8f0;
+    background: #fff;
+    color: #0f172a;
+}
+.dark .link-dialog {
+    border-color: #334155;
+    background: #1e293b;
+    color: #f1f5f9;
+}
+.link-dialog::backdrop {
+    background: rgb(15 23 42 / 0.6);
+}
+.link-result {
+    width: 100%;
+    text-align: left;
+    padding: 0.5rem;
+    border-radius: 0.5rem;
+}
+.link-result:hover {
+    background: #f1f5f9;
+}
+.dark .link-result:hover {
+    background: #334155;
+}

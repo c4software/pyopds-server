@@ -34,6 +34,8 @@ DOCUMENT_COLUMNS = {
     'finished_date': 'INTEGER',
     'cover_url': 'TEXT',
     'page_count': 'INTEGER',
+    # Library EPUB (relative to LIBRARY_DIR) chosen by hand for a document the hashes do not match
+    'library_path': 'TEXT',
     'meta_manual': 'INTEGER NOT NULL DEFAULT 0',
     'updated_at': 'INTEGER NOT NULL DEFAULT 0',
 }
@@ -495,7 +497,7 @@ class SyncStorage:
             rows = conn.execute(
                 f"""
                 SELECT p.document, p.device_id, p.device, p.percentage, p.progress, p.position, p.updated_at,
-                       d.title, d.author, d.filename, d.cover_url, d.page_count, d.status_at, d.pause_reason,
+                       d.title, d.author, d.filename, d.cover_url, d.page_count, d.library_path, d.status_at, d.pause_reason,
                        COALESCE(d.status, CASE WHEN p.percentage >= {FINISHED_PERCENTAGE} OR {completed_sql('p.user', 'p.document')}
                                                THEN 'finished' ELSE 'reading' END) AS status
                 FROM progress p
@@ -664,7 +666,7 @@ class SyncStorage:
         }
 
     def set_info(self, user: str, document: str, info: dict) -> dict:
-        """Edit cover URL, print page count, title or author of a book."""
+        """Edit cover URL, print page count, title, author or associated library EPUB of a book."""
         now = now_seconds()
         with self._get_connection() as conn:
             canonical = self._resolve(conn, user, document)
@@ -676,6 +678,8 @@ class SyncStorage:
                 conn.execute('UPDATE documents SET cover_url = ? WHERE user = ? AND document = ?', (info['cover_url'], user, canonical))
             if 'page_count' in info:
                 conn.execute('UPDATE documents SET page_count = ? WHERE user = ? AND document = ?', (info['page_count'], user, canonical))
+            if 'library_path' in info:
+                conn.execute('UPDATE documents SET library_path = ? WHERE user = ? AND document = ?', (info['library_path'], user, canonical))
             if 'title' in info or 'author' in info:
                 conn.execute(
                     'UPDATE documents SET title = COALESCE(?, title), author = CASE WHEN ? THEN ? ELSE author END, '
@@ -683,7 +687,7 @@ class SyncStorage:
                     (info.get('title'), 'author' in info, info.get('author') or None, user, canonical),
                 )
             row = conn.execute(
-                'SELECT cover_url, page_count, title, author FROM documents WHERE user = ? AND document = ?', (user, canonical)
+                'SELECT cover_url, page_count, title, author, library_path FROM documents WHERE user = ? AND document = ?', (user, canonical)
             ).fetchone()
         return {'document': canonical, **dict(row)}
 
@@ -861,7 +865,7 @@ class SyncStorage:
             documents = {
                 r['document']: dict(r)
                 for r in conn.execute(
-                    'SELECT document, filename, page_count, status, status_at, start_date, finished_date '
+                    'SELECT document, filename, page_count, library_path, status, status_at, start_date, finished_date '
                     'FROM documents WHERE user = ?', (user,)
                 )
             }

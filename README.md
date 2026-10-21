@@ -150,7 +150,7 @@ Errors, status codes and timestamps follow the reference KOSync server.
 - Clippings and bookmarks: `GET /clippings`, `GET|PUT /clippings/{document}`, `GET|PUT /bookmarks/{document}`.
 - Account: `POST /account/password`, `DELETE /account/data`, `DELETE /account`.
 
-`GET /api/v1/progress` also returns `library_path`, the path of the matching library EPUB (or `null`), used by the reading page for its catalog and download links.
+`GET /api/v1/progress` also returns `library_path`, the path of the matching library EPUB (or `null`), used by the reading page for its catalog and download links. When the hashes match no EPUB (file changed since, or sent another way), `PUT /api/v1/documents/{document}/info` accepts `library_path` (relative to `LIBRARY_DIR`, `null` to remove) to associate the document by hand: the reading page offers it with « Associer à un livre », and `library_linked` is then `true`.
 
 External services of crosspoint-sync (Hardcover, Spotify, Readwise... connectors, online cover and description lookups) are not provided: `GET /api/v1/connectors` returns an empty list and the app hides those features.
 

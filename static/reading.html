@@ -111,6 +111,22 @@
         <p id="empty" class="hidden text-sm text-slate-500 dark:text-slate-400">Aucune progression synchronisée pour ce compte pour l'instant.</p>
     </main>
 
+    <dialog id="link-dialog" class="link-dialog">
+        <form id="link-search" class="flex flex-col gap-3" method="dialog">
+            <div class="flex items-center justify-between gap-2">
+                <h2 class="text-base font-medium">Associer à un livre du catalogue</h2>
+                <button type="button" id="link-close" class="text-slate-500 hover:text-slate-900 dark:hover:text-slate-200" title="Fermer"><i data-lucide="x" class="w-4 h-4"></i></button>
+            </div>
+            <p id="link-document" class="text-xs text-slate-500 dark:text-slate-400 break-all"></p>
+            <div class="flex gap-2">
+                <input id="link-query" type="search" placeholder="Titre, auteur…" class="flex-1 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-1.5 text-sm" autocomplete="off"/>
+                <button type="submit" class="rounded-md bg-slate-700 hover:bg-slate-800 text-white px-3 py-1.5 text-sm">Chercher</button>
+            </div>
+            <p id="link-status" class="text-xs text-slate-500 dark:text-slate-400"></p>
+            <ul id="link-results" class="flex flex-col gap-1 max-h-80 overflow-y-auto"></ul>
+        </form>
+    </dialog>
+
     <div id="tooltip" class="chart-tooltip" role="tooltip" hidden></div>
     <script src="/static/reading.js"></script>
 </body>

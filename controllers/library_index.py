@@ -7,7 +7,7 @@ import zipfile
 from html.parser import HTMLParser
 from urllib.parse import unquote
 
-from controllers.opds import LIBRARY_DIR, BookMetadata, BookScanner
+from controllers.opds import LIBRARY_DIR, BookMetadata, BookScanner, SecurityUtils
 
 CHUNK_SIZE = 1024
 INDEX_TTL = 300
@@ -132,6 +132,16 @@ class LibraryIndex:
             by_key.setdefault(os.path.basename(path), path)
         self._by_key = by_key
         self._built_at = time.time()
+
+    @staticmethod
+    def resolve_relative(relative_path: str) -> str | None:
+        """Absolute path of a library EPUB given relative to LIBRARY_DIR, or None if invalid or missing."""
+        if not relative_path.lower().endswith('.epub') or SecurityUtils.has_path_traversal(relative_path):
+            return None
+        path = os.path.join(LIBRARY_DIR, relative_path)
+        if not SecurityUtils.is_within_library_dir(path) or not os.path.isfile(path):
+            return None
+        return path
 
     def find(self, documents: list[str], filename: str | None = None) -> str | None:
         """Return the EPUB path matching one of the hashes, or the device file name."""
