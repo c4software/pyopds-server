@@ -1,45 +1,22 @@
-// Reading statistics page: renders the sync API data of the account signed in on /login
-// (key kept by static/account.js). Endpoints used: /api/v1/progress, /api/v1/progress/{document},
-// /api/v1/stats/summary, /api/v1/stats/activity, /api/v1/clippings.
+// Reading statistics page: the `reading` Alpine component (templates in reading.html) loads the sync API
+// data of the account signed in on /login (key kept by static/account.js) and turns it into view models.
+// It never builds HTML. Endpoints used: /api/v1/progress, /api/v1/progress/{document},
+// /api/v1/stats/summary, /api/v1/stats/activity, /api/v1/clippings, PUT /api/v1/documents/{document}/info.
 (function () {
     'use strict';
 
-    const STORAGE_KEY = 'sync-account';
     const DAY_MS = 86400000;
     const MAX_DEVICE_LOOKUPS = 30;
     const CLIPPINGS_SHOWN = 12;
-
-    const $ = (id) => document.getElementById(id);
-
-    // ------------------------------------------------------------------ storage
-
-    function storageGet(key) {
-        try { return localStorage.getItem(key); } catch (e) { return null; }
-    }
-
-    function storageSet(key, value) {
-        try {
-            if (value === null) localStorage.removeItem(key);
-            else localStorage.setItem(key, value);
-        } catch (e) { /* private mode: the session simply is not remembered */ }
-    }
-
-    function loadAccount() {
-        try {
-            const account = JSON.parse(storageGet(STORAGE_KEY) || 'null');
-            return account && account.user && account.key ? account : null;
-        } catch (e) {
-            return null;
-        }
-    }
+    // Literal class names (custom classes of reading.css)
+    const HEAT_CLASSES = ['heat-cell heat-0', 'heat-cell heat-1', 'heat-cell heat-2', 'heat-cell heat-3', 'heat-cell heat-4'];
+    const BOOK_SECTIONS = [
+        { id: 'reading', icon: 'book-open', title: 'En cours', grid: 'grid gap-3 md:grid-cols-2' },
+        { id: 'finished', icon: 'check-circle-2', title: 'Terminés', grid: 'grid gap-3 sm:grid-cols-2 lg:grid-cols-3' },
+        { id: 'dnf', icon: 'circle-slash', title: 'Abandonnés', grid: 'grid gap-3 sm:grid-cols-2 lg:grid-cols-3' },
+    ];
 
     // ----------------------------------------------------------------- helpers
-
-    function esc(value) {
-        return String(value == null ? '' : value).replace(/[&<>"']/g, function (ch) {
-            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
-        });
-    }
 
     function encodePath(path) {
         return path.split('/').map(encodeURIComponent).join('/');
@@ -52,6 +29,12 @@
     function parseDay(key) {
         const [y, m, d] = key.split('-').map(Number);
         return new Date(y, m - 1, d);
+    }
+
+    function startOfToday() {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        return today;
     }
 
     const dateFormat = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -84,38 +67,20 @@
         return Math.round((value || 0) * 1000) / 10 + ' %';
     }
 
-    function show(id, visible) {
-        $(id).classList.toggle('hidden', !visible);
-        if (id === 'stats-view') $(id).classList.toggle('flex', visible);
+    function count(list) {
+        return list.length ? '(' + list.length + ')' : '';
     }
 
-    // ----------------------------------------------------------------- tooltip
-
-    const tooltip = $('tooltip');
-
-    function bindTooltips(root) {
-        root.querySelectorAll('[data-tip]').forEach(function (el) {
-            el.addEventListener('mouseenter', function () {
-                tooltip.textContent = el.getAttribute('data-tip');
-                tooltip.hidden = false;
-                const rect = el.getBoundingClientRect();
-                const left = Math.min(Math.max(8, rect.left + rect.width / 2 - tooltip.offsetWidth / 2), window.innerWidth - tooltip.offsetWidth - 8);
-                tooltip.style.left = left + 'px';
-                tooltip.style.top = Math.max(8, rect.top - tooltip.offsetHeight - 6) + 'px';
-            });
-            el.addEventListener('mouseleave', function () { tooltip.hidden = true; });
-        });
+    function isReading(item) {
+        return item.status === 'reading' || item.status === 'paused';
     }
 
     // --------------------------------------------------------------------- API
 
-    let account = loadAccount();
-
     class Unauthorized extends Error {}
 
-    async function api(path, credentials, method, body) {
-        const auth = credentials || account;
-        const headers = { 'x-auth-user': auth.user, 'x-auth-key': auth.key, 'Accept': 'application/json' };
+    async function api(account, path, method, body) {
+        const headers = { 'x-auth-user': account.user, 'x-auth-key': account.key, 'Accept': 'application/json' };
         if (body !== undefined) headers['Content-Type'] = 'application/json';
         const response = await fetch(path, {
             method: method || 'GET',
@@ -129,107 +94,24 @@
         return data;
     }
 
-    // ------------------------------------------------------------------- views
-
-    // Single sign-in page for the catalog and this page (/logout also closes the catalog session)
-    function signIn() {
-        storageSet(STORAGE_KEY, null);
-        window.location.replace('/logout?next=' + encodeURIComponent('/reading'));
+    // Catalog search through the OPDS feed: each acquisition link gives the EPUB path in the library
+    async function searchLibrary(query) {
+        const response = await fetch('/opds/search?q=' + encodeURIComponent(query), { cache: 'no-store' });
+        if (!response.ok) throw new Error('Erreur ' + response.status);
+        const xml = new DOMParser().parseFromString(await response.text(), 'application/xml');
+        const ATOM = 'http://www.w3.org/2005/Atom';
+        const text = function (parent, name) { const el = parent && parent.getElementsByTagNameNS(ATOM, name)[0]; return el ? el.textContent.trim() : ''; };
+        return Array.from(xml.getElementsByTagNameNS(ATOM, 'entry')).map(function (entry) {
+            const download = Array.from(entry.getElementsByTagNameNS(ATOM, 'link'))
+                .map(function (l) { return l.getAttribute('href') || ''; })
+                .find(function (href) { return href.indexOf('/download/') === 0; });
+            const path = download ? decodeURIComponent(download.slice('/download/'.length)) : null;
+            const author = text(entry.getElementsByTagNameNS(ATOM, 'author')[0], 'name');
+            return { title: text(entry, 'title'), detail: [author, path].filter(Boolean).join(' · '), path: path };
+        }).filter(function (book) { return book.path; });
     }
 
-    function showStats() {
-        show('stats-view', true);
-        show('logout-button', true);
-        show('refresh-button', true);
-        $('account-name').textContent = account.user;
-        load();
-    }
-
-    $('logout-button').addEventListener('click', function () {
-        storageSet(STORAGE_KEY, null);
-        window.location.href = '/logout';
-    });
-
-    $('refresh-button').addEventListener('click', function () { load(); });
-
-    // -------------------------------------------------------------------- load
-
-    async function load() {
-        show('loading', true);
-        show('load-error', false);
-        const tz = new Date().getTimezoneOffset();
-        const results = await Promise.allSettled([
-            api('/api/v1/progress?limit=500'),
-            api('/api/v1/stats/summary'),
-            api('/api/v1/stats/activity?tz=' + tz),
-            api('/api/v1/clippings'),
-        ]);
-        show('loading', false);
-        if (results.some(function (r) { return r.status === 'rejected' && r.reason instanceof Unauthorized; })) {
-            signIn();
-            return;
-        }
-        if (results[0].status === 'rejected') {
-            $('load-error').textContent = 'Impossible de charger la progression : ' + results[0].reason.message;
-            show('load-error', true);
-            return;
-        }
-        const value = function (i, fallback) { return results[i].status === 'fulfilled' && results[i].value ? results[i].value : fallback; };
-        const items = value(0, {}).items || [];
-        const summary = value(1, null);
-        const activity = value(2, { books: [], days: [], reading_days: [], pages_total: 0 });
-        const clippings = value(3, {}).items || [];
-
-        const devices = await loadDevices(items);
-        render(items, summary, activity, clippings, devices);
-    }
-
-    // Every device's position for the books in progress (one request per book, capped)
-    async function loadDevices(items) {
-        const reading = items.filter(isReading).slice(0, MAX_DEVICE_LOOKUPS);
-        const lookups = await Promise.allSettled(reading.map(function (item) {
-            return api('/api/v1/progress/' + encodeURIComponent(item.document));
-        }));
-        const byDocument = {};
-        lookups.forEach(function (result, i) {
-            if (result.status === 'fulfilled') byDocument[reading[i].document] = result.value.devices || [];
-        });
-        return byDocument;
-    }
-
-    function isReading(item) {
-        return item.status === 'reading' || item.status === 'paused';
-    }
-
-    // ------------------------------------------------------------------ render
-
-    function render(items, summary, activity, clippings, devicesByDocument) {
-        const reading = items.filter(isReading);
-        const finished = items.filter(function (i) { return i.status === 'finished'; });
-        const dnf = items.filter(function (i) { return i.status === 'dnf'; });
-        const activityBooks = {};
-        (activity.books || []).forEach(function (b) { activityBooks[b.document] = b; });
-
-        const days = buildDays(activity, summary);
-        renderKpis(items, reading, finished, summary, activity, days);
-        renderHeatmap(days);
-        renderDailyBars(days);
-        renderDistributions(summary);
-        renderDevices(items, summary, devicesByDocument);
-        show('activity-section', items.length > 0 || Boolean(summary && summary.seconds));
-        // Most recent weeks first in view when the calendar scrolls (narrow screens)
-        requestAnimationFrame(function () { $('heatmap').scrollLeft = $('heatmap').scrollWidth; });
-
-        renderBooks('reading', reading, function (item) { return readingCard(item, devicesByDocument[item.document], activityBooks[item.document]); });
-        finished.sort(function (a, b) {
-            return ((activityBooks[b.document] || {}).finished_at || b.status_at || b.timestamp) - ((activityBooks[a.document] || {}).finished_at || a.status_at || a.timestamp);
-        });
-        renderBooks('finished', finished, function (item) { return compactCard(item, activityBooks[item.document]); });
-        renderBooks('dnf', dnf, function (item) { return compactCard(item, activityBooks[item.document]); });
-        renderClippings(clippings, items);
-        show('empty', items.length === 0);
-        lucide.createIcons();
-    }
+    // ------------------------------------------------------------ computations
 
     // Per-day data in local days: pages (progress history), minutes (reader stats) and reading flag
     function buildDays(activity, summary) {
@@ -260,8 +142,7 @@
             previous = date;
         });
         // Current streak: from today, or from yesterday when today is not read yet
-        const cursor = new Date();
-        cursor.setHours(0, 0, 0, 0);
+        const cursor = startOfToday();
         if (!days[dayKey(cursor)] || !days[dayKey(cursor)].read) cursor.setDate(cursor.getDate() - 1);
         let current = 0;
         while (days[dayKey(cursor)] && days[dayKey(cursor)].read) {
@@ -271,22 +152,19 @@
         return { current: current, longest: longest, total: keys.length };
     }
 
-    function renderKpis(items, reading, finished, summary, activity, days) {
-        const streak = streaks(days);
+    function kpis(items, reading, finished, summary, activity, days) {
         const seconds = summary ? summary.seconds : 0;
+        if (!items.length && !seconds) return [];
+        const streak = streaks(days);
         const pages = Math.max(summary ? summary.pages : 0, activity.pages_total || 0);
-        const kpis = [
+        return [
             { icon: 'clock', label: 'Temps de lecture', value: seconds ? formatDuration(seconds) : '—' },
             { icon: 'file-text', label: 'Pages lues', value: pages ? pages.toLocaleString('fr-FR') : '—' },
-            { icon: 'book-open', label: 'En cours', value: reading.length },
-            { icon: 'check-circle-2', label: 'Terminés', value: finished.length },
-            { icon: 'calendar-check', label: 'Jours de lecture', value: streak.total },
+            { icon: 'book-open', label: 'En cours', value: String(reading.length) },
+            { icon: 'check-circle-2', label: 'Terminés', value: String(finished.length) },
+            { icon: 'calendar-check', label: 'Jours de lecture', value: String(streak.total) },
             { icon: 'flame', label: 'Série (record)', value: Math.max(streak.current, summary ? summary.current_streak : 0) + ' j (' + Math.max(streak.longest, summary ? summary.streak : 0) + ')' },
         ];
-        $('kpis').innerHTML = items.length || seconds ? kpis.map(function (k) {
-            return '<div class="card p-3"><div class="flex items-center gap-1.5 kpi-label"><i data-lucide="' + k.icon + '" class="w-3.5 h-3.5"></i>' + esc(k.label) + '</div>' +
-                '<div class="kpi-value mt-1">' + esc(k.value) + '</div></div>';
-        }).join('') : '';
     }
 
     function dayTip(key, day) {
@@ -300,39 +178,35 @@
     }
 
     // GitHub-style calendar of the last 53 weeks, intensity relative to the busiest day
-    function renderHeatmap(days) {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+    function heatmap(days) {
+        const today = startOfToday();
         const start = new Date(today);
         start.setDate(start.getDate() - 52 * 7 - ((today.getDay() + 6) % 7));
         const score = function (day) { return day ? day.pages + day.minutes : 0; };
         const max = Math.max(1, ...Object.values(days).map(score));
-
-        let cells = '', months = '', lastMonth = -1;
+        const cells = [], months = [];
+        let lastMonth = -1;
         for (let date = new Date(start), index = 0; date <= today || date.getDay() !== 1; date.setDate(date.getDate() + 1), index++) {
             const key = dayKey(date);
             const day = days[key];
             if (index % 7 === 0) {
                 const label = date.getMonth() !== lastMonth && date.getDate() <= 7 ? monthFormat.format(date) : '';
                 if (label) lastMonth = date.getMonth();
-                months += '<span>' + esc(label) + '</span>';
+                months.push({ key: key, label: label });
             }
             if (date > today) {
-                cells += '<span class="heat-cell future"></span>';
+                cells.push({ key: key, cls: 'heat-cell future', tip: '' });
                 continue;
             }
             const s = score(day);
             const level = s > 0 ? Math.min(4, Math.ceil((s / max) * 4)) : (day && day.read ? 1 : 0);
-            cells += '<span class="heat-cell heat-' + level + '" data-tip="' + esc(dayTip(key, day)) + '"></span>';
+            cells.push({ key: key, cls: HEAT_CLASSES[level], tip: dayTip(key, day) });
         }
-        const container = $('heatmap');
-        container.innerHTML = '<div class="heatmap-months">' + months + '</div><div class="heatmap">' + cells + '</div>';
-        bindTooltips(container);
+        return { months: months, cells: cells };
     }
 
-    function renderDailyBars(days) {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+    function dailyBars(days) {
+        const today = startOfToday();
         const series = [];
         for (let i = 29; i >= 0; i--) {
             const date = new Date(today);
@@ -343,252 +217,295 @@
         const useMinutes = series.some(function (s) { return s.day && s.day.minutes; });
         const metric = function (s) { return s.day ? (useMinutes ? s.day.minutes : s.day.pages) : 0; };
         const max = Math.max(1, ...series.map(metric));
-        $('daily-title').textContent = (useMinutes ? 'Minutes de lecture' : 'Pages lues') + ' — 30 derniers jours';
-        const container = $('daily-bars');
-        container.innerHTML = series.map(function (s) {
-            return '<div class="bar-slot" data-tip="' + esc(dayTip(s.key, s.day)) + '"><div class="bar" style="height:' + (metric(s) / max * 100) + '%"></div></div>';
-        }).join('');
-        const axis = container.nextElementSibling && container.nextElementSibling.classList.contains('bars-axis') ? container.nextElementSibling : null;
-        const axisHtml = '<div class="bars-axis"><span>' + esc(dayFormat.format(parseDay(series[0].key))) + '</span><span>max ' + Math.round(max) + (useMinutes ? ' min' : ' p.') + '</span><span>Aujourd\'hui</span></div>';
-        if (axis) axis.outerHTML = axisHtml;
-        else container.insertAdjacentHTML('afterend', axisHtml);
-        bindTooltips(container);
+        return {
+            title: (useMinutes ? 'Minutes de lecture' : 'Pages lues') + ' — 30 derniers jours',
+            bars: series.map(function (s) { return { key: s.key, height: metric(s) / max * 100, tip: dayTip(s.key, s.day) }; }),
+            start: dayFormat.format(parseDay(series[0].key)),
+            max: 'max ' + Math.round(max) + (useMinutes ? ' min' : ' p.'),
+        };
     }
 
-    function hbars(labels, values, unit) {
+    function hbars(labels, values) {
         const max = Math.max(1, ...values);
-        return labels.map(function (label, i) {
-            return '<div class="hbar"><span>' + esc(label) + '</span><div class="progress-track"><div class="progress-fill" style="width:' + (values[i] / max * 100) + '%"></div></div><span class="value">' + esc(unit(values[i])) + '</span></div>';
-        }).join('');
+        return labels.map(function (label, i) { return { label: label, width: values[i] / max * 100, value: String(values[i]) }; });
     }
 
-    // Reading sessions by time of day / weekday (sent by CrossPoint readers only)
-    function renderDistributions(summary) {
-        const tod = summary && summary.tod || [];
-        const dow = summary && summary.dow || [];
-        const hasTod = tod.some(Boolean), hasDow = dow.some(Boolean);
-        const sessions = function (v) { return String(v); };
-        if (hasTod) $('tod-bars').innerHTML = hbars(['Nuit', 'Matin', 'Après-midi', 'Soir'], tod, sessions);
-        // Buckets assumed in hour order (0-6 h, 6-12 h, 12-18 h, 18-24 h) and weekdays from Sunday (tm_wday)
-        if (hasDow) $('dow-bars').innerHTML = hbars(['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'], [1, 2, 3, 4, 5, 6, 0].map(function (i) { return dow[i] || 0; }), sessions);
-        show('tod-card', hasTod);
-        show('dow-card', hasDow);
-    }
-
-    function renderDevices(items, summary, devicesByDocument) {
-        const devices = {};
+    function devices(items, summary, devicesByDocument) {
+        const list = {};
         const touch = function (id, name, at, document) {
             if (!id && !name) return;
-            const device = devices[id || name] || (devices[id || name] = { name: name || id, last: 0, books: new Set(), stats: false });
+            const device = list[id || name] || (list[id || name] = { key: id || name, name: name || id, last: 0, books: new Set(), stats: false });
             if (name) device.name = name;
             device.last = Math.max(device.last, at || 0);
             if (document) device.books.add(document);
             return device;
         };
         items.forEach(function (item) { touch(item.device_id, item.device, item.timestamp, item.document); });
-        Object.entries(devicesByDocument).forEach(function ([document, list]) {
-            list.forEach(function (d) { touch(d.device_id, d.device, d.timestamp, document); });
+        Object.entries(devicesByDocument).forEach(function ([document, rows]) {
+            rows.forEach(function (d) { touch(d.device_id, d.device, d.timestamp, document); });
         });
         ((summary && summary.devices) || []).forEach(function (d) {
             const device = touch(d.device_id, d.device, d.updated_at);
             if (device) device.stats = true;
         });
-        const list = Object.values(devices).sort(function (a, b) { return b.last - a.last; });
-        $('devices-list').innerHTML = list.map(function (d) {
+        return Object.values(list).sort(function (a, b) { return b.last - a.last; }).map(function (d) {
             const books = d.books.size ? d.books.size + (d.books.size > 1 ? ' livres' : ' livre') : '';
-            return '<li class="flex items-start gap-2"><i data-lucide="tablet" class="w-4 h-4 mt-0.5 text-slate-400"></i><div class="min-w-0">' +
-                '<div class="truncate">' + esc(d.name) + (d.stats ? ' <span class="badge">stats</span>' : '') + '</div>' +
-                '<div class="text-xs text-slate-500 dark:text-slate-400">Dernière synchro ' + esc(relativeTime(d.last)) + (books ? ' · ' + books : '') + '</div></div></li>';
-        }).join('');
-        show('devices-card', list.length > 0);
-    }
-
-    function renderBooks(kind, list, card) {
-        $(kind + '-list').innerHTML = list.map(card).join('');
-        $(kind + '-count').textContent = list.length ? '(' + list.length + ')' : '';
-        show(kind + '-section', list.length > 0);
-        list.length && $(kind + '-list').querySelectorAll('img[data-fallback]').forEach(function (img) {
-            img.addEventListener('error', function () { img.replaceWith(coverPlaceholder()); lucide.createIcons(); }, { once: true });
+            return { key: d.key, name: d.name, stats: d.stats, detail: 'Dernière synchro ' + relativeTime(d.last) + (books ? ' · ' + books : '') };
         });
     }
 
-    function coverUrl(item) {
-        if (item.cover_url) return item.cover_url;
-        return item.library_path ? '/cover/' + encodePath(item.library_path) : '';
-    }
-
-    function catalogLinks(item) {
-        const link = 'inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200';
-        // Books the hashes did not match: associate them by hand with a library EPUB
-        if (!item.library_path) {
-            return '<div class="flex flex-wrap gap-3 mt-2"><button type="button" class="' + link + '" data-link-document="' + esc(item.document) + '" data-link-label="' + esc(item.title || item.filename || item.document) + '">' +
-                '<i data-lucide="link" class="w-3.5 h-3.5"></i>Associer à un livre</button></div>';
+    // Common part of the book cards: cover, title and the catalog / association links
+    function bookView(item) {
+        const view = {
+            key: item.document,
+            title: item.title || item.filename || item.document,
+            author: item.author || '',
+            cover: item.cover_url || (item.library_path ? '/cover/' + encodePath(item.library_path) : ''),
+            broken: false,
+            linkable: !item.library_path,
+            document: item.document,
+        };
+        if (item.library_path) {
+            const folder = item.library_path.includes('/') ? item.library_path.slice(0, item.library_path.lastIndexOf('/')) : '';
+            view.catalog = folder ? '/opds/folder/' + encodePath(folder) : '/opds/search?q=' + encodeURIComponent(item.title || item.filename || '');
+            view.download = '/download/' + encodePath(item.library_path);
+            view.unlink = Boolean(item.library_linked);
         }
-        const folder = item.library_path.includes('/') ? item.library_path.slice(0, item.library_path.lastIndexOf('/')) : '';
-        const catalog = folder ? '/opds/folder/' + encodePath(folder) : '/opds/search?q=' + encodeURIComponent(item.title || item.filename || '');
-        const unlink = item.library_linked
-            ? '<button type="button" class="' + link + '" data-unlink-document="' + esc(item.document) + '"><i data-lucide="unlink" class="w-3.5 h-3.5"></i>Dissocier</button>'
-            : '';
-        return '<div class="flex flex-wrap gap-3 mt-2">' +
-            '<a class="' + link + '" href="' + esc(catalog) + '"><i data-lucide="library" class="w-3.5 h-3.5"></i>Voir dans le catalogue</a>' +
-            '<a class="' + link + '" href="/download/' + esc(encodePath(item.library_path)) + '"><i data-lucide="download" class="w-3.5 h-3.5"></i>Télécharger</a>' + unlink + '</div>';
+        return view;
     }
 
-    function coverPlaceholder() {
-        const placeholder = document.createElement('div');
-        placeholder.className = 'book-thumb flex items-center justify-center text-slate-400 dark:text-slate-500';
-        placeholder.innerHTML = '<i data-lucide="book" class="w-5 h-5"></i>';
-        return placeholder;
-    }
-
-    function bookHeader(item) {
-        const cover = coverUrl(item);
-        if (!cover) return '<div class="book-thumb flex items-center justify-center text-slate-400 dark:text-slate-500"><i data-lucide="book" class="w-5 h-5"></i></div>';
-        return '<img class="book-thumb" alt="" loading="lazy" data-fallback="1" src="' + esc(cover) + '"/>';
-    }
-
-    function bookTitle(item) {
-        return '<div class="font-medium text-sm leading-snug">' + esc(item.title || item.filename || item.document) + '</div>' +
-            (item.author ? '<div class="text-xs text-slate-500 dark:text-slate-400 truncate">' + esc(item.author) + '</div>' : '');
-    }
-
-    function readingCard(item, devices, stats) {
+    function readingCard(item, deviceRows, stats) {
+        const view = bookView(item);
         const pages = item.page && item.pages ? ' · p. ' + item.page + '/' + item.pages : '';
-        const paused = item.status === 'paused' ? ' <span class="badge">en pause</span>' : '';
+        view.reading = true;
+        view.progress = (item.percentage || 0) * 100;
+        view.percent = percent(item.percentage);
+        view.meta = (item.device || item.device_id || 'Appareil inconnu') + ' · ' + relativeTime(item.timestamp) + pages;
+        view.paused = item.status === 'paused';
+        view.started = stats && stats.started_at ? 'Commencé le ' + formatDate(stats.started_at) : '';
         // Per-device rows when the book is read on several devices
-        const rows = (devices && devices.length > 1 ? devices : []).map(function (d) {
-            return '<li class="grid grid-cols-[1fr_auto] gap-x-2 items-center"><span class="truncate">' + esc(d.device || d.device_id) + ' · ' + esc(relativeTime(d.timestamp)) + '</span><span>' + esc(percent(d.percentage)) + '</span>' +
-                '<div class="progress-track col-span-2" style="height:3px"><div class="progress-fill" style="width:' + (d.percentage || 0) * 100 + '%"></div></div></li>';
-        }).join('');
-        const started = stats && stats.started_at ? 'Commencé le ' + formatDate(stats.started_at) : '';
-        return '<article class="card p-3 flex gap-3">' + bookHeader(item) + '<div class="min-w-0 flex-1">' + bookTitle(item) +
-            '<div class="flex items-center gap-2 mt-2"><div class="progress-track flex-1"><div class="progress-fill" style="width:' + (item.percentage || 0) * 100 + '%"></div></div>' +
-            '<span class="text-xs font-medium">' + esc(percent(item.percentage)) + '</span></div>' +
-            '<div class="text-xs text-slate-500 dark:text-slate-400 mt-1">' + esc((item.device || item.device_id || 'Appareil inconnu') + ' · ' + relativeTime(item.timestamp) + pages) + paused + '</div>' +
-            (started ? '<div class="text-xs text-slate-500 dark:text-slate-400">' + esc(started) + '</div>' : '') +
-            (rows ? '<ul class="mt-2 space-y-1 text-xs text-slate-500 dark:text-slate-400">' + rows + '</ul>' : '') +
-            catalogLinks(item) + '</div></article>';
+        view.devices = (deviceRows && deviceRows.length > 1 ? deviceRows : []).map(function (d, i) {
+            return { key: (d.device_id || d.device || '') + i, label: (d.device || d.device_id) + ' · ' + relativeTime(d.timestamp), percent: percent(d.percentage), progress: (d.percentage || 0) * 100 };
+        });
+        return view;
     }
 
     function compactCard(item, stats) {
-        let detail = '';
+        const view = bookView(item);
         if (item.status === 'finished') {
             const at = (stats && stats.finished_at) || item.status_at || item.timestamp;
-            detail = 'Terminé le ' + formatDate(at) + (stats && stats.days_to_finish ? ' · ' + stats.days_to_finish + ' j' : '');
+            view.detail = 'Terminé le ' + formatDate(at) + (stats && stats.days_to_finish ? ' · ' + stats.days_to_finish + ' j' : '');
         } else {
-            detail = 'Arrêté à ' + percent(item.percentage) + ' · ' + formatDate(item.status_at || item.timestamp);
+            view.detail = 'Arrêté à ' + percent(item.percentage) + ' · ' + formatDate(item.status_at || item.timestamp);
         }
-        return '<article class="card p-3 flex gap-3">' + bookHeader(item) + '<div class="min-w-0 flex-1">' + bookTitle(item) +
-            '<div class="text-xs text-slate-500 dark:text-slate-400 mt-1">' + esc(detail) + '</div>' + catalogLinks(item) + '</div></article>';
+        return view;
     }
 
-    function renderClippings(clippings, items) {
+    function clippingViews(clippings, items) {
         const titles = {};
         items.forEach(function (item) {
             [item.document].concat(item.aliases || []).forEach(function (doc) { titles[doc] = item.title || item.filename || item.document; });
         });
-        const latest = clippings.slice().sort(function (a, b) { return (b.created_at || 0) - (a.created_at || 0); }).slice(0, CLIPPINGS_SHOWN);
-        $('clippings-list').innerHTML = latest.map(function (c) {
-            return '<figure class="card p-3 text-sm"><blockquote class="clip-text">' + esc(c.text) + '</blockquote>' +
-                (c.note ? '<p class="mt-2 text-xs italic text-slate-600 dark:text-slate-300">' + esc(c.note) + '</p>' : '') +
-                '<figcaption class="mt-2 text-xs text-slate-500 dark:text-slate-400">' + esc([titles[c.document] || c.document, c.chapter, formatDate(c.created_at)].filter(Boolean).join(' · ')) + '</figcaption></figure>';
-        }).join('');
-        $('clippings-count').textContent = clippings.length ? '(' + clippings.length + ')' : '';
-        show('clippings-section', clippings.length > 0);
-    }
-
-    // ------------------------------------------------- manual library association
-
-    const linkDialog = $('link-dialog');
-    let linkDocument = null;
-
-    // Catalog search through the OPDS feed: each acquisition link gives the EPUB path in the library
-    async function searchLibrary(query) {
-        const response = await fetch('/opds/search?q=' + encodeURIComponent(query), { cache: 'no-store' });
-        if (!response.ok) throw new Error('Erreur ' + response.status);
-        const xml = new DOMParser().parseFromString(await response.text(), 'application/xml');
-        const ATOM = 'http://www.w3.org/2005/Atom';
-        const text = function (parent, name) { const el = parent && parent.getElementsByTagNameNS(ATOM, name)[0]; return el ? el.textContent.trim() : ''; };
-        return Array.from(xml.getElementsByTagNameNS(ATOM, 'entry')).map(function (entry) {
-            const download = Array.from(entry.getElementsByTagNameNS(ATOM, 'link'))
-                .map(function (l) { return l.getAttribute('href') || ''; })
-                .find(function (href) { return href.indexOf('/download/') === 0; });
+        return clippings.slice().sort(function (a, b) { return (b.created_at || 0) - (a.created_at || 0); }).slice(0, CLIPPINGS_SHOWN).map(function (c, i) {
             return {
-                title: text(entry, 'title'),
-                author: text(entry.getElementsByTagNameNS(ATOM, 'author')[0], 'name'),
-                path: download ? decodeURIComponent(download.slice('/download/'.length)) : null,
+                key: c.document + ':' + (c.id || i),
+                text: c.text,
+                note: c.note || '',
+                caption: [titles[c.document] || c.document, c.chapter, formatDate(c.created_at)].filter(Boolean).join(' · '),
             };
-        }).filter(function (book) { return book.path; });
+        });
     }
 
-    async function setLibraryPath(document, path) {
-        await api('/api/v1/documents/' + encodeURIComponent(document) + '/info', null, 'PUT', { library_path: path });
-        load();
-    }
+    // --------------------------------------------------------------- component
 
-    $('stats-view').addEventListener('click', function (event) {
-        const linkButton = event.target.closest('[data-link-document]');
-        if (linkButton) {
-            linkDocument = linkButton.dataset.linkDocument;
-            $('link-document').textContent = linkButton.dataset.linkLabel;
-            $('link-results').innerHTML = '';
-            $('link-status').textContent = '';
-            linkDialog.showModal();
-            $('link-query').focus();
-            return;
-        }
-        const unlinkButton = event.target.closest('[data-unlink-document]');
-        if (unlinkButton) {
-            setLibraryPath(unlinkButton.dataset.unlinkDocument, null).catch(function (error) { console.error(error); });
-        }
+    document.addEventListener('alpine:init', function () {
+        window.Alpine.data('reading', function () {
+            return {
+                account: window.SyncAccount.load(),
+                ready: false,
+                loading: false,
+                error: '',
+                empty: false,
+                kpis: [],
+                showActivity: false,
+                heatmap: { months: [], cells: [] },
+                daily: { title: '30 derniers jours', bars: [], start: '', max: '' },
+                tod: [],
+                dow: [],
+                devices: [],
+                sections: [],
+                clippings: [],
+                clippingsCount: '',
+                tooltip: { text: '', show: false, left: 0, top: 0 },
+                link: { document: null, label: '', query: '', status: '', results: [] },
+
+                init() {
+                    if (!this.account) {
+                        this.signIn();
+                        return;
+                    }
+                    this.ready = true;
+                    this.icons();
+                    this.load();
+                },
+
+                // lucide replaces the <i data-lucide> placeholders by SVGs: run after each render that may add some
+                // (placeholders are never Alpine roots nor bound elements, so the replacement never breaks a binding)
+                icons() {
+                    this.$nextTick(function () { window.lucide.createIcons(); });
+                },
+
+                // Single sign-in page for the catalog and this page (/logout also closes the catalog session)
+                signIn() {
+                    window.SyncAccount.save(null);
+                    window.location.replace('/logout?next=' + encodeURIComponent('/reading'));
+                },
+
+                logout() {
+                    window.SyncAccount.save(null);
+                    window.location.href = '/logout';
+                },
+
+                async load() {
+                    this.loading = true;
+                    this.error = '';
+                    const call = (path) => api(this.account, path);
+                    const tz = new Date().getTimezoneOffset();
+                    const results = await Promise.allSettled([
+                        call('/api/v1/progress?limit=500'),
+                        call('/api/v1/stats/summary'),
+                        call('/api/v1/stats/activity?tz=' + tz),
+                        call('/api/v1/clippings'),
+                    ]);
+                    this.loading = false;
+                    if (results.some(function (r) { return r.status === 'rejected' && r.reason instanceof Unauthorized; })) {
+                        this.signIn();
+                        return;
+                    }
+                    if (results[0].status === 'rejected') {
+                        this.error = 'Impossible de charger la progression : ' + results[0].reason.message;
+                        return;
+                    }
+                    const value = function (i, fallback) { return results[i].status === 'fulfilled' && results[i].value ? results[i].value : fallback; };
+                    const items = value(0, {}).items || [];
+                    const summary = value(1, null);
+                    const activity = value(2, { books: [], days: [], reading_days: [], pages_total: 0 });
+                    const clippings = value(3, {}).items || [];
+
+                    // Every device's position for the books in progress (one request per book, capped)
+                    const reading = items.filter(isReading);
+                    const lookups = await Promise.allSettled(reading.slice(0, MAX_DEVICE_LOOKUPS).map(function (item) {
+                        return call('/api/v1/progress/' + encodeURIComponent(item.document));
+                    }));
+                    const devicesByDocument = {};
+                    lookups.forEach(function (result, i) {
+                        if (result.status === 'fulfilled') devicesByDocument[reading[i].document] = result.value.devices || [];
+                    });
+                    this.render(items, summary, activity, clippings, devicesByDocument);
+                },
+
+                render(items, summary, activity, clippings, devicesByDocument) {
+                    const reading = items.filter(isReading);
+                    const finished = items.filter(function (i) { return i.status === 'finished'; });
+                    const dnf = items.filter(function (i) { return i.status === 'dnf'; });
+                    const activityBooks = {};
+                    (activity.books || []).forEach(function (b) { activityBooks[b.document] = b; });
+                    finished.sort(function (a, b) {
+                        return ((activityBooks[b.document] || {}).finished_at || b.status_at || b.timestamp) - ((activityBooks[a.document] || {}).finished_at || a.status_at || a.timestamp);
+                    });
+
+                    const days = buildDays(activity, summary);
+                    this.kpis = kpis(items, reading, finished, summary, activity, days);
+                    this.heatmap = heatmap(days);
+                    this.daily = dailyBars(days);
+                    // Reading sessions by time of day / weekday (sent by CrossPoint readers only). Buckets assumed in
+                    // hour order (0-6 h, 6-12 h, 12-18 h, 18-24 h) and weekdays from Sunday (tm_wday)
+                    const tod = (summary && summary.tod) || [];
+                    const dow = (summary && summary.dow) || [];
+                    this.tod = tod.some(Boolean) ? hbars(['Nuit', 'Matin', 'Après-midi', 'Soir'], tod) : [];
+                    this.dow = dow.some(Boolean) ? hbars(['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'], [1, 2, 3, 4, 5, 6, 0].map(function (i) { return dow[i] || 0; })) : [];
+                    this.devices = devices(items, summary, devicesByDocument);
+                    this.showActivity = items.length > 0 || Boolean(summary && summary.seconds);
+
+                    const lists = {
+                        reading: reading.map(function (item) { return readingCard(item, devicesByDocument[item.document], activityBooks[item.document]); }),
+                        finished: finished.map(function (item) { return compactCard(item, activityBooks[item.document]); }),
+                        dnf: dnf.map(function (item) { return compactCard(item, activityBooks[item.document]); }),
+                    };
+                    this.sections = BOOK_SECTIONS.map(function (section) {
+                        return Object.assign({}, section, { books: lists[section.id], count: count(lists[section.id]) });
+                    });
+                    this.clippings = clippingViews(clippings, items);
+                    this.clippingsCount = count(clippings);
+                    this.empty = items.length === 0;
+                    this.icons();
+                    // Most recent weeks first in view when the calendar scrolls (narrow screens)
+                    const calendar = this.$refs.heatmap;
+                    this.$nextTick(function () { requestAnimationFrame(function () { calendar.scrollLeft = calendar.scrollWidth; }); });
+                },
+
+                coverError(book) {
+                    book.broken = true;
+                    this.icons();
+                },
+
+                async showTip(event, text) {
+                    const el = event.currentTarget;
+                    this.tooltip.text = text;
+                    this.tooltip.show = true;
+                    await this.$nextTick();
+                    const tip = this.$refs.tooltip;
+                    const rect = el.getBoundingClientRect();
+                    this.tooltip.left = Math.min(Math.max(8, rect.left + rect.width / 2 - tip.offsetWidth / 2), window.innerWidth - tip.offsetWidth - 8);
+                    this.tooltip.top = Math.max(8, rect.top - tip.offsetHeight - 6);
+                },
+
+                hideTip() {
+                    this.tooltip.show = false;
+                },
+
+                // ------------------------------------------- manual library association
+
+                openLink(book) {
+                    this.link = { document: book.document, label: book.title, query: this.link.query, status: '', results: [] };
+                    this.$refs.linkDialog.showModal();
+                    this.$refs.linkQuery.focus();
+                },
+
+                async search() {
+                    const query = this.link.query.trim();
+                    if (!query) return;
+                    this.link.status = 'Recherche…';
+                    this.link.results = [];
+                    try {
+                        const books = await searchLibrary(query);
+                        this.link.status = books.length ? books.length + ' résultat(s)' : 'Aucun livre trouvé.';
+                        this.link.results = books;
+                    } catch (error) {
+                        this.link.status = 'Recherche impossible : ' + error.message;
+                    }
+                },
+
+                async associate(path) {
+                    if (!this.link.document) return;
+                    this.link.status = 'Association…';
+                    try {
+                        await this.setLibraryPath(this.link.document, path);
+                        this.$refs.linkDialog.close();
+                    } catch (error) {
+                        this.link.status = 'Association impossible : ' + error.message;
+                    }
+                },
+
+                unlink(book) {
+                    this.setLibraryPath(book.document, null).catch(function (error) { console.error(error); });
+                },
+
+                async setLibraryPath(document, path) {
+                    await api(this.account, '/api/v1/documents/' + encodeURIComponent(document) + '/info', 'PUT', { library_path: path });
+                    this.load();
+                },
+            };
+        });
     });
-
-    $('link-close').addEventListener('click', function () { linkDialog.close(); });
-
-    $('link-search').addEventListener('submit', async function (event) {
-        event.preventDefault();
-        const query = $('link-query').value.trim();
-        if (!query) return;
-        $('link-status').textContent = 'Recherche…';
-        $('link-results').innerHTML = '';
-        try {
-            const books = await searchLibrary(query);
-            $('link-status').textContent = books.length ? books.length + ' résultat(s)' : 'Aucun livre trouvé.';
-            $('link-results').innerHTML = books.map(function (book) {
-                return '<li><button type="button" class="link-result" data-path="' + esc(book.path) + '">' +
-                    '<span class="block text-sm font-medium">' + esc(book.title) + '</span>' +
-                    '<span class="block text-xs text-slate-500 dark:text-slate-400">' + esc([book.author, book.path].filter(Boolean).join(' · ')) + '</span></button></li>';
-            }).join('');
-        } catch (error) {
-            $('link-status').textContent = 'Recherche impossible : ' + error.message;
-        }
-    });
-
-    $('link-results').addEventListener('click', async function (event) {
-        const result = event.target.closest('[data-path]');
-        if (!result || !linkDocument) return;
-        $('link-status').textContent = 'Association…';
-        try {
-            await setLibraryPath(linkDocument, result.dataset.path);
-            linkDialog.close();
-        } catch (error) {
-            $('link-status').textContent = 'Association impossible : ' + error.message;
-        }
-    });
-
-    // ------------------------------------------------------------------- theme
-
-    const darkIcon = $('theme-toggle-dark-icon');
-    const lightIcon = $('theme-toggle-light-icon');
-    (document.documentElement.classList.contains('dark') ? lightIcon : darkIcon).classList.remove('hidden');
-    $('theme-toggle').addEventListener('click', function () {
-        const dark = document.documentElement.classList.toggle('dark');
-        darkIcon.classList.toggle('hidden', dark);
-        lightIcon.classList.toggle('hidden', !dark);
-        storageSet('color-theme', dark ? 'dark' : 'light');
-    });
-
-    lucide.createIcons();
-    if (account) showStats();
-    else signIn();
 })();

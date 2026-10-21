@@ -1,4 +1,7 @@
 /* Reading statistics page: complements the Tailwind classes shared with the catalog pages */
+
+/* Alpine.js: hidden until the component has started */
+[x-cloak] { display: none !important; }
 :root {
     --card-bg: #ffffff;          /* white */
     --card-border: #e2e8f0;      /* slate-200 */

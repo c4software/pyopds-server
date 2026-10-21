@@ -42,7 +42,7 @@ Le projet suit une architecture de type MVC (Modèle-Vue-Contrôleur) simplifié
     * `online_metadata.py` : Détails de livres en ligne optionnels (iTunes, Open Library, Hardcover) en repli de la bibliothèque : cache SQLite `catalog_cache` partagé, recherches dans un thread de fond (jamais dans le chemin d'une requête, sauf `cover/candidates`).
     * `webui.py` : Pages statiques de l'interface web hors flux OPDS (page « Lecture » `/reading` et ses fichiers `/static/...`).
 * `genres.toml` : Correspondances sujets → genres, sujets ignorés et seuil d'affichage (complétable via `GENRES_CONFIG_PATH`).
-* `static/` : Fichiers statiques (XSLT pour l'affichage navigateur, pages `reading` et `login`, `account.js`, `xslt-polyfill.min.js` vendorisé ; `tailwind.css` est généré, non versionné).
+* `static/` : Fichiers statiques (XSLT pour l'affichage navigateur, pages `reading` et `login`, `account.js`, `theme.js`, `xslt-polyfill.min.js` vendorisé ; `tailwind.css` est généré, non versionné).
 * `tailwind.config.js`, `styles/tailwind.css`, `tools/tailwind.py` : génération de `static/tailwind.css` (outil de développement, jamais requis par le serveur).
 * `Dockerfile` : étapes `css` (compile la feuille de style), `dev` (rechargement à chaud) et image de production ; `docker-compose.dev.yml` pour le développement.
 * `tests/` : Tests unitaires (`unittest`).
@@ -84,6 +84,7 @@ Le projet suit une architecture de type MVC (Modèle-Vue-Contrôleur) simplifié
 * Le même flux sert tous les clients : les navigateurs le transforment en HTML avec `static/opds_to_html.xslt` (instruction `<?xml-stylesheet?>`). Chrome 158+ n'a plus de XSLT natif : chaque flux embarque `<script xmlns="http://www.w3.org/1999/xhtml" src="/static/xslt-polyfill.min.js?v=…"/>` (polyfill WebAssembly, ignoré quand le XSLT natif existe et par les clients OPDS). Ne pas retirer ce script de `generate_feed`.
 * Les scripts de la page doivent fonctionner aussi avec le polyfill : ne pas dépendre uniquement de `DOMContentLoaded` (tester `document.readyState`).
 * Les styles viennent de `static/tailwind.css`, compilé par le CLI Tailwind autonome via `python tools/tailwind.py` (pas de CDN : il ne s'applique pas correctement avec le polyfill). Après avoir ajouté des classes Tailwind dans `static/`, relancer `python tools/tailwind.py` (ou travailler avec `docker compose -f docker-compose.dev.yml up`, qui le fait à chaque changement). L'image Docker le compile elle-même.
+* Pages statiques (`static/reading.html`, `static/login.html`) : **Alpine.js** (version épinglée exacte depuis jsDelivr, sans build). Gabarits déclaratifs dans le HTML (`x-for`, `x-if`, `x-text` pour toute donnée de l'API, jamais `x-html`), un composant `Alpine.data(...)` par page dans le JS, enregistré sur `alpine:init` (scripts `defer` chargés avant Alpine) ; le JS ne construit pas de HTML. Icônes lucide : `<i data-lucide>` sans directive Alpine (sauf `:data-lucide` stable), `lucide.createIcons()` rappelé dans `$nextTick` après chaque rendu.
 * `wants_html()` (`controllers/opds_auth.py`) distingue navigateur et client OPDS (`Accept: text/html` ou en-têtes `Sec-Fetch-*`) : les ajouts propres à la webui (liens de mosaïque) ne sont envoyés qu'aux navigateurs.
 
 ## 5. Workflow de Développement
