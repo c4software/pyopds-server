@@ -43,26 +43,6 @@
         </div>
     </div>
 
-    <!-- Sign-in with the sync account (same credentials as KoReader / CrossPoint) -->
-    <section id="login-view" class="hidden p-4 sm:p-6">
-        <form id="login-form" class="max-w-sm mx-auto mt-6 sm:mt-12 bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 p-5 space-y-4">
-            <div class="flex items-center gap-2 text-slate-700 dark:text-slate-200">
-                <i data-lucide="book-open" class="w-5 h-5"></i>
-                <h2 class="text-base font-medium">Compte de synchronisation</h2>
-            </div>
-            <p class="text-sm text-slate-500 dark:text-slate-400">Identifiants utilisés par KoReader ou CrossPoint pour synchroniser la progression.</p>
-            <label class="block">
-                <span class="text-sm text-slate-600 dark:text-slate-300">Utilisateur</span>
-                <input id="login-user" name="username" autocomplete="username" required class="mt-1 w-full h-9 px-3 text-sm rounded-md border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100"/>
-            </label>
-            <label class="block">
-                <span class="text-sm text-slate-600 dark:text-slate-300">Mot de passe</span>
-                <input id="login-password" name="password" type="password" autocomplete="current-password" required class="mt-1 w-full h-9 px-3 text-sm rounded-md border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100"/>
-            </label>
-            <p id="login-error" class="hidden text-sm text-red-600 dark:text-red-400"></p>
-            <button type="submit" class="w-full h-9 bg-slate-700 text-white text-sm rounded-md hover:bg-slate-600 dark:bg-slate-600 dark:hover:bg-slate-500">Se connecter</button>
-        </form>
-    </section>
 
     <main id="stats-view" class="hidden p-4 sm:p-6 max-w-6xl mx-auto flex-col gap-8">
         <p id="loading" class="hidden text-sm text-slate-500 dark:text-slate-400">Chargement…</p>

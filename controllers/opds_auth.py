@@ -1,10 +1,14 @@
-"""Optional authentication of the OPDS catalog and web UI (OPDS_AUTH=true).
+"""Accounts of the OPDS catalog and web UI.
+
+The catalog is public by default; signing in is optional and enables what depends on the reader
+(the "read next" recommendations, routes declared with auth='user'). OPDS_AUTH=true makes the
+whole catalog private (routes declared with auth='opds').
 
 Accounts are the sync accounts: the MD5 of the password is checked against the stored key with
 the same function as the KOSync x-auth-user / x-auth-key headers.
 - OPDS clients (KoReader, CrossPoint…) use HTTP Basic.
-- Browsers are sent to the sign-in page /login, which opens a session (signed cookie).
-The sync API, /cover/* and /static/* are never protected (routes declared without auth='opds').
+- Browsers use the sign-in page /login, which opens a session (signed cookie).
+The sync API, /cover/* and /static/* are never protected (routes declared without auth).
 """
 import base64
 import binascii
@@ -31,8 +35,8 @@ MAX_LOGIN_BODY = 4096
 _session_secret: bytes | None = None
 
 
-def is_enabled() -> bool:
-    """OPDS_AUTH is read on every request (cheap) so that it can be toggled in tests."""
+def is_private() -> bool:
+    """OPDS_AUTH=true: the whole catalog requires an account. Read on every request (toggled in tests)."""
     return os.environ.get('OPDS_AUTH', '').strip().lower() in ('1', 'true', 'yes')
 
 
@@ -137,7 +141,7 @@ def _cookie_header(request_handler, name: str, value: str, max_age: int, http_on
             + ('; HttpOnly' if http_only else '') + ('; Secure' if secure else ''))
 
 
-def _wants_html(request_handler) -> bool:
+def wants_html(request_handler) -> bool:
     """Browser navigation (sent to the sign-in page) rather than an OPDS client (answered with Basic)."""
     return 'text/html' in (request_handler.headers.get('Accept') or '')
 
@@ -172,18 +176,20 @@ def send_challenge(request_handler) -> None:
 
 
 def guard(request_handler, auth: str | None) -> bool:
-    """Route middleware: set request_handler.opds_user and return False after answering 401.
+    """Route middleware: set request_handler.opds_user, return False after asking for an account.
 
-    `auth` is the route's auth option; only 'opds' routes are guarded, and only when OPDS_AUTH is on.
+    `auth` is the route's auth option: on 'opds' (catalog) and 'user' routes the reader is identified
+    when credentials are sent (HTTP Basic or session cookie). An account is required on 'user' routes,
+    and on 'opds' routes when the catalog is private (OPDS_AUTH=true).
     """
     request_handler.opds_user = None
-    if auth != 'opds' or not is_enabled():
+    if auth not in ('opds', 'user'):
         return True
     user = authenticate_basic(request_handler.headers.get('Authorization'))
     if user is None:
         user = session_user(_cookies(request_handler).get(SESSION_COOKIE))
-    if user is None:
-        if _wants_html(request_handler):
+    if user is None and (auth == 'user' or is_private()):
+        if wants_html(request_handler):
             _redirect(request_handler, '/login?next=' + quote(request_handler.path, safe=''))
         else:
             send_challenge(request_handler)
@@ -193,18 +199,16 @@ def guard(request_handler, auth: str | None) -> bool:
 
 
 class AuthController:
-    """Sign-in page, session opening and closing for browsers (OPDS_AUTH)."""
+    """Sign-in (and sign-up) page, session opening and closing for browsers."""
 
     def __init__(self, request_handler):
         self.request = request_handler
 
     def login_page(self) -> None:
-        """GET /login: sign-in page (straight to the catalog when OPDS_AUTH is off)."""
-        if not is_enabled():
-            _redirect(self.request, '/opds')
-            return
+        """GET /login: sign-in page, with account creation unless REGISTRATION_DISABLED."""
         from controllers.webui import WebUIController
-        WebUIController(self.request).serve_page('login.html')
+        registration = 'closed' if koreader_sync.REGISTRATION_DISABLED else 'open'
+        WebUIController(self.request).serve_page('login.html', {'data-registration="open"': f'data-registration="{registration}"'})
 
     def login(self) -> None:
         """POST /login: check the sync account and open the session.
@@ -235,7 +239,7 @@ class AuthController:
         password = str(body.get('password') or '')
         target = safe_next(body.get('next'))
         user = None
-        if is_enabled() and username:
+        if username:
             try:
                 user = koreader_sync.get_sync_storage().authenticate(username, md5_hex(password))
             except Exception:
@@ -275,6 +279,6 @@ class AuthController:
 
 
 __all__ = [
-    'AuthController', 'authenticate_basic', 'guard', 'is_enabled', 'make_session', 'parse_basic_credentials',
-    'safe_next', 'send_challenge', 'session_user',
+    'AuthController', 'authenticate_basic', 'guard', 'is_private', 'make_session', 'parse_basic_credentials',
+    'safe_next', 'send_challenge', 'session_user', 'wants_html',
 ]

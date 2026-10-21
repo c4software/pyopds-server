@@ -31,11 +31,11 @@ class WebUIController:
         """GET /static/{name}: a web UI asset (scripts, stylesheets) from the static/ folder."""
         self._serve(self.params.get('name') or '')
 
-    def serve_page(self, name: str) -> None:
-        """Serve a page of static/ (e.g. the sign-in page), with versioned asset URLs."""
-        self._serve(name)
+    def serve_page(self, name: str, replacements: dict[str, str] | None = None) -> None:
+        """Serve a page of static/ (e.g. the sign-in page), with versioned asset URLs and text replacements."""
+        self._serve(name, replacements)
 
-    def _serve(self, name: str) -> None:
+    def _serve(self, name: str, replacements: dict[str, str] | None = None) -> None:
         match = STATIC_NAME_RE.match(name)
         path = os.path.join(STATIC_DIR, name)
         if not match or not os.path.isfile(path):
@@ -45,7 +45,10 @@ class WebUIController:
             with open(path, 'rb') as f:
                 data = f.read()
             if match.group(1) == 'html':
-                data = ASSET_REF_RE.sub(self._versioned_ref, data.decode('utf-8')).encode('utf-8')
+                text = ASSET_REF_RE.sub(self._versioned_ref, data.decode('utf-8'))
+                for old, new in (replacements or {}).items():
+                    text = text.replace(old, new)
+                data = text.encode('utf-8')
         except (OSError, UnicodeDecodeError):
             self._send_error(500, 'Unable to read file')
             return

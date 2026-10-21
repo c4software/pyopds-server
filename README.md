@@ -23,8 +23,8 @@ If you browse your OPDS feed in a web browser, it will display a simple HTML rep
 - **Book Covers**: Covers are extracted from the EPUB files and declared in the feed, so they show up in OPDS clients.
 - **Reading Sync API**: KOSync-compatible progress sync for KoReader and CrossPoint / CrossInk readers.
 - **CrossPoint Sync Compatible**: Implements the [crosspoint-sync](https://github.com/crosspoint-reader/crosspoint-sync) extensions (`/api/v1`): the CrossPoint Sync app shows your library, reading statuses, statistics, activity and clippings, and CrossPoint readers sync rich positions and clippings.
-- **Optional Catalog Authentication**: `OPDS_AUTH=true` protects the catalog and the web UI with HTTP Basic, using the sync accounts.
-- **Read Next Recommendations**: with `OPDS_AUTH`, a « Read Next » tile and feed (`/opds/recommendations`) suggest unread books of the library from your reading sync history, computed locally.
+- **Accounts**: the catalog is public; readers can sign in (or create an account) from the web UI or with HTTP Basic in their reading app, with the same account as the sync. `OPDS_AUTH=true` makes the whole catalog private.
+- **« À lire ensuite » Recommendations**: once signed in, a tile and feed (`/opds/recommendations`) suggest unread books of the library from your reading sync history, computed locally.
 - **Docker Deployment**: Includes a `Dockerfile` and `docker-compose.yml` for easy containerized deployment.
 - **Visual HTML Representation**: Provides a simple HTML view of the OPDS feed for easy browsing in web browsers (using XSLT transformation).
 - **Reading Page**: `/reading` (chart icon in the web UI header) signs in with the sync account and shows the books in progress per device with their last sync, finished and abandoned books, reading time, pages, a reading calendar, recent activity, devices and the latest highlights, with links to the matching books of the catalog.
@@ -94,7 +94,8 @@ The following environment variables can be set:
 - **LIBRARY_DIR**: Path to the directory containing EPUB files (default: `books`).
 - **KOREADER_SYNC_DB_PATH**: Path to the SQLite database file used by the KoReader sync helper (default: `koreader_sync.db`).
 - **REGISTRATION_DISABLED**: Set to `true` to refuse new sync accounts (default: registration open).
-- **OPDS_AUTH**: Set to `true` to require HTTP Basic authentication on the catalog and the web UI (default: disabled). See [Catalog authentication](#catalog-authentication-opds_auth).
+- **OPDS_AUTH**: Set to `true` to make the whole catalog and web UI private (default: public catalog, optional sign-in). See [Accounts and sign-in](#accounts-and-sign-in).
+- **OPDS_SESSION_SECRET**: Key signing the browser sessions (default: a random key written once to `session.secret` next to the sync database).
 - **GENRES_CONFIG_PATH**: Path to a custom genre file completing [`genres.toml`](genres.toml), with the same format: its subject-to-genre aliases and ignored subjects are added to the default ones (and win over them), and its `min_books` overrides the default threshold. Restart the server after editing it. Example (for instance in the mounted `config/` folder):
 
   ```toml
@@ -137,24 +138,26 @@ services:
 2. Browse the book list at the `/opds/books` endpoint.
 3. Download books via the links provided in the OPDS feed.
 
-### Catalog authentication (`OPDS_AUTH`)
+### Accounts and sign-in
 
-With `OPDS_AUTH=true`, the catalog and the web UI require a sign-in: `/`, every `/opds…` feed (search, OpenSearch, refresh included), `/download/…`, `/opds_to_html.xslt` and `/reading`. The accounts are the **sync accounts** (user name and password created from KoReader, a CrossPoint reader or the CrossPoint Sync app): the server checks the MD5 of the password against the stored sync key. UTF-8 passwords are supported.
+The catalog is **public**: anyone can browse and download. Signing in is optional and enables what depends on the reader, the « À lire ensuite » recommendations (`/opds/recommendations` always requires an account). With `OPDS_AUTH=true` the whole catalog is private: `/`, every `/opds…` feed (search, OpenSearch, refresh included), `/download/…`, `/opds_to_html.xslt` and `/reading`.
+
+The accounts are the **sync accounts** (created from the web UI, KoReader, a CrossPoint reader or the CrossPoint Sync app): the server checks the MD5 of the password against the stored sync key. UTF-8 passwords are supported.
 
 - **OPDS clients** (KoReader, CrossPoint readers, the CrossPoint Sync app) use HTTP Basic (`WWW-Authenticate: Basic realm="PyOPDS", charset="UTF-8"`): enter the user name and password in the catalog settings.
-- **Browsers** are sent to a sign-in page (`/login`). One sign-in opens a session (signed `HttpOnly` cookie, 90 days) for the catalog **and** the reading page; the header shows a logout button (`/logout`). The signing key is `OPDS_SESSION_SECRET` when set, otherwise a random key written once to `session.secret` next to the sync database.
+- **Browsers** use the sign-in page `/login` (the « Se connecter » button of the header, or a redirect when an account is required). It also **creates accounts** (unless `REGISTRATION_DISABLED`). One sign-in opens a session (signed `HttpOnly` cookie, 90 days) for the catalog **and** the reading page; the header shows a logout button (`/logout`). The signing key is `OPDS_SESSION_SECRET` when set, otherwise a random key written once to `session.secret` next to the sync database.
 
 Left public on purpose: the page assets `/static/…` (no library data), the whole sync API (KOSync at the root and under `/koreader/sync`, `/api/v1/…`, `/healthz`), which keeps its own `x-auth-user` / `x-auth-key` authentication, `/cover/…` (the CrossPoint Sync app shows covers with plain image requests) and the `/health` monitoring probe. Basic authentication sends the password in clear text: use HTTPS (reverse proxy) when exposing the server.
 
-### Read Next recommendations
+### « À lire ensuite » recommendations
 
-When `OPDS_AUTH` is enabled, the root catalog shows a **Read Next** tile linking to the acquisition feed `/opds/recommendations`: up to 30 books of the library **you never opened**, suggested from your reading sync history and computed locally (no third-party service):
+Once signed in, the root catalog shows an **« À lire ensuite »** tile linking to the acquisition feed `/opds/recommendations`: up to 30 books of the library **you never opened**, suggested from your reading sync history and computed locally (no third-party service):
 
 - books read (marked finished or read to 90 % or more) or in progress (paused ones count less) whose synced document matches a library EPUB build your profile; abandoned books (`dnf`) are ignored;
 - each candidate scores for the **same author**, **shared genres** (see « By Genre ») and the **next volume of a series** you started (when the series metadata of the EPUBs is available); recent reads weigh more than old ones;
 - each entry's summary explains why it is suggested.
 
-Results are cached for 5 minutes per user and refreshed as soon as a new sync arrives. With an empty history, the feed is empty with an explanatory subtitle. **Without `OPDS_AUTH` the catalog has no user: the tile is hidden and `/opds/recommendations` answers 404.**
+Results are cached for 5 minutes per user and refreshed as soon as a new sync arrives. With an empty history, the feed is empty with an explanatory subtitle. Browsers without an account see the « Se connecter » button instead of the tile; OPDS clients always see the tile, and opening it asks for their credentials (HTTP Basic).
 
 ## Sync API (KoReader, CrossPoint)
 
@@ -203,7 +206,7 @@ The connectors of crosspoint-sync (Hardcover, Spotify, Readwise... progress sync
 
 ## Security Consideration
 
-This server is designed to be lightweight and does not include HTTPS support; the catalog is public unless `OPDS_AUTH=true`. For production use, it is strongly recommended to place the server behind a reverse proxy (e.g., SWAG, Nginx, or Nginx Proxy Manager).
+This server is designed to be lightweight and does not include HTTPS support; the catalog is public unless `OPDS_AUTH=true`, and passwords travel in clear text over plain HTTP. For production use, it is strongly recommended to place the server behind a reverse proxy (e.g., SWAG, Nginx, or Nginx Proxy Manager).
 
 ## License
 

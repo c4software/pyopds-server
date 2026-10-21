@@ -585,12 +585,23 @@ class TestOPDSAuthAndRecommendations(unittest.TestCase):
                                               self._sync_headers(user))
             self.assertEqual(status_code, 200)
 
-    def test_auth_disabled_by_default(self):
-        status, _, body = self._request('GET', '/opds')
+    def test_public_catalog_with_optional_account(self):
+        browser = {'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8'}
+        # Public catalog: no account needed
+        status, _, body = self._request('GET', '/opds', headers=browser)
         self.assertEqual(status, 200)
-        # Without authentication there is no user: no tile, and the feed answers 404
+        # Browsers without an account get the header's sign-in button instead of the tile
         self.assertNotIn(b'urn:recommendations', body)
-        self.assertEqual(self._request('GET', '/opds/recommendations')[0], 404)
+        self.assertEqual(self._request('GET', '/opds/recommendations', headers=browser)[1].get('Location'),
+                         '/login?next=%2Fopds%2Frecommendations')
+        # OPDS clients see the tile, opening it asks for their credentials
+        self.assertIn(b'urn:recommendations', self._request('GET', '/opds')[2])
+        status, headers, _ = self._request('GET', '/opds/recommendations')
+        self.assertEqual((status, headers.get('WWW-Authenticate')), (401, 'Basic realm="PyOPDS", charset="UTF-8"'))
+        good = basic_header('reader', self.password)
+        self.assertEqual(self._request('GET', '/opds/recommendations', headers=good)[0], 200)
+        # Wrong credentials on the public catalog: simply anonymous
+        self.assertEqual(self._request('GET', '/opds', headers=basic_header('reader', 'wrong'))[0], 200)
 
     def test_catalog_requires_basic_auth_when_enabled(self):
         with mock.patch.dict(os.environ, {'OPDS_AUTH': 'true'}):
@@ -654,8 +665,14 @@ class TestOPDSAuthAndRecommendations(unittest.TestCase):
 
             status, headers, _ = self._request('GET', '/logout?next=/reading')
             self.assertEqual((status, headers.get('Location')), (303, '/login?next=%2Freading'))
-        # Without OPDS_AUTH the sign-in page leads straight to the catalog
-        self.assertEqual(self._request('GET', '/login')[1].get('Location'), '/opds')
+        # Public catalog: the sign-in page and sessions work the same
+        status, _, body = self._request('GET', '/login')
+        self.assertEqual(status, 200)
+        self.assertIn(b'data-registration="open"', body)
+        status, _, body = self._request('GET', '/opds', headers={**browser, **cookie})
+        self.assertIn(b'urn:recommendations', body)
+        with mock.patch.object(self.koreader_sync, 'REGISTRATION_DISABLED', True):
+            self.assertIn(b'data-registration="closed"', self._request('GET', '/login')[2])
 
     def test_session_cookie_signature_and_expiry(self):
         opds_auth = importlib.import_module('controllers.opds_auth')

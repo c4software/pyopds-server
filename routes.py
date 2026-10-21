@@ -24,7 +24,8 @@ class Route:
             pattern: URL pattern (string or regex)
             controller_action: Tuple of (controller_class, action_method_name)
             name: Optional name for the route
-            auth: Optional authentication guard ('opds': HTTP Basic when OPDS_AUTH is enabled)
+            auth: Optional account guard ('opds': catalog, account required when OPDS_AUTH=true;
+                'user': account always required)
         """
         self.method = method
         self.pattern = pattern if isinstance(pattern, re.Pattern) else re.compile(f'^{pattern}$')
@@ -72,7 +73,7 @@ class Router:
 
 
 def register_routes(router):
-    """Register every route; catalog and web UI routes take auth='opds' (HTTP Basic when OPDS_AUTH=true)."""
+    """Register every route; catalog and web UI routes take auth='opds' (reader identified, required when OPDS_AUTH=true)."""
     opds = 'opds'
     # OPDS Catalog Routes
     router.get('/', (OPDSController, 'redirect_to_opds'), name='home', auth=opds)
@@ -82,7 +83,8 @@ def register_routes(router):
     router.get('/opds/', (OPDSController, 'show_root_catalog'), name='opds.root.slash', auth=opds)
     router.get('/opds/books', (OPDSController, 'show_all_books'), name='opds.books', auth=opds)
     router.get('/opds/recent', (OPDSController, 'show_recent_books'), name='opds.recent', auth=opds)
-    router.get('/opds/recommendations', (OPDSController, 'show_recommendations'), name='opds.recommendations', auth=opds)
+    # Depends on the reader: an account is always required (sign-in page or HTTP Basic)
+    router.get('/opds/recommendations', (OPDSController, 'show_recommendations'), name='opds.recommendations', auth='user')
     router.get('/opds/by-year', (OPDSController, 'show_by_year_catalog'), name='opds.by-year', auth=opds)
     router.get(r'/opds/by-year/.*', (OPDSController, 'show_year_books'), name='opds.year', auth=opds)
     router.get('/opds/by-author', (OPDSController, 'show_by_author_catalog'), name='opds.by-author', auth=opds)
@@ -103,7 +105,7 @@ def register_routes(router):
     router.get('/reading', (WebUIController, 'reading_page'), name='webui.reading', auth=opds)
     # Page assets only (no library data): public, the sign-in page needs them
     router.get(r'/static/(?P<name>[^/]+)', (WebUIController, 'static_file'), name='webui.static')
-    # Sign-in page of the browsers (OPDS_AUTH), one session for the catalog and the reading page
+    # Sign-in and sign-up page of the browsers, one session for the catalog and the reading page
     router.get('/login', (AuthController, 'login_page'), name='auth.login.page')
     router.post('/login', (AuthController, 'login'), name='auth.login')
     router.get('/logout', (AuthController, 'logout'), name='auth.logout')

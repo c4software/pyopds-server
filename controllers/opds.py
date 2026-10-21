@@ -1001,7 +1001,7 @@ class OPDSController:
     def show_recommendations(self):
         """Display the "read next" recommendations of the authenticated sync user.
 
-        Requires OPDS_AUTH: without authentication the catalog has no user, so this feed answers 404.
+        Requires an account (route auth='user'): browsers are sent to the sign-in page, OPDS clients get HTTP Basic.
         """
         self._handle_recommendations()
 
@@ -1230,7 +1230,7 @@ class OPDSController:
         self._send_xml_response(xml, 'acquisition')
 
     def _current_user_recommendations(self):
-        """Recommendations of the user authenticated with OPDS_AUTH, None without an authenticated user."""
+        """Recommendations of the signed-in reader, None without one."""
         user = getattr(self.request, 'opds_user', None)
         if not user:
             return None
@@ -1238,16 +1238,23 @@ class OPDSController:
         return RecommendationService.get_instance().for_user(user)
 
     def _recommendations_root_entry(self) -> dict | None:
-        """'Read Next' tile of the root catalog, only for an authenticated user (OPDS_AUTH)."""
-        if not getattr(self.request, 'opds_user', None):
+        """'Read next' tile of the root catalog.
+
+        Shown to signed-in readers. Browsers without an account get the header's sign-in button instead;
+        OPDS clients always see it, opening it asks for their credentials (HTTP Basic).
+        """
+        from controllers.opds_auth import wants_html
+        paths = []
+        if getattr(self.request, 'opds_user', None):
+            try:
+                paths = [book['path'] for book in self._current_user_recommendations().books]
+            except Exception:
+                # The tile is a bonus: never break the root catalog because of it
+                paths = []
+        elif wants_html(self.request):
             return None
-        try:
-            paths = [book['path'] for book in self._current_user_recommendations().books]
-        except Exception:
-            # The tile is a bonus: never break the root catalog because of it
-            paths = []
         return {
-            'title': 'Read Next',
+            'title': 'À lire ensuite',
             'id': 'urn:recommendations',
             'links': [
                 (
@@ -1266,7 +1273,8 @@ class OPDSController:
             self._send_error(500, f'Unable to compute recommendations: {exc}')
             return
         if result is None:
-            self._send_error(404, 'Recommendations require authentication (OPDS_AUTH=true)')
+            # Unreachable through the router (auth='user'), kept for direct calls
+            self._send_error(401, 'Recommendations require an account')
             return
         links = [
             (
@@ -1284,7 +1292,7 @@ class OPDSController:
         for entry, book in zip(entries, result.books):
             entry['summary'] = ' · '.join(book['reasons'])
         xml = self.feed_generator.generate_feed(
-            'Read Next', 'urn:recommendations', links, entries, subtitle=result.message
+            'À lire ensuite', 'urn:recommendations', links, entries, subtitle=result.message
         )
         self._send_xml_response(xml, 'acquisition')
 

@@ -19,7 +19,11 @@
 </head>
 <body class="bg-slate-50 font-sans dark:bg-slate-900 text-slate-800 dark:text-slate-200 min-h-screen">
     <div class="bg-white/80 backdrop-blur-sm sticky top-0 z-10 shadow-sm px-4 py-2.5 flex items-center gap-3 dark:bg-slate-800/80 dark:shadow-slate-700">
-        <h1 class="text-lg font-light text-slate-800 truncate dark:text-slate-200">My Library</h1>
+        <a id="back-link" href="/opds" class="flex items-center text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 gap-1.5 flex-shrink-0" style="text-decoration: none;">
+            <i data-lucide="arrow-left" class="w-4 h-4"></i>
+            <span class="text-sm">Catalogue</span>
+        </a>
+        <h1 class="text-lg font-light text-slate-800 truncate dark:text-slate-200">Mon compte</h1>
         <div class="flex-grow"></div>
         <button id="theme-toggle" type="button" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Changer de thème">
             <i id="theme-toggle-dark-icon" class="hidden w-4 h-4" data-lucide="moon"></i>
@@ -27,14 +31,14 @@
         </button>
     </div>
 
-    <!-- One sign-in for the catalog and the reading page, with the sync account -->
-    <section class="p-4 sm:p-6">
+    <!-- One sign-in for the catalog and the reading page; the account also syncs KoReader / CrossPoint -->
+    <section class="p-4 sm:p-6" data-registration="open" id="account-section">
         <form id="login-form" method="post" action="/login" class="max-w-sm mx-auto mt-6 sm:mt-12 bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 p-5 space-y-4">
             <div class="flex items-center gap-2 text-slate-700 dark:text-slate-200">
                 <i data-lucide="book-open" class="w-5 h-5"></i>
-                <h2 class="text-base font-medium">Compte de synchronisation</h2>
+                <h2 id="form-title" class="text-base font-medium">Se connecter</h2>
             </div>
-            <p class="text-sm text-slate-500 dark:text-slate-400">Identifiants utilisés par KoReader ou CrossPoint pour synchroniser la progression.</p>
+            <p id="form-intro" class="text-sm text-slate-500 dark:text-slate-400">Retrouvez vos suggestions de lecture et vos statistiques. Le même compte synchronise votre progression sur KoReader et CrossPoint.</p>
             <input id="login-next" type="hidden" name="next" value="/opds"/>
             <label class="block">
                 <span class="text-sm text-slate-600 dark:text-slate-300">Utilisateur</span>
@@ -44,8 +48,16 @@
                 <span class="text-sm text-slate-600 dark:text-slate-300">Mot de passe</span>
                 <input id="login-password" name="password" type="password" autocomplete="current-password" required class="mt-1 w-full h-9 px-3 text-sm rounded-md border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100"/>
             </label>
+            <label id="confirm-field" class="hidden block">
+                <span class="text-sm text-slate-600 dark:text-slate-300">Confirmer le mot de passe</span>
+                <input id="login-confirm" type="password" autocomplete="new-password" class="mt-1 w-full h-9 px-3 text-sm rounded-md border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100"/>
+            </label>
             <p id="login-error" class="hidden text-sm text-red-600 dark:text-red-400"></p>
             <button id="login-submit" type="submit" class="w-full h-9 bg-slate-700 text-white text-sm rounded-md hover:bg-slate-600 dark:bg-slate-600 dark:hover:bg-slate-500">Se connecter</button>
+            <p id="mode-switch" class="hidden text-sm text-center text-slate-500 dark:text-slate-400">
+                <span id="mode-question">Pas encore de compte ?</span>
+                <button id="mode-toggle" type="button" class="font-medium text-slate-700 underline underline-offset-2 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white">Créer un compte</button>
+            </p>
         </form>
     </section>
 

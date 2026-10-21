@@ -37,8 +37,8 @@ Le projet suit une architecture de type MVC (Modèle-Vue-Contrôleur) simplifié
     * `reading_activity.py` : Calculs purs des statistiques et de l'activité de lecture.
     * `genres.py` : Normalisation des sujets EPUB (`dc:subject`) en genres pour la navigation « By Genre », selon les règles de `genres.toml`.
     * `library_index.py` : Correspondance entre les hash de documents KoReader et les EPUB de la bibliothèque.
-    * `opds_auth.py` : Authentification optionnelle du catalogue (`OPDS_AUTH`) : middleware des routes `auth='opds'` (HTTP Basic ou cookie de session), page de connexion `/login` et `/logout` des navigateurs.
-    * `recommendations.py` : Recommandations « Read Next » locales (fonctions de scoring pures + service avec cache par utilisateur).
+    * `opds_auth.py` : Comptes du catalogue : middleware des routes `auth='opds'` (lecteur identifié si des identifiants sont fournis, obligatoire si `OPDS_AUTH=true`) et `auth='user'` (compte toujours requis), HTTP Basic ou cookie de session ; page de connexion / création de compte `/login` et `/logout` des navigateurs.
+    * `recommendations.py` : Recommandations « À lire ensuite » locales (fonctions de scoring pures + service avec cache par utilisateur).
     * `online_metadata.py` : Détails de livres en ligne optionnels (iTunes, Open Library, Hardcover) en repli de la bibliothèque : cache SQLite `catalog_cache` partagé, recherches dans un thread de fond (jamais dans le chemin d'une requête, sauf `cover/candidates`).
     * `webui.py` : Pages statiques de l'interface web hors flux OPDS (page « Lecture » `/reading` et ses fichiers `/static/...`).
 * `genres.toml` : Correspondances sujets → genres, sujets ignorés et seuil d'affichage (complétable via `GENRES_CONFIG_PATH`).
@@ -76,7 +76,7 @@ Le projet suit une architecture de type MVC (Modèle-Vue-Contrôleur) simplifié
 ### Routage
 * Le routeur est "custom". Il supporte les Regex.
 * Format : `router.get(r'/url/pattern', (ControllerClass, 'method_name'), name='route.name')`.
-* Les routes du catalogue et de la webui prennent `auth='opds'` (Basic si `OPDS_AUTH=true`) ; l'utilisateur authentifié est exposé dans `request_handler.opds_user` (`None` sinon).
+* Les routes du catalogue et de la webui prennent `auth='opds'` (catalogue public, privé si `OPDS_AUTH=true`) ; celles qui dépendent du lecteur prennent `auth='user'` (compte requis). L'utilisateur identifié est exposé dans `request_handler.opds_user` (`None` sinon).
 
 ## 5. Workflow de Développement
 
@@ -100,7 +100,7 @@ L'application doit respecter ces variables de configuration :
 * `PORT` : Port d'écoute (défaut: `8080`).
 * `KOREADER_SYNC_DB_PATH` : Chemin de la DB SQLite.
 * `REGISTRATION_DISABLED` : `true` pour refuser la création de comptes de synchronisation.
-* `OPDS_AUTH` : `true` pour protéger le catalogue et la webui avec les comptes de synchronisation (routes déclarées avec `auth='opds'` ; synchro, `/cover/*`, `/static/*` et `/health` restent publics) : HTTP Basic pour les clients OPDS, page de connexion `/login` et cookie de session pour les navigateurs (une seule connexion pour le catalogue et la page Lecture). Active aussi la tuile/flux « Read Next » (`/opds/recommendations`).
+* `OPDS_AUTH` : `true` pour rendre privés le catalogue et la webui (routes `auth='opds'` ; synchro, `/cover/*`, `/static/*` et `/health` restent publics). Par défaut le catalogue est public et la connexion facultative (HTTP Basic pour les clients OPDS, page `/login` et cookie de session pour les navigateurs, une seule connexion pour le catalogue et la page Lecture) ; elle active la tuile/flux « À lire ensuite » (`/opds/recommendations`).
 * `OPDS_SESSION_SECRET` : Clé de signature des cookies de session (par défaut, clé aléatoire écrite dans `session.secret` à côté de la DB de synchro).
 * `GENRES_CONFIG_PATH` : Fichier TOML de genres complétant `genres.toml` (mêmes clés, prioritaire).
 * `PAGE_SIZE` : Nombre de livres par page dans le flux OPDS.

@@ -183,7 +183,11 @@
                         <a href="/reading" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center" title="Lecture et statistiques">
                             <i data-lucide="bar-chart-3" class="w-4 h-4"></i>
                         </a>
-                        <!-- Shown when signed in through the sign-in page (OPDS_AUTH) -->
+                        <!-- Account: sign-in button (enables « À lire ensuite »), or logout once signed in -->
+                        <a id="login-link" href="/login" class="hidden text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 items-center gap-1" title="Se connecter pour obtenir des suggestions de lecture">
+                            <i data-lucide="log-in" class="w-4 h-4"></i>
+                            <span class="hidden sm:inline">Se connecter</span>
+                        </a>
                         <a id="logout-link" href="/logout" class="hidden text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 items-center" title="Se déconnecter">
                             <i data-lucide="log-out" class="w-4 h-4"></i>
                         </a>
@@ -825,14 +829,18 @@
                         });
                     }
 
-                    // Catalog session opened by the sign-in page: show who is signed in and the logout button
+                    // Account button: sign in (back to this page afterwards), or who is signed in and logout
                     (function() {
                         const match = document.cookie.match(/(?:^|;\s*)pyopds_user=([^;]*)/);
-                        const logout = document.getElementById('logout-link');
-                        if (!match || !logout) return;
-                        logout.classList.remove('hidden');
-                        logout.classList.add('flex');
-                        logout.title = 'Se déconnecter (' + decodeURIComponent(match[1]) + ')';
+                        const link = document.getElementById(match ? 'logout-link' : 'login-link');
+                        if (!link) return;
+                        link.classList.remove('hidden');
+                        link.classList.add('flex');
+                        if (match) {
+                            link.title = 'Se déconnecter (' + decodeURIComponent(match[1]) + ')';
+                        } else {
+                            link.href = '/login?next=' + encodeURIComponent(location.pathname + location.search);
+                        }
                     })();
 
                     // Header button switching the mosaic on and off, applied without reloading

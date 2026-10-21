@@ -1,5 +1,5 @@
-// Reading statistics page: signs in with the sync account and renders the sync API data.
-// Endpoints used: /users/auth, /api/v1/progress, /api/v1/progress/{document},
+// Reading statistics page: renders the sync API data of the account signed in on /login
+// (key kept by static/account.js). Endpoints used: /api/v1/progress, /api/v1/progress/{document},
 // /api/v1/stats/summary, /api/v1/stats/activity, /api/v1/clippings.
 (function () {
     'use strict';
@@ -32,9 +32,6 @@
             return null;
         }
     }
-
-    // KOSync sends the MD5 of the password as x-auth-key: the raw password is never stored.
-    const md5 = window.SyncAccount.md5;
 
     // ----------------------------------------------------------------- helpers
 
@@ -134,19 +131,13 @@
 
     // ------------------------------------------------------------------- views
 
-    function showLogin(message) {
-        account = null;
-        show('login-view', true);
-        show('stats-view', false);
-        show('logout-button', false);
-        show('refresh-button', false);
-        $('account-name').textContent = '';
-        $('login-error').textContent = message || '';
-        show('login-error', Boolean(message));
+    // Single sign-in page for the catalog and this page (/logout also closes the catalog session)
+    function signIn() {
+        storageSet(STORAGE_KEY, null);
+        window.location.replace('/logout?next=' + encodeURIComponent('/reading'));
     }
 
     function showStats() {
-        show('login-view', false);
         show('stats-view', true);
         show('logout-button', true);
         show('refresh-button', true);
@@ -154,30 +145,9 @@
         load();
     }
 
-    $('login-form').addEventListener('submit', async function (event) {
-        event.preventDefault();
-        const user = $('login-user').value.trim().toLowerCase();
-        const credentials = { user: user, key: md5($('login-password').value) };
-        try {
-            await api('/users/auth', credentials);
-        } catch (error) {
-            showLogin(error instanceof Unauthorized ? 'Utilisateur ou mot de passe incorrect.' : 'Serveur injoignable : ' + error.message);
-            return;
-        }
-        account = credentials;
-        storageSet(STORAGE_KEY, JSON.stringify(account));
-        $('login-password').value = '';
-        showStats();
-    });
-
     $('logout-button').addEventListener('click', function () {
         storageSet(STORAGE_KEY, null);
-        // Signed in through the catalog sign-in page: close the catalog session too
-        if (window.SyncAccount.sessionUser()) {
-            window.location.href = '/logout';
-            return;
-        }
-        showLogin();
+        window.location.href = '/logout';
     });
 
     $('refresh-button').addEventListener('click', function () { load(); });
@@ -196,8 +166,7 @@
         ]);
         show('loading', false);
         if (results.some(function (r) { return r.status === 'rejected' && r.reason instanceof Unauthorized; })) {
-            storageSet(STORAGE_KEY, null);
-            showLogin('Session expirée, reconnectez-vous.');
+            signIn();
             return;
         }
         if (results[0].status === 'rejected') {
@@ -621,7 +590,5 @@
 
     lucide.createIcons();
     if (account) showStats();
-    // Catalog session without the sync key in this browser: sign in again once, for both
-    else if (window.SyncAccount.sessionUser()) window.location.href = '/logout?next=' + encodeURIComponent('/reading');
-    else showLogin();
+    else signIn();
 })();
