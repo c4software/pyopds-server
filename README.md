@@ -53,6 +53,12 @@ If you browse your OPDS feed in a web browser, it will display a simple HTML rep
 
 4. Access the OPDS catalog at: `http://localhost:8080/opds`.
 
+A prebuilt image (amd64, arm64) is also published on each release tag to `ghcr.io/c4software/pyopds-server` (`latest` and the tag version):
+
+```bash
+docker run -p 8080:8080 -v ./books:/books ghcr.io/c4software/pyopds-server:latest
+```
+
 ### Without Docker
 
 1. Clone the repository:
