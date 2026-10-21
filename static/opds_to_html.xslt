@@ -147,8 +147,8 @@
 
                     /* Book details dialog */
                     .book-dialog {
-                        width: min(52rem, calc(100% - 1.5rem));
-                        max-width: none;
+                        width: min(52rem, calc(100vw - 1.5rem));
+                        max-width: calc(100vw - 1.5rem);
                         max-height: calc(100% - 1.5rem);
                         padding: 0;
                         border-radius: 1rem;
@@ -211,7 +211,8 @@
                         <i data-lucide="arrow-left" class="w-4 h-4"></i>
                         <span class="text-sm">Retour</span>
                     </a>
-                    <h1 class="text-lg font-light text-slate-800 truncate flex-shrink-0 dark:text-slate-200"><xsl:value-of select="atom:title"/></h1>
+                    <!-- Shrinks (truncated) so that the header buttons always fit on a phone -->
+                    <h1 class="text-lg font-light text-slate-800 truncate min-w-0 dark:text-slate-200"><xsl:value-of select="atom:title"/></h1>
                     <!-- Search form: hidden on mobile, visible on md+ -->
                     <form id="search-form" class="hidden md:flex flex-grow max-w-sm mx-auto m-0" action="/opds/search" method="get">
                         <div class="relative w-full">
@@ -233,7 +234,7 @@
                     </form>
                     <!-- Spacer for mobile to push icons to right -->
                     <div class="flex-grow md:hidden"></div>
-                    <div id="quick-links" class="flex items-center gap-3 flex-shrink-0">
+                    <div id="quick-links" class="flex items-center gap-2.5 sm:gap-3 flex-shrink-0">
                         <!-- Mobile search toggle button -->
                         <button id="search-toggle" type="button" class="md:hidden text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Rechercher">
                             <i data-lucide="search" class="w-4 h-4"></i>
