@@ -1826,7 +1826,16 @@ class OPDSController:
                 'author': file_info['author'],
             }
             fields = self._book_metadata_fields(file_info.get('path'))
+            # Navigation from a book (titled rel="related" links, the "More like this" of the CrossPoint
+            # Sync app; the web UI book sheet uses them too): its series, its author, then its genres
             entry_links.extend(fields.pop('extra_links', []))
+            author = (file_info.get('author') or '').strip()
+            if author and author != 'Unknown':
+                entry_links.append(('related', f'/opds/by-author/{quote(author)}?page=1', ACQUISITION_FEED,
+                                    f'Auteur : {author}'))
+            for _, genre in fields.get('categories', []):
+                entry_links.append(('related', f'/opds/by-genre/{quote(genre)}?page=1', ACQUISITION_FEED,
+                                    f'Genre : {genre}'))
             entry.update(fields)
             entries.append(entry)
 
@@ -1835,7 +1844,8 @@ class OPDSController:
     @staticmethod
     def _book_metadata_fields(path: str | None) -> dict:
         """Entry fields from the cached OPF metadata of a book (LibraryIndex.book_meta): summary,
-        categories (genres), issued (year), series, rating and a rel="related" link to the series feed.
+        categories (genres), issued (year), series, rating and a rel="related" link to the series feed
+        (the author and genre links are added by _create_book_entries).
 
         Only the books of the current page are read; a missing or unreadable book gives no field.
         """

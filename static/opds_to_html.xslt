@@ -1137,8 +1137,19 @@
                         const genres = document.getElementById('book-dialog-genres');
                         genres.replaceChildren();
                         bookField(link, 'genres').split('\n').filter(Boolean).forEach(function(genre) {
-                            genres.appendChild(chip(genre, '/opds/by-genre/' + encodeURIComponent(genre) + '?page=1'));
+                            // Tag chip: opens the books of that genre
+                            const tag = chip(genre, '/opds/by-genre/' + encodeURIComponent(genre) + '?page=1');
+                            tag.classList.add('inline-flex', 'items-center', 'gap-1');
+                            tag.title = 'Voir les livres du genre « ' + genre + ' »';
+                            const icon = document.createElement('i');
+                            icon.setAttribute('data-lucide', 'tag');
+                            icon.className = 'w-3 h-3';
+                            tag.prepend(icon);
+                            genres.appendChild(tag);
                         });
+                        if (window.lucide) {
+                            lucide.createIcons();
+                        }
 
                         const download = document.getElementById('book-dialog-download');
                         download.href = link.getAttribute('href');

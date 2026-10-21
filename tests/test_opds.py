@@ -602,15 +602,22 @@ class TestBookDetailsInFeeds(unittest.TestCase):
         series = entry.find('pyopds:series', self.ns)
         self.assertEqual((series.text, series.get('index')), ('La Fondation', '2'))
         self.assertEqual(entry.find('pyopds:rating', self.ns).text, '4.5')
-        related = entry.find('atom:link[@rel="related"]', self.ns)
-        self.assertEqual(related.get('href'), '/opds/series?name=La%20Fondation')
-        self.assertEqual(related.get('title'), 'Série : La Fondation (tome 2)')
-        self.assertIn('kind=acquisition', related.get('type'))
-        # Book without metadata: nothing invented
+        # Navigation from the book ("More like this" of the CrossPoint Sync app): series, author, genres
+        related = [(link.get('href'), link.get('title')) for link in entry.findall('atom:link[@rel="related"]', self.ns)]
+        self.assertEqual(related, [
+            ('/opds/series?name=La%20Fondation', 'Série : La Fondation (tome 2)'),
+            ('/opds/by-author/Isaac%20Asimov?page=1', 'Auteur : Isaac Asimov'),
+            ('/opds/by-genre/Science-fiction?page=1', 'Genre : Science-fiction'),
+        ])
+        self.assertTrue(all('kind=acquisition' in link.get('type') for link in entry.findall('atom:link[@rel="related"]', self.ns)))
+        for href, _ in related:
+            self.assertEqual(self._feed(href)[0], 200, href)
+        # Book without metadata: nothing invented, only its author
         alone = self._entries(feed)['Livre seul']
-        for path in ('atom:summary', 'atom:category', 'dc:issued', 'pyopds:series', 'pyopds:rating',
-                     'atom:link[@rel="related"]'):
+        for path in ('atom:summary', 'atom:category', 'dc:issued', 'pyopds:series', 'pyopds:rating'):
             self.assertIsNone(alone.find(path, self.ns), path)
+        self.assertEqual([link.get('title') for link in alone.findall('atom:link[@rel="related"]', self.ns)],
+                         [f"Auteur : {alone.find('atom:author/atom:name', self.ns).text}"])
         # A rating of 0 means "not rated"
         self.assertIsNone(self._entries(feed)['Fondation'].find('pyopds:rating', self.ns))
 

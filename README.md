@@ -162,6 +162,7 @@ Every book entry (all books, recent, folders, years, authors, genres, search, «
 - `<category term="…" label="…"/>`: the genres (see « By Genre »).
 - `<dc:issued>`: the publication year (`xmlns:dc="http://purl.org/dc/terms/"`).
 - Series: a standard Atom link `<link rel="related" href="/opds/series?name=…" type="…kind=acquisition" title="Série : … (tome N)"/>` to the other volumes, plus `<pyopds:series index="N">name</pyopds:series>` and `<pyopds:rating>` (0-5) in the server's namespace `urn:pyopds:metadata`. OPDS 1.x has no element for series and rating and clients share no convention for them (Calibre's own feed only writes them as text), so other clients just ignore these two.
+- Navigation from the book: titled `rel="related"` links to its author (`Auteur : …`) and to each of its genres (`Genre : …`), after the series one. The CrossPoint Sync app lists them under « More like this »; in the web UI book sheet, the author, the series and the genre tags are links.
 - `GET /opds/series?name=<series>`: the library books of that series, sorted by volume (books without a volume last), series names compared ignoring case, accents and punctuation; 404 when no book has it.
 
 Navigation entries only list the links clients need: the cover mosaic links of the web view (`rel="urn:pyopds:mosaic-cover"`) are only sent to browsers (`Accept: text/html`), never to OPDS clients, which may list every link of a navigation entry as a section.
