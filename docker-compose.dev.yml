@@ -1,0 +1,35 @@
+# Development with hot reload: the source is mounted into the containers.
+#   docker compose -f docker-compose.dev.yml up --build
+# - app: http://localhost:8080, restarted on every change of the Python code or genres.toml
+# - css: static/tailwind.css rebuilt on every change of the Tailwind classes in static/
+# EPUBs are read from ./books, the sync database is kept in ./config.
+name: pyopds-dev
+services:
+  app:
+    build:
+      context: .
+      target: dev
+    environment:
+      - KOREADER_SYNC_DB_PATH=/config/koreader_sync.db
+      - GENRES_CONFIG_PATH=/config/genres.toml
+    volumes:
+      - .:/app
+      - ./books:/books
+      - ./config:/config
+    ports:
+      - "8080:8080"
+
+  css:
+    build:
+      context: .
+      target: dev
+    # Writes static/tailwind.css into the mounted source. Root by default, which is the host user with
+    # rootless Docker; with rootful Docker set DEV_UID / DEV_GID (e.g. in .env: DEV_UID=1000) so that the
+    # file belongs to you
+    user: "${DEV_UID:-0}:${DEV_GID:-0}"
+    command: ["python", "tools/tailwind.py", "--watch", "--poll"]
+    # The Tailwind CLI stops watching when its standard input closes
+    stdin_open: true
+    tty: true
+    volumes:
+      - .:/app

@@ -1,0 +1,16 @@
+# Build context: only what the images need
+.git
+.github
+.claude
+.cache
+.venv
+**/__pycache__
+.pytest_cache
+books
+config
+preview
+tests
+*.db
+session.secret
+docker-compose.override.yml
+static/tailwind.css

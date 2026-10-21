@@ -1,0 +1,4 @@
+/* Source of static/tailwind.css: build it with `python tools/tailwind.py` (see README, "Web UI styles"). */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

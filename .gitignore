@@ -11,3 +11,7 @@ config/
 # Claude Code worktrees
 .claude/
 session.secret
+
+# Built by tools/tailwind.py (and by the Docker image build)
+static/tailwind.css
+.cache/

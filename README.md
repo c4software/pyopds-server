@@ -80,13 +80,32 @@ Machine-specific settings (library path, pinned version, reverse proxy, extra va
    export LIBRARY_DIR=/path/to/your/books
    ```
 
-3. Start the server:
+3. Build the web UI stylesheet once (see [Web UI styles](#web-ui-styles)):
+
+   ```bash
+   python tools/tailwind.py
+   ```
+
+4. Start the server:
 
    ```bash
    python server.py
    ```
 
-4. Access the OPDS catalog at: `http://localhost:8080/opds`.
+5. Access the OPDS catalog at: `http://localhost:8080/opds`.
+
+### Development (Docker, hot reload)
+
+```bash
+docker compose -f docker-compose.dev.yml up --build
+```
+
+The source is mounted into two containers built from the `dev` stage of the [`Dockerfile`](Dockerfile):
+
+- `app` serves `http://localhost:8080` and restarts on every change of the Python code or `genres.toml` ([watchfiles](https://watchfiles.helpmanual.io/)); EPUBs are read from `./books`, the sync database is kept in `./config`. Changes to `static/` (XSLT, pages, scripts) need no restart: reload the page.
+- `css` rebuilds `static/tailwind.css` whenever Tailwind classes change in `static/` (Tailwind CLI `--watch`).
+
+With rootful Docker, set `DEV_UID` / `DEV_GID` (e.g. in a `.env` file: `DEV_UID=1000`) so that the rebuilt stylesheet belongs to you; rootless Docker needs nothing.
 
 ## Configuration
 
@@ -149,7 +168,7 @@ Navigation entries only list the links clients need: the cover mosaic links of t
 
 ### Web interface
 
-Opening the catalog URL in a browser shows it as a web page: the browser turns the feed into HTML with [`static/opds_to_html.xslt`](static/opds_to_html.xslt), so browsers and OPDS clients read the very same feed. Browsers without native XSLT (Chrome removes it in version 158, November 2026) use [xslt-polyfill](https://github.com/mfreed7/xslt_polyfill), the XSLT engine compiled to WebAssembly (BSD-3, `static/xslt-polyfill.min.js`): every feed references it, it is only downloaded when native XSLT is missing (1.5 MB, cached for a year), and OPDS clients ignore it. Styles come from the Tailwind CDN (no build step).
+Opening the catalog URL in a browser shows it as a web page: the browser turns the feed into HTML with [`static/opds_to_html.xslt`](static/opds_to_html.xslt), so browsers and OPDS clients read the very same feed. Browsers without native XSLT (Chrome removes it in version 158, November 2026) use [xslt-polyfill](https://github.com/mfreed7/xslt_polyfill), the XSLT engine compiled to WebAssembly (BSD-3, `static/xslt-polyfill.min.js`): every feed references it, it is only downloaded when native XSLT is missing (1.5 MB, cached for a year), and OPDS clients ignore it. Styles come from a compiled Tailwind stylesheet (see [Web UI styles](#web-ui-styles)), so they also work with the polyfill.
 
 The header holds the search field and these buttons:
 
@@ -229,6 +248,17 @@ The connectors of crosspoint-sync (Hardcover, Spotify, Readwise... progress sync
 A synced book that matches no EPUB of the library (shown by its document hash, e.g. a file changed since it was downloaded, or sent to the reader another way) has an **« Associer à un livre »** button: search the catalog and pick the book; its title, cover, pages and links then come from that EPUB (« Dissocier » removes the association).
 
 The page assets are served with a version (`/static/reading.js?v=<modification time>`), so that a reverse proxy caching static files never serves an outdated script after an update.
+
+## Web UI styles
+
+The web UI uses [Tailwind CSS](https://tailwindcss.com) v3, compiled into `static/tailwind.css` (not versioned) by the official [standalone CLI](https://tailwindcss.com/blog/standalone-cli), which needs no Node.js:
+
+```bash
+python tools/tailwind.py          # build static/tailwind.css (minified)
+python tools/tailwind.py --watch  # rebuild on every change of static/
+```
+
+[`tools/tailwind.py`](tools/tailwind.py) downloads the pinned CLI version once (checked against its SHA-256) into `.cache/`, then runs it with [`tailwind.config.js`](tailwind.config.js) (dark mode by class, classes scanned in `static/*.xslt|html|js`) and [`styles/tailwind.css`](styles/tailwind.css). Extra arguments go to the Tailwind CLI. The Docker image builds the stylesheet itself (`css` stage of the Dockerfile), and the development compose file rebuilds it on every change.
 
 ## Security Consideration
 
