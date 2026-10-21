@@ -103,6 +103,10 @@ The following environment variables can be set:
   [aliases]
   "Science-fiction" = ["cyberpunk"]
   ```
+- **ONLINE_METADATA**: Set to `true` to look up, without any API key, the cover ([iTunes Search](https://performance-partners.apple.com/search-api), then [Open Library](https://openlibrary.org/developers/api)), print page count and description (Open Library) of synced books the library does not provide (default: disabled).
+- **HARDCOVER_API_KEY**: [Hardcover](https://hardcover.app/account/api) API key (`read:catalog` is enough) to add moods, genres, content warnings, community rating, series and position, release year and description to synced books, and the next book of a series (`GET /api/v1/documents/{document}/next`) (default: disabled). Requests are throttled (1.1 s apart, 4,000 a day, 10 min pause after a 429).
+
+  Online lookups are only a fallback: they run for books that match no EPUB of the library, and their results only fill fields the library and the reader left empty. Only the book's **title, author and ISBN** are sent to those services (with a `PyOPDS-Server` User-Agent), never anything about the user. They run in a background thread (at most 10 books per `GET /api/v1/progress`), never while answering a request, except the cover picker (`GET /api/v1/documents/{document}/cover/candidates`) which searches live. Results are cached for every user in the `catalog_cache` table of the sync database (30 days; misses 7 days for Open Library, 30 days for Hardcover; series 7 days).
 
 For Docker, set these variables in `docker-compose.override.yml` (see above):
 
@@ -188,7 +192,9 @@ Book metadata is provided locally, without any third-party service, from the lib
 - `GET /api/v1/documents/{document}/about`: the EPUB's `dc:description`, HTML converted to plain text (paragraphs and line breaks kept, cut at about 6000 characters).
 - `GET /api/v1/documents/{document}/next`: the next volume of the series found in the library (series names compared ignoring case, accents and punctuation; whole-numbered volumes preferred over novellas like 1.5), with its absolute cover URL. The app's « Find it in your catalogs » button then finds it by title with the OPDS search.
 
-Other external services of crosspoint-sync (Hardcover, Spotify, Readwise... connectors, online cover lookup, moods and content warnings) are not provided: `GET /api/v1/connectors` returns an empty list and the app hides those features.
+When `ONLINE_METADATA` / `HARDCOVER_API_KEY` are set (see Configuration), online lookups fill what the library leaves empty: cover, page count, description, Hardcover moods, genres, content warnings, rating, series and next-in-series.
+
+The connectors of crosspoint-sync (Hardcover, Spotify, Readwise... progress sync) are not provided: `GET /api/v1/connectors` returns an empty list and the app hides those features.
 
 ### Reading page (web UI)
 

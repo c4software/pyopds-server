@@ -7,3 +7,6 @@ books/
 __pycache__/
 .pytest_cache/
 config/
+
+# Claude Code worktrees
+.claude/

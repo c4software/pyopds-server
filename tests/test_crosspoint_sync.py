@@ -624,6 +624,47 @@ class TestCrossPointSync(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(self.request('GET', '/users/auth', user=user, password='nouveau')[0], 401)
 
+    def test_online_metadata_fallback(self):
+        from unittest import mock
+        import test_online_metadata as samples
+        from controllers import online_metadata
+
+        service = online_metadata.OnlineMetadata.for_db(self.db_path)
+        fake = samples.FakeFetch(samples.TestService.ROUTES)
+        user = self.create_user('online')
+        document = 'a1' * 16
+        self.put_progress(user, document, 0.3, metadata={'title': 'The Martian', 'authors': 'Andy Weir'})
+        with mock.patch.object(service, 'fetch', fake), mock.patch.object(service, 'limiter', samples.NoWaitLimiter()):
+            # Disabled by default: no lookup, no change
+            item = self.books(user)[document]
+            service.wait_idle()
+            self.assertEqual((item['cover_url'], item['moods'], fake.calls), (None, [], []))
+            with mock.patch.dict(os.environ, {'ONLINE_METADATA': 'true', 'HARDCOVER_API_KEY': 'secret'}):
+                self.assertIsNone(self.books(user)[document]['cover_url'])  # lookup queued, answered from the cache
+                service.wait_idle()
+                item = self.books(user)[document]
+                self.assertEqual(item['cover_url'], 'https://a/martian/600x600bb.jpg')
+                self.assertEqual((item['page_count'], item['hardcover_slug'], item['series']), (384, 'the-martian', 'Mars'))
+                self.assertEqual(item['moods'], ['Adventurous', 'Funny', 'Tense'])
+                self.assertEqual(self.request('GET', f'/api/v1/documents/{document}/cover', user=user)[1],
+                                 {'url': 'https://a/martian/600x600bb.jpg', 'pages': 384})
+                self.assertEqual(self.request('GET', f'/api/v1/documents/{document}/about', user=user)[1],
+                                 {'description': 'Six days ago...'})
+                self.assertEqual(self.request('GET', f'/api/v1/documents/{document}/next', user=user)[1],
+                                 {'next': None, 'pending': True})
+                service.wait_idle()
+                status, data = self.request('GET', f'/api/v1/documents/{document}/next', user=user)
+                self.assertEqual((data['series'], data['next']['title']), ('Mars', 'Mars 2'))
+                status, data = self.request('GET', f'/api/v1/documents/{document}/cover/candidates?q=Martian', user=user)
+                self.assertEqual(data['items'][0]['source'], 'Apple Books')
+            # The library EPUB keeps priority for a matched book
+            self.put_progress(user, md5('Le Rouge et le Noir.epub'), 0.1, metadata={'filename': 'Le Rouge et le Noir.epub'})
+            calls = len(fake.calls)
+            with mock.patch.dict(os.environ, {'ONLINE_METADATA': 'true'}):
+                self.books(user)
+                service.wait_idle()
+            self.assertEqual(len(fake.calls), calls)
+
     def test_connectors_and_unknown_routes(self):
         user = self.create_user('connectors')
         self.assertEqual(self.request('GET', '/api/v1/connectors', user=user)[1], {'encryption': 'enabled', 'connectors': []})

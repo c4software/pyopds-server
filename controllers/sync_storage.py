@@ -508,7 +508,7 @@ class SyncStorage:
                 f"""
                 SELECT p.document, p.device_id, p.device, p.percentage, p.progress, p.position, p.updated_at,
                        d.title, d.author, d.filename, d.cover_url, d.page_count, d.library_path, d.status_at, d.pause_reason,
-                       d.series, d.series_index,
+                       d.series, d.series_index, d.isbn,
                        COALESCE(d.status, CASE WHEN p.percentage >= {FINISHED_PERCENTAGE} OR {completed_sql('p.user', 'p.document')}
                                                THEN 'finished' ELSE 'reading' END) AS status
                 FROM progress p

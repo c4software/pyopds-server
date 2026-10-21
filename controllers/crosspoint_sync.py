@@ -1,11 +1,12 @@
 """CrossPoint Sync API (/api/v1): the extensions used by CrossPoint readers and the CrossPoint Sync app.
 
 Wire format follows crosspoint-sync (https://github.com/crosspoint-reader/crosspoint-sync).
-External services (Hardcover, Spotify, Readwise... connectors, online cover lookup) are not
-provided: those endpoints answer with empty results, which the app handles by hiding the feature.
+Connectors (Hardcover, Spotify, Readwise...) are not provided: those endpoints answer with empty results, which the app handles by hiding the feature.
 Book details missing from the sync data are taken from the OPDS library when the hash matches:
 title, author, cover, print pages, genres, series, year, rating, description (/about) and the
 next book of the series found in the library (/next).
+Then, optionally (ONLINE_METADATA / HARDCOVER_API_KEY, see controllers/online_metadata.py), from the
+online lookups cache.
 """
 import json
 import math
@@ -24,6 +25,7 @@ from controllers.koreader_sync import (
 )
 from controllers.library_index import LibraryIndex
 from controllers.opds import LIBRARY_DIR
+from controllers.online_metadata import OnlineMetadata
 from controllers.reading_activity import (
     HISTORY_BYTES,
     combine_book_stats,
@@ -229,6 +231,8 @@ class CrossPointSyncController(SyncControllerBase):
     def __init__(self, request_handler):
         super().__init__(request_handler)
         self.library = LibraryIndex.get_instance()
+        # Optional online details (ONLINE_METADATA / HARDCOVER_API_KEY): cache reads only, lookups in the background
+        self.online = OnlineMetadata.for_db(self.sync_storage.db_path)
 
     # ----------------------------------------------------------------- helpers
 
@@ -392,6 +396,8 @@ class CrossPointSyncController(SyncControllerBase):
                 # True when the library EPUB was associated by hand (PUT /documents/{document}/info)
                 'library_linked': bool(row['library_path']) and library_path is not None,
             })
+        # Online fallback: fills only the fields still empty, queues lookups for unmatched books
+        self.online.fill_progress_items(items, [row.get('isbn') for row in rows])
         self._send_json_response({'items': items})
 
     def progress_changes(self) -> None:
@@ -589,6 +595,10 @@ class CrossPointSyncController(SyncControllerBase):
             if library_book:
                 url = url or library_book['cover_url']
                 pages = pages or library_book['page_count']
+        if not url or not pages:
+            # Online fallback (cache only)
+            online = self.online.cached_info(row.get('title'), row.get('author'), row.get('isbn'), row.get('filename'))
+            url, pages = url or online.get('cover_url'), pages or online.get('page_count')
         self._send_json_response({'url': url, 'pages': pages})
 
     def document_cover_candidates(self) -> None:
@@ -610,6 +620,12 @@ class CrossPointSyncController(SyncControllerBase):
                 'source': 'OPDS',
                 'pages': None,
             })
+        # Online candidates after the library one (live iTunes / Open Library search, ?q= searches another title)
+        q = (self._query('q') or '').strip()[:200]
+        title = q or row.get('title') or (library_book or {}).get('title')
+        author = '' if q else (row.get('author') or (library_book or {}).get('author') or '')
+        if title:
+            items.extend(self.online.cover_candidates(title, author))
         self._send_json_response({'items': items})
 
     def _document_library_book(self, user: str, document: str) -> tuple[dict, dict | None]:
@@ -619,22 +635,38 @@ class CrossPointSyncController(SyncControllerBase):
         return row, self._library_book([canonical, document], row.get('filename'), row.get('library_path'))
 
     def document_about(self) -> None:
-        """GET /api/v1/documents/{document}/about: the library EPUB's description (plain text), else null."""
+        """GET /api/v1/documents/{document}/about: the library EPUB's description (plain text), else the online lookups cache, else null."""
         user = self._require_user()
         if not user:
             return
         document = self._document_param()
         if not document:
             return
-        _, library_book = self._document_library_book(user, document)
-        self._send_json_response({'description': library_book['description'] if library_book else None})
+        row, library_book = self._document_library_book(user, document)
+        description = library_book['description'] if library_book else None
+        if not description:
+            # Online fallback (cache only)
+            description = self._online_info(row, library_book).get('description')
+        self._send_json_response({'description': description})
+
+    def _online_query(self, row: dict, library_book: dict | None) -> tuple:
+        """(title, author, isbn, filename) for the online lookups: the sync data, else the library EPUB."""
+        library_book = library_book or {}
+        return (row.get('title') or library_book.get('title'), row.get('author') or library_book.get('author'),
+                row.get('isbn'), row.get('filename'))
+
+    def _online_info(self, row: dict, library_book: dict | None) -> dict:
+        """Cached online details of a document ({} when disabled or unknown)."""
+        return self.online.cached_info(*self._online_query(row, library_book))
 
     def document_next(self) -> None:
-        """GET /api/v1/documents/{document}/next: the next book of the series found in the library.
+        """GET /api/v1/documents/{document}/next: the next book of the series found in the library, else on Hardcover.
 
         The series comes from the library EPUB, else from the reader's metadata. Answers
         `{series, next: {position, title, author, year, slug, cover}}`, `next` null when the
         library holds no later book, and `{next: null}` for a book outside any known series.
+        Without a later book in the library, Hardcover's series is used when HARDCOVER_API_KEY is set
+        (`{next: null, pending: true}` while it is fetched in the background).
         """
         user = self._require_user()
         if not user:
@@ -647,18 +679,28 @@ class CrossPointSyncController(SyncControllerBase):
         if library_book and library_book['series']:
             series, position = library_book['series'], library_book['series_index']
             current = os.path.join(LIBRARY_DIR, library_book['relative_path'])
+        answer = self._local_next(series, position, current)
+        if answer.get('next') is None:
+            # Online fallback: Hardcover series (cache only, fetched in the background; pending meanwhile)
+            online = self.online.next_in_series(*self._online_query(row, library_book))
+            if online and (online.get('next') or online.get('pending')):
+                series_name = answer.get('series') or online.get('series')  # the local series name wins
+                answer = {**({'series': series_name} if series_name else {}),
+                          **{k: v for k, v in online.items() if k != 'series'}}
+        self._send_json_response(answer)
+
+    def _local_next(self, series: str | None, position: float | None, current: str | None) -> dict:
+        """Next book of a series found in the library: {series, next}, or {next: None} without a series."""
         if not series or position is None:
-            self._send_json_response({'next': None})
-            return
+            return {'next': None}
         try:
             found = self.library.next_in_series(series, position, current)
             details = self.library.details(found[1]) if found else None
         except OSError:
             found = details = None
         if not found or details is None:
-            self._send_json_response({'series': series, 'next': None})
-            return
-        self._send_json_response({
+            return {'series': series, 'next': None}
+        return {
             'series': series,
             'next': {
                 'position': found[0],
@@ -668,7 +710,7 @@ class CrossPointSyncController(SyncControllerBase):
                 'slug': None,
                 'cover': f"{self._base_url()}/cover/{quote(details['relative_path'])}" if details['has_cover'] else None,
             },
-        })
+        }
 
     def document_matches(self) -> None:
         """GET /api/v1/documents/{document}/matches: no connected services."""
