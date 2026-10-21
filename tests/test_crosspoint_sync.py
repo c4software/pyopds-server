@@ -259,8 +259,10 @@ class TestCrossPointSync(unittest.TestCase):
     def test_reading_page_and_assets(self):
         status, content_type, body = self.raw_get('/reading')
         self.assertEqual((status, content_type), (200, 'text/html; charset=utf-8'))
-        self.assertIn(b'/static/reading.js', body)
-        status, content_type, _ = self.raw_get('/static/reading.js')
+        # Versioned asset URLs: a proxy caching static files still serves the new ones after an update
+        self.assertRegex(body, rb'/static/reading\.js\?v=\d+"')
+        self.assertRegex(body, rb'/static/reading\.css\?v=\d+"')
+        status, content_type, _ = self.raw_get('/static/reading.js?v=1')
         self.assertEqual((status, content_type), (200, 'text/javascript; charset=utf-8'))
         status, content_type, _ = self.raw_get('/static/reading.css')
         self.assertEqual((status, content_type), (200, 'text/css; charset=utf-8'))

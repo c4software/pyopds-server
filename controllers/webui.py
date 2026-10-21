@@ -6,6 +6,8 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 
 # Only plain file names with a known web extension are served from static/
 STATIC_NAME_RE = re.compile(r'^[A-Za-z0-9_-]+\.(html|js|css|svg)$')
+# Asset references in the served pages, versioned so that a proxy caching static files serves the new ones
+ASSET_REF_RE = re.compile(r'(/static/([A-Za-z0-9_-]+\.(?:js|css|svg)))"')
 CONTENT_TYPES = {
     'html': 'text/html; charset=utf-8',
     'js': 'text/javascript; charset=utf-8',
@@ -38,7 +40,9 @@ class WebUIController:
         try:
             with open(path, 'rb') as f:
                 data = f.read()
-        except OSError:
+            if match.group(1) == 'html':
+                data = ASSET_REF_RE.sub(self._versioned_ref, data.decode('utf-8')).encode('utf-8')
+        except (OSError, UnicodeDecodeError):
             self._send_error(500, 'Unable to read file')
             return
         self.request.send_response(200)
@@ -47,6 +51,14 @@ class WebUIController:
         self.request.send_header('Cache-Control', 'no-cache')
         self.request.end_headers()
         self.request.wfile.write(data)
+
+    @staticmethod
+    def _versioned_ref(match: re.Match) -> str:
+        try:
+            version = int(os.path.getmtime(os.path.join(STATIC_DIR, match.group(2))))
+        except OSError:
+            return match.group(0)
+        return f'{match.group(1)}?v={version}"'
 
     def _send_error(self, code: int, message: str) -> None:
         body = message.encode('utf-8')
