@@ -23,6 +23,8 @@ If you browse your OPDS feed in a web browser, it will display a simple HTML rep
 - **Book Covers**: Covers are extracted from the EPUB files and declared in the feed, so they show up in OPDS clients.
 - **Reading Sync API**: KOSync-compatible progress sync for KoReader and CrossPoint / CrossInk readers.
 - **CrossPoint Sync Compatible**: Implements the [crosspoint-sync](https://github.com/crosspoint-reader/crosspoint-sync) extensions (`/api/v1`): the CrossPoint Sync app shows your library, reading statuses, statistics, activity and clippings, and CrossPoint readers sync rich positions and clippings.
+- **Optional Catalog Authentication**: `OPDS_AUTH=true` protects the catalog and the web UI with HTTP Basic, using the sync accounts.
+- **Read Next Recommendations**: with `OPDS_AUTH`, a « Read Next » tile and feed (`/opds/recommendations`) suggest unread books of the library from your reading sync history, computed locally.
 - **Docker Deployment**: Includes a `Dockerfile` and `docker-compose.yml` for easy containerized deployment.
 - **Visual HTML Representation**: Provides a simple HTML view of the OPDS feed for easy browsing in web browsers (using XSLT transformation).
 - **Reading Page**: `/reading` (chart icon in the web UI header) signs in with the sync account and shows the books in progress per device with their last sync, finished and abandoned books, reading time, pages, a reading calendar, recent activity, devices and the latest highlights, with links to the matching books of the catalog.
@@ -92,6 +94,7 @@ The following environment variables can be set:
 - **LIBRARY_DIR**: Path to the directory containing EPUB files (default: `books`).
 - **KOREADER_SYNC_DB_PATH**: Path to the SQLite database file used by the KoReader sync helper (default: `koreader_sync.db`).
 - **REGISTRATION_DISABLED**: Set to `true` to refuse new sync accounts (default: registration open).
+- **OPDS_AUTH**: Set to `true` to require HTTP Basic authentication on the catalog and the web UI (default: disabled). See [Catalog authentication](#catalog-authentication-opds_auth).
 - **GENRES_CONFIG_PATH**: Path to a custom genre file completing [`genres.toml`](genres.toml), with the same format: its subject-to-genre aliases and ignored subjects are added to the default ones (and win over them), and its `min_books` overrides the default threshold. Restart the server after editing it. Example (for instance in the mounted `config/` folder):
 
   ```toml
@@ -129,6 +132,24 @@ services:
    - Add a new catalog with the URL: `http://<your-ip>:8080/opds`.
 2. Browse the book list at the `/opds/books` endpoint.
 3. Download books via the links provided in the OPDS feed.
+
+### Catalog authentication (`OPDS_AUTH`)
+
+With `OPDS_AUTH=true`, the catalog and the web UI ask for HTTP Basic credentials (`WWW-Authenticate: Basic realm="PyOPDS", charset="UTF-8"`): `/`, every `/opds…` feed (search, OpenSearch, refresh included), `/download/…`, `/opds_to_html.xslt`, `/reading` and `/static/…`. The accounts are the **sync accounts** (user name and password created from KoReader, a CrossPoint reader or the CrossPoint Sync app): the server checks the MD5 of the password against the stored sync key. UTF-8 passwords are supported.
+
+Left public on purpose: the whole sync API (KOSync at the root and under `/koreader/sync`, `/api/v1/…`, `/healthz`), which keeps its own `x-auth-user` / `x-auth-key` authentication, `/cover/…` (the CrossPoint Sync app shows covers with plain image requests) and the `/health` monitoring probe. Basic authentication sends the password in clear text: use HTTPS (reverse proxy) when exposing the server.
+
+In KoReader, enter the user name and password in the catalog settings; browsers show their login prompt.
+
+### Read Next recommendations
+
+When `OPDS_AUTH` is enabled, the root catalog shows a **Read Next** tile linking to the acquisition feed `/opds/recommendations`: up to 30 books of the library **you never opened**, suggested from your reading sync history and computed locally (no third-party service):
+
+- books read (marked finished or read to 90 % or more) or in progress (paused ones count less) whose synced document matches a library EPUB build your profile; abandoned books (`dnf`) are ignored;
+- each candidate scores for the **same author**, **shared genres** (see « By Genre ») and the **next volume of a series** you started (when the series metadata of the EPUBs is available); recent reads weigh more than old ones;
+- each entry's summary explains why it is suggested.
+
+Results are cached for 5 minutes per user and refreshed as soon as a new sync arrives. With an empty history, the feed is empty with an explanatory subtitle. **Without `OPDS_AUTH` the catalog has no user: the tile is hidden and `/opds/recommendations` answers 404.**
 
 ## Sync API (KoReader, CrossPoint)
 
@@ -175,7 +196,7 @@ Other external services of crosspoint-sync (Hardcover, Spotify, Readwise... conn
 
 ## Security Consideration
 
-This server is designed to be lightweight and does not include built-in authentication or HTTPS support. For production use, it is strongly recommended to place the server behind a reverse proxy (e.g., SWAG, Nginx, or Nginx Proxy Manager).
+This server is designed to be lightweight and does not include HTTPS support; the catalog is public unless `OPDS_AUTH=true`. For production use, it is strongly recommended to place the server behind a reverse proxy (e.g., SWAG, Nginx, or Nginx Proxy Manager).
 
 ## License
 

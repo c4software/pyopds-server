@@ -3,6 +3,7 @@ import os
 import socketserver
 from urllib.parse import urlparse
 
+from controllers import opds_auth
 from controllers.opds import LIBRARY_DIR, OPDSController, PAGE_SIZE
 from routes import Router, register_routes
 
@@ -16,6 +17,9 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
 
     # Drop clients that stall (e.g. announce a body they never send) instead of blocking the server
     timeout = 60
+
+    # Sync account authenticated with HTTP Basic on catalog routes (None when OPDS_AUTH is off)
+    opds_user: str | None = None
 
     # Initialize router with all routes
     router = register_routes(Router())
@@ -48,6 +52,9 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
         route = self.router.find_route(method, path)
 
         if route:
+            # Authentication middleware (sets self.opds_user, answers 401 itself when refused)
+            if not opds_auth.guard(self, route.auth):
+                return
             # Named groups of the route pattern (e.g. {document}) are exposed to controllers
             self.route_params = route.pattern.match(path).groupdict()
             # Get controller and call action

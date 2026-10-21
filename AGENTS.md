@@ -37,6 +37,8 @@ Le projet suit une architecture de type MVC (Modèle-Vue-Contrôleur) simplifié
     * `reading_activity.py` : Calculs purs des statistiques et de l'activité de lecture.
     * `genres.py` : Normalisation des sujets EPUB (`dc:subject`) en genres pour la navigation « By Genre », selon les règles de `genres.toml`.
     * `library_index.py` : Correspondance entre les hash de documents KoReader et les EPUB de la bibliothèque.
+    * `opds_auth.py` : Authentification HTTP Basic optionnelle du catalogue (`OPDS_AUTH`), middleware appliqué aux routes `auth='opds'`.
+    * `recommendations.py` : Recommandations « Read Next » locales (fonctions de scoring pures + service avec cache par utilisateur).
     * `webui.py` : Pages statiques de l'interface web hors flux OPDS (page « Lecture » `/reading` et ses fichiers `/static/...`).
 * `genres.toml` : Correspondances sujets → genres, sujets ignorés et seuil d'affichage (complétable via `GENRES_CONFIG_PATH`).
 * `static/` : Fichiers statiques (XSLT pour l'affichage navigateur, page `reading.html/js/css` des statistiques qui interroge l'API de synchronisation).
@@ -73,6 +75,7 @@ Le projet suit une architecture de type MVC (Modèle-Vue-Contrôleur) simplifié
 ### Routage
 * Le routeur est "custom". Il supporte les Regex.
 * Format : `router.get(r'/url/pattern', (ControllerClass, 'method_name'), name='route.name')`.
+* Les routes du catalogue et de la webui prennent `auth='opds'` (Basic si `OPDS_AUTH=true`) ; l'utilisateur authentifié est exposé dans `request_handler.opds_user` (`None` sinon).
 
 ## 5. Workflow de Développement
 
@@ -96,5 +99,6 @@ L'application doit respecter ces variables de configuration :
 * `PORT` : Port d'écoute (défaut: `8080`).
 * `KOREADER_SYNC_DB_PATH` : Chemin de la DB SQLite.
 * `REGISTRATION_DISABLED` : `true` pour refuser la création de comptes de synchronisation.
+* `OPDS_AUTH` : `true` pour protéger le catalogue et la webui en HTTP Basic avec les comptes de synchronisation (routes déclarées avec `auth='opds'` ; synchro, `/cover/*` et `/health` restent publics). Active aussi la tuile/flux « Read Next » (`/opds/recommendations`).
 * `GENRES_CONFIG_PATH` : Fichier TOML de genres complétant `genres.toml` (mêmes clés, prioritaire).
 * `PAGE_SIZE` : Nombre de livres par page dans le flux OPDS.

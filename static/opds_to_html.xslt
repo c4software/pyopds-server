@@ -215,17 +215,21 @@
                         </button>
                     </form>
                 </div>
+                <!-- Feed subtitle (e.g. why the recommendations are empty) -->
+                <xsl:if test="atom:subtitle">
+                    <p class="px-4 sm:px-6 pt-4 text-sm text-slate-500 dark:text-slate-400"><xsl:value-of select="atom:subtitle"/></p>
+                </xsl:if>
                 <!-- System Collections -->
-                <xsl:if test="atom:entry[atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author' or atom:id = 'urn:by-genre')]">
+                <xsl:if test="atom:entry[atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author' or atom:id = 'urn:by-genre' or atom:id = 'urn:recommendations')]">
                     <div class="p-4 sm:p-6">
                         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 sm:gap-6">
-                            <xsl:apply-templates select="atom:entry[atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author' or atom:id = 'urn:by-genre')]"/>
+                            <xsl:apply-templates select="atom:entry[atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author' or atom:id = 'urn:by-genre' or atom:id = 'urn:recommendations')]"/>
                         </div>
                     </div>
                 </xsl:if>
 
                 <!-- Divider between System Collections and Disk Folders -->
-                <xsl:if test="atom:entry[atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author' or atom:id = 'urn:by-genre')] and atom:entry[atom:link[@rel='subsection'] and not(atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author' or atom:id = 'urn:by-genre' or starts-with(atom:id, 'urn:author-letter:') or starts-with(atom:id, 'urn:author:'))]">
+                <xsl:if test="atom:entry[atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author' or atom:id = 'urn:by-genre' or atom:id = 'urn:recommendations')] and atom:entry[atom:link[@rel='subsection'] and not(atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author' or atom:id = 'urn:by-genre' or atom:id = 'urn:recommendations' or starts-with(atom:id, 'urn:author-letter:') or starts-with(atom:id, 'urn:author:'))]">
                     <div class="px-4 sm:px-6 py-6">
                         <div class="flex items-center gap-4">
                             <div class="flex-grow h-px bg-gradient-to-r from-transparent via-slate-300 to-transparent dark:via-slate-700"></div>
@@ -239,9 +243,9 @@
                 </xsl:if>
 
                 <!-- Disk Folders and other entries -->
-                <xsl:if test="atom:entry[not(atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author' or atom:id = 'urn:by-genre'))]">
+                <xsl:if test="atom:entry[not(atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author' or atom:id = 'urn:by-genre' or atom:id = 'urn:recommendations'))]">
                     <div class="p-4 sm:p-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 sm:gap-6">
-                        <xsl:apply-templates select="atom:entry[not(atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author' or atom:id = 'urn:by-genre'))]"/>
+                        <xsl:apply-templates select="atom:entry[not(atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author' or atom:id = 'urn:by-genre' or atom:id = 'urn:recommendations'))]"/>
                     </div>
                 </xsl:if>
 
@@ -949,7 +953,7 @@
 
     <xsl:template match="atom:entry">
         <xsl:choose>
-            <xsl:when test="atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author' or atom:id = 'urn:by-genre')">
+            <xsl:when test="atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author' or atom:id = 'urn:by-genre' or atom:id = 'urn:recommendations')">
                 <a class="block group rounded-lg overflow-hidden transition-all duration-300 transform hover:-translate-y-1 hover:shadow-xl aspect-[2/3]">
                     <xsl:attribute name="href">
                         <xsl:value-of select="atom:link[@rel='subsection']/@href"/>
@@ -971,6 +975,9 @@
                             </xsl:when>
                             <xsl:when test="atom:id = 'urn:by-genre'">
                                 <i data-lucide="tags" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
+                            </xsl:when>
+                            <xsl:when test="atom:id = 'urn:recommendations'">
+                                <i data-lucide="sparkles" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
                             </xsl:when>
                         </xsl:choose>
                         <div class="font-semibold text-slate-700 transition-colors dark:text-slate-300"><xsl:value-of select="atom:title"/></div>
