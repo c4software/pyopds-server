@@ -150,11 +150,15 @@ class TestOPDSCatalog(unittest.TestCase):
                 for entry in self._parse_feed(body).findall('atom:entry', ns)
             }
 
-        root = mosaic_covers('/opds')
-        self.assertEqual(root['All Books'], {'/cover/alpha.epub', '/cover/french.epub', '/cover/Subfolder/beta.epub'})
-        self.assertEqual(root['Subfolder'], {'/cover/Subfolder/beta.epub'})
-        self.assertEqual(mosaic_covers('/opds/by-year')['2023 (1 books)'], {'/cover/alpha.epub'})
-        self.assertEqual(mosaic_covers('/opds/by-author/letter/A?page=1')['Author One (1 livres)'], {'/cover/alpha.epub'})
+        # Disabled by default
+        self.assertEqual(mosaic_covers('/opds')['All Books'], set())
+
+        with mock.patch.object(importlib.import_module('controllers.opds'), 'COVER_MOSAIC', True):
+            root = mosaic_covers('/opds')
+            self.assertEqual(root['All Books'], {'/cover/alpha.epub', '/cover/french.epub', '/cover/Subfolder/beta.epub'})
+            self.assertEqual(root['Subfolder'], {'/cover/Subfolder/beta.epub'})
+            self.assertEqual(mosaic_covers('/opds/by-year')['2023 (1 books)'], {'/cover/alpha.epub'})
+            self.assertEqual(mosaic_covers('/opds/by-author/letter/A?page=1')['Author One (1 livres)'], {'/cover/alpha.epub'})
 
     def test_all_books_feed_paginates_and_lists_books(self):
         ns = {'atom': 'http://www.w3.org/2005/Atom'}

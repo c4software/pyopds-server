@@ -14,7 +14,8 @@ from controllers.genres import genre_key, get_genre_config, normalize_genres
 
 LIBRARY_DIR = os.environ.get('LIBRARY_DIR', 'books')
 PAGE_SIZE = int(os.environ.get('PAGE_SIZE', 25))
-# Covers shown as an animated mosaic in the background of the web view navigation tiles
+# Covers shown as an animated mosaic in the background of the web view navigation tiles (opt-in)
+COVER_MOSAIC = os.environ.get('COVER_MOSAIC', '').lower() in ('1', 'true', 'yes')
 MOSAIC_REL = 'urn:pyopds:mosaic-cover'
 MOSAIC_SIZE = 12
 
@@ -23,7 +24,10 @@ def mosaic_links(paths: list[str]) -> list[tuple[str, str, str]]:
     """Links to the covers of a random sample of books, for the background of a navigation tile.
 
     Covers are not checked (that would open every EPUB): the web view skips those answering 404.
+    Empty unless COVER_MOSAIC is enabled.
     """
+    if not COVER_MOSAIC:
+        return []
     sample = random.sample(paths, min(MOSAIC_SIZE, len(paths)))
     return [
         (MOSAIC_REL, f'/cover/{quote(os.path.relpath(path, LIBRARY_DIR).replace(os.sep, "/"))}', 'image/jpeg')

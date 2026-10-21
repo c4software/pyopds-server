@@ -95,5 +95,6 @@ L'application doit respecter ces variables de configuration :
 * `PORT` : Port d'écoute (défaut: `8080`).
 * `KOREADER_SYNC_DB_PATH` : Chemin de la DB SQLite.
 * `REGISTRATION_DISABLED` : `true` pour refuser la création de comptes de synchronisation.
+* `COVER_MOSAIC` : `true` pour afficher une mosaïque animée de couvertures en fond des tuiles de navigation de l'interface web (désactivé par défaut).
 * `GENRES_CONFIG_PATH` : Fichier TOML de genres complétant `genres.toml` (mêmes clés, prioritaire).
 * `PAGE_SIZE` : Nombre de livres par page dans le flux OPDS.
