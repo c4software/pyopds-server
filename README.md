@@ -107,6 +107,20 @@ The source is mounted into two containers built from the `dev` stage of the [`Do
 
 With rootful Docker, set `DEV_UID` / `DEV_GID` (e.g. in a `.env` file: `DEV_UID=1000`) so that the rebuilt stylesheet belongs to you; rootless Docker needs nothing.
 
+### Releasing
+
+Commits go to `main`; a version is published by pushing a tag (plain [semantic version](https://semver.org), no `v` prefix: `2.9.0`), which triggers the [`Docker image`](.github/workflows/docker.yml) workflow (image `latest` and `<version>`, amd64 and arm64):
+
+```bash
+python -m unittest discover tests        # tests must pass
+git push                                 # commits on main
+git tag 2.9.1 && git push origin 2.9.1   # new version: minor for a feature, patch for a fix
+gh release create 2.9.1 --title 2.9.1 --notes "…"   # release notes on GitHub
+gh run watch                             # wait for the image build
+```
+
+Then update the servers: `docker compose pull && docker compose up -d`.
+
 ## Configuration
 
 The following environment variables can be set:

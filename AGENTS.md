@@ -102,6 +102,8 @@ Le projet suit une architecture de type MVC (Modèle-Vue-Contrôleur) simplifié
 3.  **Feuille de style :** `python tools/tailwind.py` (une fois, puis à chaque nouvelle classe Tailwind) ou `--watch`.
 4.  **Docker de développement :** `docker compose -f docker-compose.dev.yml up --build` : serveur relancé à chaque modification Python (watchfiles), CSS recompilé à chaque modification de `static/`.
 
+5.  **Push et version :** commits sur `main` (`git push`), sans ligne d'attribution dans les messages. Une version = un tag poussé, au format semver sans préfixe (`git tag 2.9.1 && git push origin 2.9.1`, mineure pour une fonctionnalité, patch pour un correctif), suivi de `gh release create <version> --title <version> --notes "…"` (notes en français). Le tag déclenche `.github/workflows/docker.yml`, qui publie `ghcr.io/c4software/pyopds-server:latest` et `:<version>` ; attendre la fin du build (`gh run watch`) avant de mettre à jour un serveur (`docker compose pull && docker compose up -d`). Tests au vert avant tout tag.
+
 ## 6. Tests et Qualité
 
 * **Exécution :** Lancer les tests avant toute soumission avec `pytest` ou `python -m unittest discover tests`.
