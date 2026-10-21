@@ -14,7 +14,7 @@ from controllers.webui import WebUIController
 class Route:
     """Represents a single route with path pattern and handler."""
 
-    def __init__(self, method, pattern, controller_action, name=None):
+    def __init__(self, method, pattern, controller_action, name=None, auth: str | None = None):
         """
         Initialize a route.
         
@@ -23,11 +23,13 @@ class Route:
             pattern: URL pattern (string or regex)
             controller_action: Tuple of (controller_class, action_method_name)
             name: Optional name for the route
+            auth: Optional authentication guard ('opds': HTTP Basic when OPDS_AUTH is enabled)
         """
         self.method = method
         self.pattern = pattern if isinstance(pattern, re.Pattern) else re.compile(f'^{pattern}$')
         self.controller_class, self.action = controller_action
         self.name = name
+        self.auth = auth
 
     def matches(self, method, path):
         """Check if this route matches the given method and path."""
@@ -40,24 +42,24 @@ class Router:
     def __init__(self):
         self.routes = []
 
-    def get(self, pattern, controller_action, name=None):
+    def get(self, pattern, controller_action, name=None, auth: str | None = None):
         """Register a GET route."""
-        self.routes.append(Route('GET', pattern, controller_action, name))
+        self.routes.append(Route('GET', pattern, controller_action, name, auth))
         return self
 
-    def post(self, pattern, controller_action, name=None):
+    def post(self, pattern, controller_action, name=None, auth: str | None = None):
         """Register a POST route."""
-        self.routes.append(Route('POST', pattern, controller_action, name))
+        self.routes.append(Route('POST', pattern, controller_action, name, auth))
         return self
     
-    def put(self, pattern, controller_action, name=None):
+    def put(self, pattern, controller_action, name=None, auth: str | None = None):
         """Register a PUT route."""
-        self.routes.append(Route('PUT', pattern, controller_action, name))
+        self.routes.append(Route('PUT', pattern, controller_action, name, auth))
         return self
 
-    def delete(self, pattern, controller_action, name=None):
+    def delete(self, pattern, controller_action, name=None, auth: str | None = None):
         """Register a DELETE route."""
-        self.routes.append(Route('DELETE', pattern, controller_action, name))
+        self.routes.append(Route('DELETE', pattern, controller_action, name, auth))
         return self
 
     def find_route(self, method, path):
@@ -69,31 +71,36 @@ class Router:
 
 
 def register_routes(router):
+    """Register every route; catalog and web UI routes take auth='opds' (HTTP Basic when OPDS_AUTH=true)."""
+    opds = 'opds'
     # OPDS Catalog Routes
-    router.get('/', (OPDSController, 'redirect_to_opds'), name='home')
+    router.get('/', (OPDSController, 'redirect_to_opds'), name='home', auth=opds)
+    # Monitoring probe: never authenticated
     router.get('/health', (OPDSController, 'health_check'), name='health')
-    router.get('/opds', (OPDSController, 'show_root_catalog'), name='opds.root')
-    router.get('/opds/', (OPDSController, 'show_root_catalog'), name='opds.root.slash')
-    router.get('/opds/books', (OPDSController, 'show_all_books'), name='opds.books')
-    router.get('/opds/recent', (OPDSController, 'show_recent_books'), name='opds.recent')
-    router.get('/opds/by-year', (OPDSController, 'show_by_year_catalog'), name='opds.by-year')
-    router.get(r'/opds/by-year/.*', (OPDSController, 'show_year_books'), name='opds.year')
-    router.get('/opds/by-author', (OPDSController, 'show_by_author_catalog'), name='opds.by-author')
-    router.get(r'/opds/by-author/letter/.*', (OPDSController, 'show_author_letter_catalog'), name='opds.author-letter')
-    router.get(r'/opds/by-author/.*', (OPDSController, 'show_author_books'), name='opds.author')
-    router.get('/opds/by-genre', (OPDSController, 'show_by_genre_catalog'), name='opds.by-genre')
-    router.get(r'/opds/by-genre/.*', (OPDSController, 'show_genre_books'), name='opds.genre')
-    router.get(r'/opds/folder/.*', (OPDSController, 'show_folder_catalog'), name='opds.folder')
-    router.get('/opds/refresh', (OPDSController, 'refresh_cache'), name='opds.refresh')
-    router.get('/opds/opensearch.xml', (OPDSController, 'serve_opensearch_description'), name='opds.opensearch')
-    router.get('/opds/search', (OPDSController, 'show_search_results'), name='opds.search')
-    router.get('/opds_to_html.xslt', (OPDSController, 'serve_xslt'), name='opds.xslt')
-    router.get(r'/download/.*', (OPDSController, 'download_book'), name='opds.download')
+    router.get('/opds', (OPDSController, 'show_root_catalog'), name='opds.root', auth=opds)
+    router.get('/opds/', (OPDSController, 'show_root_catalog'), name='opds.root.slash', auth=opds)
+    router.get('/opds/books', (OPDSController, 'show_all_books'), name='opds.books', auth=opds)
+    router.get('/opds/recent', (OPDSController, 'show_recent_books'), name='opds.recent', auth=opds)
+    router.get('/opds/recommendations', (OPDSController, 'show_recommendations'), name='opds.recommendations', auth=opds)
+    router.get('/opds/by-year', (OPDSController, 'show_by_year_catalog'), name='opds.by-year', auth=opds)
+    router.get(r'/opds/by-year/.*', (OPDSController, 'show_year_books'), name='opds.year', auth=opds)
+    router.get('/opds/by-author', (OPDSController, 'show_by_author_catalog'), name='opds.by-author', auth=opds)
+    router.get(r'/opds/by-author/letter/.*', (OPDSController, 'show_author_letter_catalog'), name='opds.author-letter', auth=opds)
+    router.get(r'/opds/by-author/.*', (OPDSController, 'show_author_books'), name='opds.author', auth=opds)
+    router.get('/opds/by-genre', (OPDSController, 'show_by_genre_catalog'), name='opds.by-genre', auth=opds)
+    router.get(r'/opds/by-genre/.*', (OPDSController, 'show_genre_books'), name='opds.genre', auth=opds)
+    router.get(r'/opds/folder/.*', (OPDSController, 'show_folder_catalog'), name='opds.folder', auth=opds)
+    router.get('/opds/refresh', (OPDSController, 'refresh_cache'), name='opds.refresh', auth=opds)
+    router.get('/opds/opensearch.xml', (OPDSController, 'serve_opensearch_description'), name='opds.opensearch', auth=opds)
+    router.get('/opds/search', (OPDSController, 'show_search_results'), name='opds.search', auth=opds)
+    router.get('/opds_to_html.xslt', (OPDSController, 'serve_xslt'), name='opds.xslt', auth=opds)
+    router.get(r'/download/.*', (OPDSController, 'download_book'), name='opds.download', auth=opds)
+    # Covers stay public: the CrossPoint Sync app shows them with <img> tags, without credentials
     router.get(r'/cover/.*', (OPDSController, 'download_cover'), name='opds.cover')
 
     # Web UI: reading statistics / sync page (data fetched from the sync API by the page)
-    router.get('/reading', (WebUIController, 'reading_page'), name='webui.reading')
-    router.get(r'/static/(?P<name>[^/]+)', (WebUIController, 'static_file'), name='webui.static')
+    router.get('/reading', (WebUIController, 'reading_page'), name='webui.reading', auth=opds)
+    router.get(r'/static/(?P<name>[^/]+)', (WebUIController, 'static_file'), name='webui.static', auth=opds)
 
     # Sync API, mounted at the root (CrossPoint Sync app: "host:port") and under /koreader/sync (KoReader)
     for prefix in ('', '/koreader/sync'):

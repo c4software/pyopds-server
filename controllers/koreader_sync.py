@@ -130,10 +130,8 @@ class SyncControllerBase:
     _sync_storage_instance: SyncStorage | None = None
 
     def __init__(self, request_handler):
-        if SyncControllerBase._sync_storage_instance is None:
-            SyncControllerBase._sync_storage_instance = SyncStorage(KOREADER_SYNC_DB_PATH)
         self.request = request_handler
-        self.sync_storage = SyncControllerBase._sync_storage_instance
+        self.sync_storage = get_sync_storage()
         self.params = getattr(request_handler, 'route_params', {}) or {}
         self.query = parse_qs(urlparse(request_handler.path).query)
 
@@ -206,6 +204,13 @@ class SyncControllerBase:
             self.ERROR_DOCUMENT_FIELD_MISSING: 403,
         }
         self._send_json_response({'code': code, 'message': message}, status=status or http_status_map.get(code, 500))
+
+
+def get_sync_storage() -> SyncStorage:
+    """Shared SyncStorage (created on first use), also used by the OPDS authentication and recommendations."""
+    if SyncControllerBase._sync_storage_instance is None:
+        SyncControllerBase._sync_storage_instance = SyncStorage(KOREADER_SYNC_DB_PATH)
+    return SyncControllerBase._sync_storage_instance
 
 
 class KoReaderSyncController(SyncControllerBase):
@@ -294,6 +299,7 @@ __all__ = [
     'KOREADER_SYNC_DB_PATH',
     'KoReaderSyncController',
     'SyncControllerBase',
+    'get_sync_storage',
     'is_fraction',
     'is_valid_document',
     'is_uint',

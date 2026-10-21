@@ -191,7 +191,9 @@ class SecurityUtils:
 
 class OPDSFeedGenerator:
     @staticmethod
-    def generate_feed(title: str, feed_id: str, links: list[tuple[str, str, str]], entries: list[dict]) -> str:
+    def generate_feed(title: str, feed_id: str, links: list[tuple[str, str, str]], entries: list[dict],
+                      subtitle: str | None = None) -> str:
+        """Build an Atom/OPDS feed; entries may carry an optional 'summary' text."""
         feed = ET.Element(
             'feed',
             {
@@ -202,6 +204,8 @@ class OPDSFeedGenerator:
 
         ET.SubElement(feed, 'title').text = title
         ET.SubElement(feed, 'id').text = feed_id
+        if subtitle:
+            ET.SubElement(feed, 'subtitle').text = subtitle
         ET.SubElement(feed, 'updated').text = (
             datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         )
@@ -217,6 +221,9 @@ class OPDSFeedGenerator:
             if 'author' in entry_data:
                 author = ET.SubElement(entry, 'author')
                 ET.SubElement(author, 'name').text = entry_data['author']
+
+            if entry_data.get('summary'):
+                ET.SubElement(entry, 'summary', {'type': 'text'}).text = entry_data['summary']
 
             for rel, href, type_ in entry_data['links']:
                 ET.SubElement(entry, 'link', {'rel': rel, 'href': href, 'type': type_})
@@ -250,6 +257,7 @@ class BookScanner:
         self._year_index = None  # {year: [paths...]}
         self._author_index = None  # {author: [paths...]}
         self._genre_index = None  # {genre key: {'name': displayed genre, 'paths': [paths...]}}
+        self._path_index = None  # {path: (author, [genres...])}
         self._recent_books_cache = None
         self._recent_books_cache_time = 0
         self.RECENT_CACHE_TTL = 300
@@ -261,8 +269,12 @@ class BookScanner:
         self._year_index = None
         self._author_index = None
         self._genre_index = None
+        self._path_index = None
         self._recent_books_cache = None
         self._recent_books_cache_time = 0
+        # Recommendations are derived from the library indexes
+        from controllers.recommendations import RecommendationService
+        RecommendationService.get_instance().invalidate()
     
     def _create_book_info_from_path(self, path: str) -> dict:
         """Create book info dict from file path. Used to avoid code duplication."""
@@ -546,7 +558,8 @@ class BookScanner:
         Only extracts minimal metadata (year, author, subjects) without full book info.
         Much faster than collect_all_books_with_metadata.
         """
-        if self._year_index is not None and self._author_index is not None and self._genre_index is not None:
+        if (self._year_index is not None and self._author_index is not None and self._genre_index is not None
+                and self._path_index is not None):
             return
         
         if self._all_paths_cache is None:
@@ -555,6 +568,7 @@ class BookScanner:
         year_index = {}  # {year: [paths...]}
         author_index = {}  # {author: [paths...]}
         genre_index = {}  # {genre key: {'name': ..., 'paths': [...]}}
+        path_index = {}  # {path: (author, [genres...])}
         
         for path in self._all_paths_cache:
             relative_path = os.path.relpath(path, LIBRARY_DIR)
@@ -564,6 +578,7 @@ class BookScanner:
             _, author, pub_date, genres = self.metadata_extractor.extract_epub_details(path)
             author = author or 'Unknown'
             year = self._extract_year(pub_date)
+            path_index[path] = (author, list(genres))
 
             for name in genres:
                 genre_index.setdefault(genre_key(name), {'name': name, 'paths': []})['paths'].append(path)
@@ -587,6 +602,16 @@ class BookScanner:
         self._year_index = year_index
         self._author_index = author_index
         self._genre_index = genre_index
+        self._path_index = path_index
+
+    def get_path_metadata_index(self) -> dict[str, tuple[str, list[str]]]:
+        """Author and genres of every library EPUB {path: (author, [genres])}, from the cached indexes."""
+        self._build_year_author_indexes()
+        return self._path_index
+
+    def book_info(self, path: str) -> dict:
+        """Title, author, relative path… of one EPUB (opens it: use for a handful of books only)."""
+        return self._create_book_info_from_path(path)
 
     def get_folder_paths(self, folder_relative: str) -> list[str]:
         """Get the paths of all EPUB files under a library folder, subfolders included."""
@@ -911,6 +936,13 @@ class OPDSController:
         """Display recently added books."""
         self._handle_recent_books()
 
+    def show_recommendations(self):
+        """Display the "read next" recommendations of the authenticated sync user.
+
+        Requires OPDS_AUTH: without authentication the catalog has no user, so this feed answers 404.
+        """
+        self._handle_recommendations()
+
     def show_folder_catalog(self):
         """Display folder contents."""
         self._handle_folder_catalog()
@@ -1065,6 +1097,10 @@ class OPDSController:
             },
         ]
 
+        recommendations_entry = self._recommendations_root_entry()
+        if recommendations_entry:
+            entries.append(recommendations_entry)
+
 
         for folder in sorted(os.listdir(LIBRARY_DIR)):
             folder_path = os.path.join(LIBRARY_DIR, folder)
@@ -1129,6 +1165,65 @@ class OPDSController:
         entries = self._create_book_entries(file_list)
         xml = self.feed_generator.generate_feed('Recent Books', 'urn:recent-books', links, entries)
 
+        self._send_xml_response(xml, 'acquisition')
+
+    def _current_user_recommendations(self):
+        """Recommendations of the user authenticated with OPDS_AUTH, None without an authenticated user."""
+        user = getattr(self.request, 'opds_user', None)
+        if not user:
+            return None
+        from controllers.recommendations import RecommendationService
+        return RecommendationService.get_instance().for_user(user)
+
+    def _recommendations_root_entry(self) -> dict | None:
+        """'Read Next' tile of the root catalog, only for an authenticated user (OPDS_AUTH)."""
+        if not getattr(self.request, 'opds_user', None):
+            return None
+        try:
+            paths = [book['path'] for book in self._current_user_recommendations().books]
+        except Exception:
+            # The tile is a bonus: never break the root catalog because of it
+            paths = []
+        return {
+            'title': 'Read Next',
+            'id': 'urn:recommendations',
+            'links': [
+                (
+                    'subsection',
+                    '/opds/recommendations',
+                    'application/atom+xml;profile=opds-catalog;kind=acquisition',
+                ),
+                *mosaic_links(paths),
+            ],
+        }
+
+    def _handle_recommendations(self):
+        try:
+            result = self._current_user_recommendations()
+        except Exception as exc:
+            self._send_error(500, f'Unable to compute recommendations: {exc}')
+            return
+        if result is None:
+            self._send_error(404, 'Recommendations require authentication (OPDS_AUTH=true)')
+            return
+        links = [
+            (
+                'self',
+                '/opds/recommendations',
+                'application/atom+xml;profile=opds-catalog;kind=acquisition',
+            ),
+            (
+                'start',
+                '/opds',
+                'application/atom+xml;profile=opds-catalog;kind=navigation',
+            ),
+        ]
+        entries = self._create_book_entries(result.books)
+        for entry, book in zip(entries, result.books):
+            entry['summary'] = ' · '.join(book['reasons'])
+        xml = self.feed_generator.generate_feed(
+            'Read Next', 'urn:recommendations', links, entries, subtitle=result.message
+        )
         self._send_xml_response(xml, 'acquisition')
 
     def _handle_folder_catalog(self):

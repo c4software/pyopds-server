@@ -1,7 +1,10 @@
+import base64
 import contextlib
+import hashlib
 import http.client
 import importlib
 import io
+import json
 import os
 import socketserver
 import sys
@@ -474,6 +477,241 @@ class TestGenreCatalog(unittest.TestCase):
         _, feed = self._feed('/opds/by-genre/Lancedragon')
         self.assertEqual(self.titles(feed), ['Book g'])
         self.assertEqual(self._feed('/opds/by-genre/Inconnu')[0], 404)
+
+
+def basic_header(user: str, password: str) -> dict:
+    """Authorization header for HTTP Basic, UTF-8 encoded."""
+    token = base64.b64encode(f'{user}:{password}'.encode('utf-8')).decode('ascii')
+    return {'Authorization': f'Basic {token}'}
+
+
+def http_request(port, method, path, body=None, headers=None):
+    """Send a request to the test server; returns (status, headers, body)."""
+    conn = http.client.HTTPConnection('localhost', port, timeout=10)
+    headers = dict(headers or {})
+    payload = None
+    if body is not None:
+        payload = json.dumps(body)
+        headers['Content-Type'] = 'application/json'
+    conn.request(method, path, body=payload, headers=headers)
+    response = conn.getresponse()
+    data = response.read()
+    result = response.status, dict(response.getheaders()), data
+    conn.close()
+    return result
+
+
+class TestOPDSAuthAndRecommendations(unittest.TestCase):
+    """OPDS_AUTH (HTTP Basic with the sync accounts) and the "Read Next" recommendations feed."""
+
+    ns = {'atom': 'http://www.w3.org/2005/Atom'}
+    password = 'pässwörd ünicode'
+
+    @classmethod
+    def setUpClass(cls):
+        cls._orig_env = {key: os.environ.get(key) for key in ('LIBRARY_DIR', 'PAGE_SIZE', 'OPDS_AUTH')}
+        cls.library_dir = tempfile.TemporaryDirectory()
+        cls.db_dir = tempfile.TemporaryDirectory()
+        os.environ['LIBRARY_DIR'] = cls.library_dir.name
+        os.environ['PAGE_SIZE'] = '25'
+        os.environ.pop('OPDS_AUTH', None)
+        books = {
+            'dune.epub': ('Dune', 'Frank Herbert', ['Science Fiction']),
+            'messiah.epub': ('Dune Messiah', 'Frank Herbert', ['Science Fiction']),
+            'hyperion.epub': ('Hyperion', 'Dan Simmons', ['Science Fiction']),
+            'cuisine.epub': ('Cuisine facile', 'Chef Anonyme', ['Cuisine']),
+            'abandoned.epub': ('Abandoned', 'Frank Herbert', ['Science Fiction']),
+        }
+        for name, (title, author, subjects) in books.items():
+            create_epub(os.path.join(cls.library_dir.name, name), title, author, subjects=subjects)
+        for module in ('controllers.opds', 'controllers.sync_storage', 'controllers.koreader_sync',
+                       'controllers.library_index', 'controllers.recommendations', 'controllers.crosspoint_sync'):
+            importlib.reload(importlib.import_module(module))
+        importlib.reload(importlib.import_module('routes'))
+        cls.server = importlib.reload(importlib.import_module('server'))
+        cls.koreader_sync = importlib.import_module('controllers.koreader_sync')
+        sync_storage = importlib.import_module('controllers.sync_storage')
+        cls.koreader_sync.SyncControllerBase._sync_storage_instance = sync_storage.SyncStorage(
+            os.path.join(cls.db_dir.name, 'sync.db'))
+        cls.httpd = ThreadedTCPServer(('localhost', 0), cls.server.UnifiedHandler)
+        cls.port = cls.httpd.server_address[1]
+        cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
+        cls.thread.start()
+        time.sleep(0.1)
+        with contextlib.redirect_stdout(io.StringIO()):
+            for user in ('reader', 'newbie', 'other'):
+                status, _, _ = http_request(cls.port, 'POST', '/users/create', {'username': user, 'password': cls.password})
+                assert status == 201, status
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+        cls.thread.join(timeout=1)
+        cls.koreader_sync.SyncControllerBase._sync_storage_instance = None
+        cls.library_dir.cleanup()
+        cls.db_dir.cleanup()
+        for key, value in cls._orig_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        importlib.reload(importlib.import_module('controllers.opds'))
+        importlib.reload(importlib.import_module('server'))
+
+    def _request(self, method, path, body=None, headers=None):
+        return http_request(self.port, method, path, body, headers)
+
+    def _sync_headers(self, user):
+        return {'X-Auth-User': user, 'X-Auth-Key': hashlib.md5(self.password.encode('utf-8')).hexdigest()}
+
+    def _feed(self, body):
+        text = '\n'.join(line for line in body.decode('utf-8').split('\n') if not line.strip().startswith('<?'))
+        return ET.fromstring(text)
+
+    def _push_progress(self, user, filename, percentage, status=None):
+        document = hashlib.md5(filename.encode('utf-8')).hexdigest()
+        status_code, _, _ = self._request('PUT', '/syncs/progress', {
+            'document': document, 'progress': '/body/DocFragment[1]', 'percentage': percentage,
+            'device': 'test', 'device_id': 'test-device',
+        }, self._sync_headers(user))
+        self.assertEqual(status_code, 200)
+        if status:
+            status_code, _, _ = self._request('PUT', f'/api/v1/documents/{document}/status', {'status': status},
+                                              self._sync_headers(user))
+            self.assertEqual(status_code, 200)
+
+    def test_auth_disabled_by_default(self):
+        status, _, body = self._request('GET', '/opds')
+        self.assertEqual(status, 200)
+        # Without authentication there is no user: no tile, and the feed answers 404
+        self.assertNotIn(b'urn:recommendations', body)
+        self.assertEqual(self._request('GET', '/opds/recommendations')[0], 404)
+
+    def test_catalog_requires_basic_auth_when_enabled(self):
+        with mock.patch.dict(os.environ, {'OPDS_AUTH': 'true'}):
+            for path in ('/', '/opds', '/opds/books', '/opds/search?q=dune', '/opds/opensearch.xml', '/opds_to_html.xslt',
+                         '/download/dune.epub', '/reading', '/static/reading.js', '/opds/refresh', '/opds/recommendations'):
+                status, headers, _ = self._request('GET', path)
+                self.assertEqual(status, 401, path)
+                self.assertEqual(headers.get('WWW-Authenticate'), 'Basic realm="PyOPDS", charset="UTF-8"')
+            self.assertEqual(self._request('GET', '/opds', headers=basic_header('reader', 'wrong'))[0], 401)
+            self.assertEqual(self._request('GET', '/opds', headers=basic_header('nobody', self.password))[0], 401)
+            self.assertEqual(self._request('GET', '/opds', headers={'Authorization': 'Basic !!!'})[0], 401)
+            good = basic_header('reader', self.password)
+            status, _, body = self._request('GET', '/opds', headers=good)
+            self.assertEqual(status, 200)
+            self.assertIn(b'urn:recommendations', body)
+            self.assertEqual(self._request('GET', '/download/dune.epub', headers=good)[0], 200)
+            self.assertEqual(self._request('GET', '/static/reading.js', headers=good)[0], 200)
+
+    def test_covers_and_sync_routes_stay_public(self):
+        with mock.patch.dict(os.environ, {'OPDS_AUTH': 'true'}):
+            # The test EPUBs have no cover: 404, but never 401
+            self.assertEqual(self._request('GET', '/cover/dune.epub')[0], 404)
+            self.assertEqual(self._request('GET', '/health')[0], 200)
+            for prefix in ('', '/koreader/sync'):
+                self.assertEqual(self._request('GET', f'{prefix}/healthz')[0], 200)
+                self.assertEqual(self._request('GET', f'{prefix}/users/auth', headers=self._sync_headers('reader'))[0], 200)
+                self.assertEqual(self._request('GET', f'{prefix}/api/v1/progress', headers=self._sync_headers('reader'))[0], 200)
+                self.assertEqual(self._request('GET', f'{prefix}/users/auth')[0], 401)
+
+    def test_recommendations_feed_without_history(self):
+        with mock.patch.dict(os.environ, {'OPDS_AUTH': 'true'}):
+            status, _, body = self._request('GET', '/opds/recommendations', headers=basic_header('newbie', self.password))
+        self.assertEqual(status, 200)
+        feed = self._feed(body)
+        self.assertEqual(feed.findall('atom:entry', self.ns), [])
+        self.assertIn('historique', feed.find('atom:subtitle', self.ns).text)
+
+    def test_recommendations_feed_from_sync_history(self):
+        self._push_progress('other', 'hyperion.epub', 1.0)
+        self._push_progress('reader', 'dune.epub', 1.0)
+        self._push_progress('reader', 'abandoned.epub', 0.1, status='dnf')
+        with mock.patch.dict(os.environ, {'OPDS_AUTH': 'true'}):
+            good = basic_header('reader', self.password)
+            status, _, body = self._request('GET', '/opds/recommendations', headers=good)
+            self.assertEqual(status, 200)
+            entries = self._feed(body).findall('atom:entry', self.ns)
+            titles = [entry.find('atom:title', self.ns).text for entry in entries]
+            # Same author first, then same genre; read, abandoned and unrelated books are left out
+            self.assertEqual(titles, ['Dune Messiah', 'Hyperion'])
+            self.assertIn('Frank Herbert', entries[0].find('atom:summary', self.ns).text)
+            links = {link.get('rel'): link.get('href') for link in entries[0].findall('atom:link', self.ns)}
+            self.assertEqual(links['http://opds-spec.org/acquisition/open-access'], '/download/messiah.epub')
+            self.assertEqual(links['http://opds-spec.org/image'], '/cover/messiah.epub')
+            # Root tile: mosaic of the recommended covers
+            _, _, body = self._request('GET', '/opds', headers=good)
+            tile = next(entry for entry in self._feed(body).findall('atom:entry', self.ns)
+                        if entry.find('atom:id', self.ns).text == 'urn:recommendations')
+            mosaic = {link.get('href') for link in tile.findall('atom:link', self.ns)
+                      if link.get('rel') == 'urn:pyopds:mosaic-cover'}
+            self.assertEqual(mosaic, {'/cover/messiah.epub', '/cover/hyperion.epub'})
+
+
+class TestRecommendationScoring(unittest.TestCase):
+    """Pure scoring functions of controllers.recommendations and Basic credentials parsing."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.rec = importlib.import_module('controllers.recommendations')
+
+    def test_reading_signal(self):
+        signal = self.rec.reading_signal
+        self.assertEqual(signal('finished', 0.2), 'read')
+        self.assertEqual(signal('reading', 0.95), 'read')
+        self.assertEqual(signal('dnf', 0.99), 'dnf')
+        self.assertEqual(signal('reading', 0.3), 'reading')
+        self.assertEqual(signal('paused', 0.3), 'paused')
+
+    def test_recency_favours_recent_reads(self):
+        now = 1_000_000_000
+        self.assertAlmostEqual(self.rec.recency_factor(now, now), 1.0)
+        self.assertLess(self.rec.recency_factor(now - 365 * 86400, now), self.rec.recency_factor(now - 86400, now))
+        self.assertGreaterEqual(self.rec.recency_factor(0, now), 0.5)
+
+    def test_profile_ignores_abandoned_books(self):
+        profile = self.rec.build_profile([
+            {'author': 'A', 'genres': ['SF'], 'status': 'dnf', 'percentage': 0.5, 'updated_at': 0},
+        ], 0)
+        self.assertTrue(profile.is_empty)
+        self.assertEqual(self.rec.recommend([{'path': 'x', 'author': 'A', 'genres': ['SF']}], profile), [])
+
+    def test_scoring_ranks_series_author_and_genres(self):
+        now = 1_000_000_000
+        profile = self.rec.build_profile([
+            {'author': 'Frank  Herbert', 'genres': ['Science-fiction'], 'series': 'Dune', 'series_index': '1',
+             'status': 'finished', 'percentage': 1.0, 'updated_at': now},
+            {'author': 'Old Author', 'genres': ['Policier'], 'status': None, 'percentage': 0.95,
+             'updated_at': now - 3 * 365 * 86400},
+        ], now)
+        candidates = [
+            {'path': 'genre', 'author': 'Dan Simmons', 'genres': ['Science-fiction']},
+            {'path': 'author', 'author': 'frank herbert', 'genres': []},
+            {'path': 'next', 'author': 'Frank Herbert', 'genres': ['Science-fiction'], 'series': 'dune', 'series_index': 2},
+            {'path': 'later', 'author': 'Frank Herbert', 'genres': ['Science-fiction'], 'series': 'Dune', 'series_index': 4},
+            {'path': 'old-genre', 'author': 'X', 'genres': ['Policier']},
+            {'path': 'none', 'author': 'Y', 'genres': ['Cuisine']},
+        ]
+        ranked = self.rec.recommend(candidates, profile)
+        self.assertEqual([book['path'] for book in ranked], ['next', 'later', 'author', 'genre', 'old-genre'])
+        self.assertIn('Tome suivant de Dune', ranked[0]['reasons'])
+        self.assertEqual(len(self.rec.recommend(candidates, profile, limit=2)), 2)
+
+    def test_series_bonus_is_optional(self):
+        profile = self.rec.build_profile(
+            [{'author': 'A', 'genres': [], 'status': 'reading', 'percentage': 0.4, 'updated_at': 0}], 0)
+        score, reasons = self.rec.score_candidate({'author': 'A', 'genres': []}, profile)
+        self.assertGreater(score, 0)
+        self.assertEqual(reasons, ['Même auteur : A'])
+
+    def test_basic_credentials_parsing(self):
+        auth = importlib.import_module('controllers.opds_auth')
+        token = base64.b64encode('élise:p:ss wörd'.encode('utf-8')).decode()
+        self.assertEqual(auth.parse_basic_credentials(f'Basic {token}'), ('élise', 'p:ss wörd'))
+        self.assertIsNone(auth.parse_basic_credentials('Bearer abc'))
+        self.assertIsNone(auth.parse_basic_credentials('Basic ###'))
+        self.assertIsNone(auth.parse_basic_credentials(None))
 
 
 if __name__ == '__main__':
