@@ -529,13 +529,134 @@
                             mosaic.classList.remove('single');
                             mosaic.parentElement.classList.remove('has-mosaic');
                         });
+                        session.thumbs.forEach(function(url) { URL.revokeObjectURL(url); });
+                        session.thumbs.clear();
                     }
+
+                    // Browser cache of the mosaic covers: small thumbnails in IndexedDB (the full EPUB covers
+                    // are heavy for a mosaic cell), books without a cover, and the covers last shown per tile
+                    const coverCache = (function() {
+                        const DB_NAME = 'pyopds-mosaic';
+                        const STORE = 'thumbs';
+                        const MAX_ENTRIES = 800;
+                        const TTL = 7 * 86400 * 1000;
+                        const THUMB_WIDTH = 200;
+                        const SEEN_KEY = 'tile-mosaic-seen';
+                        let dbPromise = null;
+
+                        function openDb() {
+                            if (!dbPromise) {
+                                dbPromise = new Promise(function(resolve) {
+                                    try {
+                                        const request = indexedDB.open(DB_NAME, 1);
+                                        request.onupgradeneeded = function() {
+                                            request.result.createObjectStore(STORE).createIndex('at', 'at');
+                                        };
+                                        request.onsuccess = function() { resolve(request.result); };
+                                        request.onerror = function() { resolve(null); };
+                                    } catch (e) {
+                                        resolve(null);
+                                    }
+                                });
+                            }
+                            return dbPromise;
+                        }
+
+                        function run(mode, fn) {
+                            return openDb().then(function(db) {
+                                if (!db) return null;
+                                return new Promise(function(resolve) {
+                                    try {
+                                        const tx = db.transaction(STORE, mode);
+                                        const request = fn(tx.objectStore(STORE));
+                                        tx.oncomplete = function() { resolve(request ? request.result : null); };
+                                        tx.onerror = tx.onabort = function() { resolve(null); };
+                                    } catch (e) {
+                                        resolve(null);
+                                    }
+                                });
+                            });
+                        }
+
+                        // Drop the oldest thumbnails above the size limit
+                        function prune() {
+                            run('readwrite', function(store) {
+                                const count = store.count();
+                                count.onsuccess = function() {
+                                    let excess = count.result - MAX_ENTRIES;
+                                    if (excess &lt;= 0) return;
+                                    store.index('at').openCursor().onsuccess = function(event) {
+                                        const cursor = event.target.result;
+                                        if (!cursor || excess-- &lt;= 0) return;
+                                        cursor.delete();
+                                        cursor.continue();
+                                    };
+                                };
+                                return null;
+                            });
+                        }
+
+                        // Cached entry of a cover URL: {blob} or {missing: true}, null when unknown or expired
+                        async function get(url) {
+                            const entry = await run('readonly', function(store) { return store.get(url); });
+                            return entry &amp;&amp; Date.now() - entry.at &lt; TTL ? entry : null;
+                        }
+
+                        function put(url, entry) {
+                            entry.at = Date.now();
+                            run('readwrite', function(store) { return store.put(entry, url); }).then(prune);
+                        }
+
+                        // Thumbnail of a loaded cover, as a JPEG blob (null if the browser cannot make one)
+                        function thumbnail(img) {
+                            return new Promise(function(resolve) {
+                                try {
+                                    const scale = Math.min(1, THUMB_WIDTH / img.naturalWidth);
+                                    const canvas = document.createElement('canvas');
+                                    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+                                    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+                                    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+                                    canvas.toBlob(resolve, 'image/jpeg', 0.8);
+                                } catch (e) {
+                                    resolve(null);
+                                }
+                            });
+                        }
+
+                        function loadSeen() {
+                            try {
+                                return JSON.parse(localStorage.getItem(SEEN_KEY) || '{}') || {};
+                            } catch (e) {
+                                return {};
+                            }
+                        }
+
+                        // Covers last shown by a tile, to show them again right away on the next visit
+                        function seen(tile) {
+                            return loadSeen()[tile] || [];
+                        }
+
+                        function remember(tile, covers) {
+                            const all = loadSeen();
+                            delete all[tile];
+                            all[tile] = covers.slice(0, 8);
+                            const tiles = Object.keys(all);
+                            tiles.slice(0, Math.max(0, tiles.length - 200)).forEach(function(key) { delete all[key]; });
+                            try {
+                                localStorage.setItem(SEEN_KEY, JSON.stringify(all));
+                            } catch (e) {
+                                // Storage full or unavailable: covers are only remembered for this page
+                            }
+                        }
+
+                        return { get: get, put: put, thumbnail: thumbnail, seen: seen, remember: remember };
+                    })();
 
                     // Fill the navigation tiles with a mosaic of covers, one cell changing every few seconds
                     function setupTileMosaics() {
                         if (mosaicSession || !isMosaicEnabled()) return;
                         document.documentElement.classList.add('mosaic-enabled');
-                        const session = { observer: null, timers: new Set(), images: new Set(), active: true };
+                        const session = { observer: null, timers: new Set(), images: new Set(), thumbs: new Map(), active: true };
                         mosaicSession = session;
                         const CELLS = 4;
                         const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -549,16 +670,37 @@
                             session.timers.add(id);
                         }
 
-                        // Resolve with the loaded URL, or null when the EPUB has no cover (or the mosaic was stopped)
-                        function loadCover(src) {
-                            if (!session.active) return Promise.resolve(null);
-                            return new Promise(function(resolve) {
-                                const img = new Image();
-                                session.images.add(img);
-                                img.onload = function() { session.images.delete(img); resolve(session.active ? img.src : null); };
-                                img.onerror = function() { session.images.delete(img); resolve(null); };
-                                img.src = src;
+                        function useThumbnail(src, blob) {
+                            if (session.active &amp;&amp; blob &amp;&amp; !session.thumbs.has(src)) session.thumbs.set(src, URL.createObjectURL(blob));
+                        }
+
+                        // Resolve with the cover URL once displayable (from the browser cache when known),
+                        // or null when the EPUB has no cover (or the mosaic was stopped)
+                        async function loadCover(src) {
+                            if (!session.active) return null;
+                            const cached = await coverCache.get(src);
+                            if (cached) {
+                                useThumbnail(src, cached.blob);
+                                return session.active &amp;&amp; !cached.missing ? src : null;
+                            }
+                            const img = await new Promise(function(resolve) {
+                                const image = new Image();
+                                session.images.add(image);
+                                image.onload = function() { session.images.delete(image); resolve(image); };
+                                image.onerror = function() { session.images.delete(image); resolve(null); };
+                                image.src = src;
                             });
+                            if (!session.active) return null;
+                            if (!img) {
+                                coverCache.put(src, { missing: true });
+                                return null;
+                            }
+                            const blob = await coverCache.thumbnail(img);
+                            if (blob) {
+                                coverCache.put(src, { blob: blob });
+                                useThumbnail(src, blob);
+                            }
+                            return session.active ? src : null;
                         }
 
                         // Next cover of the pool that exists
@@ -578,7 +720,7 @@
                             const img = document.createElement('img');
                             img.className = 'tile-mosaic-cover';
                             img.alt = '';
-                            img.src = src;
+                            img.src = session.thumbs.get(src) || src;
                             cell.appendChild(img);
                             void img.offsetWidth; // Start the transition from opacity 0
                             img.classList.add('loaded');
@@ -608,6 +750,7 @@
                                 return cell;
                             });
                             mosaic.parentElement.classList.add('has-mosaic');
+                            coverCache.remember(state.tile, shown);
                             if (reduceMotion) return;
 
                             let lastCell = -1;
@@ -627,6 +770,7 @@
                                     lastCell = index;
                                     shown[index] = src;
                                     showCover(cells[index], src);
+                                    coverCache.remember(state.tile, shown);
                                 }
                                 schedule(rotate, 5000 + Math.random() * 4000);
                             }
@@ -640,7 +784,11 @@
                                 let state = states.get(entry.target);
                                 if (!state) {
                                     if (!entry.isIntersecting) return;
-                                    state = { pending: entry.target.getAttribute('data-covers').split(' ').filter(Boolean), covers: [], visible: true };
+                                    // Covers shown on the last visit first (instant, from the cache), then the feed's sample
+                                    const link = entry.target.closest('a');
+                                    const tile = link ? link.getAttribute('href') : '';
+                                    const pending = coverCache.seen(tile).concat(entry.target.getAttribute('data-covers').split(' ').filter(Boolean));
+                                    state = { tile: tile, pending: pending.filter(function(src, i) { return pending.indexOf(src) === i; }), covers: [], visible: true };
                                     states.set(entry.target, state);
                                     startMosaic(entry.target, state);
                                 }
