@@ -216,7 +216,11 @@
                             </div>
                             <div class="flex-1 min-w-0">
                                 <h2 id="book-dialog-title" class="text-xl sm:text-2xl font-semibold leading-tight pr-8 text-slate-900 dark:text-slate-50"></h2>
-                                <a id="book-dialog-author" class="inline-block mt-1 text-slate-600 hover:text-slate-900 hover:underline dark:text-slate-300 dark:hover:text-white"></a>
+                                <!-- Author: link to all their books (plain text for an unknown author) -->
+                                <a id="book-dialog-author" class="group/author mt-1.5 inline-flex items-center gap-1.5 max-w-full text-slate-600 dark:text-slate-300">
+                                    <i id="book-dialog-author-icon" data-lucide="user-round" class="w-4 h-4 flex-shrink-0 text-slate-400"></i>
+                                    <span id="book-dialog-author-name" class="truncate group-[[href]]/author:text-indigo-700 group-[[href]]/author:hover:underline dark:group-[[href]]/author:text-indigo-300"></span>
+                                </a>
                                 <div id="book-dialog-series-row" class="mt-3 flex items-center gap-1.5 text-sm" hidden="hidden">
                                     <i data-lucide="library" class="w-4 h-4 text-slate-400"></i>
                                     <a id="book-dialog-series" class="text-indigo-700 hover:underline dark:text-indigo-300"></a>

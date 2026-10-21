@@ -32,14 +32,16 @@
         document.getElementById('book-dialog-title').textContent = title;
         document.getElementById('book-dialog-cover-title').textContent = title;
 
+        // Author navigation: all the books of the author (none for an unknown author)
         const authorEl = document.getElementById('book-dialog-author');
-        authorEl.textContent = author;
-        if (author) {
-            if (author !== 'Unknown') {
-                authorEl.href = '/opds/by-author/' + encodeURIComponent(author);
-            } else {
-                authorEl.removeAttribute('href');
-            }
+        authorEl.hidden = !author;
+        document.getElementById('book-dialog-author-name').textContent = author;
+        if (author && author !== 'Unknown') {
+            authorEl.href = '/opds/by-author/' + encodeURIComponent(author) + '?page=1';
+            authorEl.title = 'Voir les livres de ' + author;
+        } else {
+            authorEl.removeAttribute('href');
+            authorEl.removeAttribute('title');
         }
 
         // Large cover, title block when the EPUB has none

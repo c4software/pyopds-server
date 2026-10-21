@@ -185,3 +185,6 @@
     white-space: nowrap;
     color: #f59e0b; /* amber-500 */
 }
+
+/* Book sheet rows toggled with the hidden attribute: win over their display utilities (flex, inline-flex) */
+#book-dialog [hidden] { display: none; }
