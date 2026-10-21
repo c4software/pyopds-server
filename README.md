@@ -21,13 +21,14 @@ If you browse your OPDS feed in a web browser, it will display a simple HTML rep
 - **Metadata Extraction**: Extracts title and author from EPUB files for rich display in the catalog.
 - **Browse by Year, Author and Genre**: Genres come from the EPUB subjects (`dc:subject`); spelling variants are merged (SF, science-fiction...), technical tags and series names are ignored, and genres with fewer than 3 books are hidden. These rules live in [`genres.toml`](genres.toml) (see Configuration).
 - **Book Covers**: Covers are extracted from the EPUB files and declared in the feed, so they show up in OPDS clients.
+- **Book Details**: Series and volume, description, publication year and rating are read from the EPUBs (`calibre:series`, EPUB 3 collections, `dc:description`…) and served to the CrossPoint Sync app, including the next volume of a series. Optional online lookups (Open Library, iTunes, Hardcover) fill the gaps for books outside the library.
 - **Reading Sync API**: KOSync-compatible progress sync for KoReader and CrossPoint / CrossInk readers.
 - **CrossPoint Sync Compatible**: Implements the [crosspoint-sync](https://github.com/crosspoint-reader/crosspoint-sync) extensions (`/api/v1`): the CrossPoint Sync app shows your library, reading statuses, statistics, activity and clippings, and CrossPoint readers sync rich positions and clippings.
 - **Accounts**: the catalog is public; readers can sign in (or create an account) from the web UI or with HTTP Basic in their reading app, with the same account as the sync. `OPDS_AUTH=true` makes the whole catalog private.
 - **« À lire ensuite » Recommendations**: once signed in, a tile and feed (`/opds/recommendations`) suggest unread books of the library from your reading sync history, computed locally.
-- **Docker Deployment**: Includes a `Dockerfile` and `docker-compose.yml` for easy containerized deployment.
-- **Visual HTML Representation**: Provides a simple HTML view of the OPDS feed for easy browsing in web browsers (using XSLT transformation).
-- **Reading Page**: `/reading` (chart icon in the web UI header) signs in with the sync account and shows the books in progress per device with their last sync, finished and abandoned books, reading time, pages, a reading calendar, recent activity, devices and the latest highlights, with links to the matching books of the catalog.
+- **Docker Deployment**: Prebuilt multi-arch image (`ghcr.io/c4software/pyopds-server`) published on each release, a versioned `docker-compose.yml` and a git-ignored override for your own settings.
+- **Web Interface**: The OPDS feed rendered as a web page in browsers (XSLT transformation), with light/dark theme, search, sign-in / account creation and an optional animated mosaic of covers on the navigation tiles (see [Web interface](#web-interface)).
+- **Reading Page**: `/reading` (chart icon in the web UI header) shows the books in progress per device with their last sync, finished and abandoned books, reading time, pages, a reading calendar, recent activity, devices and the latest highlights, with links to the matching books of the catalog; a synced book the server could not match can be associated by hand with a book of the library.
 
 ## Prerequisites
 
@@ -42,8 +43,8 @@ If you browse your OPDS feed in a web browser, it will display a simple HTML rep
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/your-username/your-repo.git
-   cd your-repo
+   git clone https://github.com/c4software/pyopds-server.git
+   cd pyopds-server
    ```
 
 2. Create a `books/` directory and place your EPUB files in it (e.g., `books/author1/book.epub`).
@@ -56,7 +57,7 @@ If you browse your OPDS feed in a web browser, it will display a simple HTML rep
 
 4. Access the OPDS catalog at: `http://localhost:8080/opds`.
 
-The prebuilt image (amd64, arm64) is also published on each release tag to `ghcr.io/c4software/pyopds-server` (`latest` and the tag version):
+The prebuilt image (amd64, arm64) is published by GitHub Actions on each release tag to `ghcr.io/c4software/pyopds-server`, as `latest` and as the tag version (e.g. `2.4.0`):
 
 ```bash
 docker run -p 8080:8080 -v ./books:/books ghcr.io/c4software/pyopds-server:latest
@@ -69,8 +70,8 @@ Machine-specific settings (library path, pinned version, reverse proxy, extra va
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/your-username/your-repo.git
-   cd your-repo
+   git clone https://github.com/c4software/pyopds-server.git
+   cd pyopds-server
    ```
 
 2. Set the environment variable for the books directory:
@@ -91,9 +92,11 @@ Machine-specific settings (library path, pinned version, reverse proxy, extra va
 
 The following environment variables can be set:
 
-- **LIBRARY_DIR**: Path to the directory containing EPUB files (default: `books`).
+- **LIBRARY_DIR**: Path to the directory containing EPUB files (default: `books`; `/books` in the Docker image).
+- **PORT**: Listening port (default: `8080`).
+- **PAGE_SIZE**: Number of books per page in the OPDS feeds (default: `25`).
 - **KOREADER_SYNC_DB_PATH**: Path to the SQLite database file used by the KoReader sync helper (default: `koreader_sync.db`).
-- **REGISTRATION_DISABLED**: Set to `true` to refuse new sync accounts (default: registration open).
+- **REGISTRATION_DISABLED**: Set to `true` to refuse new accounts, from the readers as well as from the web sign-in page (default: registration open).
 - **OPDS_AUTH**: Set to `true` to make the whole catalog and web UI private (default: public catalog, optional sign-in). See [Accounts and sign-in](#accounts-and-sign-in).
 - **OPDS_SESSION_SECRET**: Key signing the browser sessions (default: a random key written once to `session.secret` next to the sync database).
 - **GENRES_CONFIG_PATH**: Path to a custom genre file completing [`genres.toml`](genres.toml), with the same format: its subject-to-genre aliases and ignored subjects are added to the default ones (and win over them), and its `min_books` overrides the default threshold. Restart the server after editing it. Example (for instance in the mounted `config/` folder):
@@ -109,27 +112,21 @@ The following environment variables can be set:
 
   Online lookups are only a fallback: they run for books that match no EPUB of the library, and their results only fill fields the library and the reader left empty. Only the book's **title, author and ISBN** are sent to those services (with a `PyOPDS-Server` User-Agent), never anything about the user. They run in a background thread (at most 10 books per `GET /api/v1/progress`), never while answering a request, except the cover picker (`GET /api/v1/documents/{document}/cover/candidates`) which searches live. Results are cached for every user in the `catalog_cache` table of the sync database (30 days; misses 7 days for Open Library, 30 days for Hardcover; series 7 days).
 
-For Docker, set these variables in `docker-compose.override.yml` (see above):
+For Docker, set these variables in `docker-compose.override.yml` (see above); the base `docker-compose.yml` already mounts `./books` and `./config` (sync database, custom genres, session key). For example:
 
 ```yaml
 services:
-  opds-server:
-    build: .
-    ports:
-      - "8080:8080"
+  cops:
+    # Pin a version instead of following `latest`
+    image: ghcr.io/c4software/pyopds-server:2.4.0
     volumes:
-      - ./books:/books
-      - ./config:/config
+      - /srv/epub:/books        # replaces the ./books volume of the base file
     environment:
-      - LIBRARY_DIR=/books
-      - KOREADER_SYNC_DB_PATH=/config/koreader_sync.db
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 5s
+      - REGISTRATION_DISABLED=true
+      - ONLINE_METADATA=true
 ```
+
+Check the merged configuration with `docker compose config`.
 
 ## Usage with an OPDS Client
 
@@ -137,6 +134,15 @@ services:
    - Add a new catalog with the URL: `http://<your-ip>:8080/opds`.
 2. Browse the book list at the `/opds/books` endpoint.
 3. Download books via the links provided in the OPDS feed.
+
+### Web interface
+
+Opening the catalog URL in a browser shows it as a web page (the feed is turned into HTML by [`static/opds_to_html.xslt`](static/opds_to_html.xslt)). The header holds the search field and these buttons:
+
+- **Home**, **Reading page** (chart icon, see [Reading page](#reading-page-web-ui)) and **Refresh** (rescans the library and clears the caches).
+- **Se connecter** / **logout**: optional sign-in (see below), which shows the « À lire ensuite » tile.
+- **Cover mosaic** (image icon): fills the navigation tiles (collections, authors, years, genres, folders) with an animated mosaic of the covers of their books, under a veil that keeps the text readable. It is off by default and remembered per browser. Covers are only requested while it is on; small thumbnails, books without a cover and the covers last shown on each tile are cached in the browser (IndexedDB, 7 days), so tiles fill at once on the next visits.
+- **Theme**: light or dark, remembered per browser.
 
 ### Accounts and sign-in
 
@@ -202,7 +208,11 @@ The connectors of crosspoint-sync (Hardcover, Spotify, Readwise... progress sync
 
 ### Reading page (web UI)
 
-`/reading` is a static page (`static/reading.html`, `reading.js`, `reading.css`) that calls the sync API from the browser with the `x-auth-user` / `x-auth-key` headers: progress (`/api/v1/progress`, and `/api/v1/progress/{document}` for the per-device positions), `/api/v1/stats/summary`, `/api/v1/stats/activity` and `/api/v1/clippings`. The user name and the MD5 of the password are kept in the browser's `localStorage` until you sign out. Reading time, time of day and weekday charts need readers that upload statistics (CrossPoint); with KoReader alone, pages and reading days come from the progress history.
+`/reading` is a static page (`static/reading.html`, `reading.js`, `reading.css`) that calls the sync API from the browser with the `x-auth-user` / `x-auth-key` headers: progress (`/api/v1/progress`, and `/api/v1/progress/{document}` for the per-device positions), `/api/v1/stats/summary`, `/api/v1/stats/activity` and `/api/v1/clippings`. It uses the common sign-in page: the sign-in opens the catalog session and keeps the user name and the MD5 of the password in the browser's `localStorage` until you sign out. Reading time, time of day and weekday charts need readers that upload statistics (CrossPoint); with KoReader alone, pages and reading days come from the progress history.
+
+A synced book that matches no EPUB of the library (shown by its document hash, e.g. a file changed since it was downloaded, or sent to the reader another way) has an **« Associer à un livre »** button: search the catalog and pick the book; its title, cover, pages and links then come from that EPUB (« Dissocier » removes the association).
+
+The page assets are served with a version (`/static/reading.js?v=<modification time>`), so that a reverse proxy caching static files never serves an outdated script after an update.
 
 ## Security Consideration
 
