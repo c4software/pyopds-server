@@ -1,40 +1,29 @@
-// Sign-in / sign-up page: opens the catalog session (cookie set by POST /login) and keeps the sync key
-// for the reading page, so that one sign-in serves both. Accounts are created with POST /users/create,
-// the same account then syncs KoReader / CrossPoint.
+// Sign-in / sign-up page: the `login` Alpine component (template in login.html) opens the catalog session
+// (cookie set by POST /login) and keeps the sync key for the reading page, so that one sign-in serves both.
+// Accounts are created with POST /users/create, the same account then syncs KoReader / CrossPoint.
 (function () {
     'use strict';
 
-    const $ = (id) => document.getElementById(id);
-    const params = new URLSearchParams(window.location.search);
-    const registrationOpen = $('account-section').dataset.registration === 'open';
-    let signUp = false;
+    const TEXTS = {
+        signIn: {
+            title: 'Se connecter',
+            intro: 'Retrouvez vos suggestions de lecture et vos statistiques. Le même compte synchronise votre progression sur KoReader et CrossPoint.',
+            submit: 'Se connecter',
+            question: 'Pas encore de compte ?',
+            toggle: 'Créer un compte',
+        },
+        signUp: {
+            title: 'Créer un compte',
+            intro: 'Votre compte vous donne des suggestions de lecture et vos statistiques. Utilisez les mêmes identifiants dans KoReader ou CrossPoint pour synchroniser votre progression.',
+            submit: 'Créer le compte',
+            question: 'Déjà un compte ?',
+            toggle: 'Se connecter',
+        },
+    };
 
     // Only local paths, never another site
-    const next = params.get('next');
-    $('login-next').value = next && next.charAt(0) === '/' && next.charAt(1) !== '/' && next.charAt(1) !== '\\' ? next : '/opds';
-    $('back-link').href = $('login-next').value;
-
-    // Signed out (or session expired): forget the sync key of the reading page too
-    window.SyncAccount.save(null);
-
-    function showError(message) {
-        $('login-error').textContent = message;
-        $('login-error').classList.toggle('hidden', !message);
-    }
-
-    function setMode(creating) {
-        signUp = creating;
-        $('form-title').textContent = creating ? 'Créer un compte' : 'Se connecter';
-        $('form-intro').textContent = creating
-            ? 'Votre compte vous donne des suggestions de lecture et vos statistiques. Utilisez les mêmes identifiants dans KoReader ou CrossPoint pour synchroniser votre progression.'
-            : 'Retrouvez vos suggestions de lecture et vos statistiques. Le même compte synchronise votre progression sur KoReader et CrossPoint.';
-        $('login-submit').textContent = creating ? 'Créer le compte' : 'Se connecter';
-        $('mode-question').textContent = creating ? 'Déjà un compte ?' : 'Pas encore de compte ?';
-        $('mode-toggle').textContent = creating ? 'Se connecter' : 'Créer un compte';
-        $('confirm-field').classList.toggle('hidden', !creating);
-        $('login-confirm').required = creating;
-        $('login-password').autocomplete = creating ? 'new-password' : 'current-password';
-        showError('');
+    function safeNext(next) {
+        return next && next.charAt(0) === '/' && next.charAt(1) !== '/' && next.charAt(1) !== '\\' ? next : '/opds';
     }
 
     async function createAccount(user, password) {
@@ -62,45 +51,60 @@
         return null;
     }
 
-    $('login-form').addEventListener('submit', async function (event) {
-        event.preventDefault();
-        const user = $('login-user').value.trim().toLowerCase();
-        const password = $('login-password').value;
-        if (signUp && password !== $('login-confirm').value) {
-            showError('Les mots de passe ne correspondent pas.');
-            return;
-        }
-        $('login-submit').disabled = true;
-        showError('');
-        try {
-            const error = (signUp && await createAccount(user, password)) || await openSession(user, password);
-            if (error) {
-                showError(error);
-                return;
-            }
-            window.SyncAccount.save({ user: user, key: window.SyncAccount.md5(password) });
-            window.location.replace($('login-next').value);
-        } catch (error) {
-            showError('Serveur injoignable : ' + error.message);
-        } finally {
-            $('login-submit').disabled = false;
-        }
+    document.addEventListener('alpine:init', function () {
+        window.Alpine.data('login', function () {
+            const params = new URLSearchParams(window.location.search);
+            return {
+                registrationOpen: false,
+                signUp: false,
+                busy: false,
+                error: '',
+                next: safeNext(params.get('next')),
+
+                get text() {
+                    return this.signUp ? TEXTS.signUp : TEXTS.signIn;
+                },
+
+                init() {
+                    // Rewritten by the server (REGISTRATION_DISABLED)
+                    this.registrationOpen = document.getElementById('account-section').dataset.registration === 'open';
+                    this.signUp = this.registrationOpen && params.get('signup') === '1';
+                    if (params.get('error')) this.error = 'Utilisateur ou mot de passe incorrect.';
+                    // Signed out (or session expired): forget the sync key of the reading page too
+                    window.SyncAccount.save(null);
+                    this.$nextTick(function () { window.lucide.createIcons(); });
+                },
+
+                toggleMode() {
+                    this.signUp = !this.signUp;
+                    this.error = '';
+                },
+
+                // Fields read on submit (not x-model): browser autofill does not always send input events
+                async submit() {
+                    const user = this.$refs.user.value.trim().toLowerCase();
+                    const password = this.$refs.password.value;
+                    if (this.signUp && password !== this.$refs.confirm.value) {
+                        this.error = 'Les mots de passe ne correspondent pas.';
+                        return;
+                    }
+                    this.busy = true;
+                    this.error = '';
+                    try {
+                        const error = (this.signUp && await createAccount(user, password)) || await openSession(user, password);
+                        if (error) {
+                            this.error = error;
+                            return;
+                        }
+                        window.SyncAccount.save({ user: user, key: window.SyncAccount.md5(password) });
+                        window.location.replace(this.next);
+                    } catch (error) {
+                        this.error = 'Serveur injoignable : ' + error.message;
+                    } finally {
+                        this.busy = false;
+                    }
+                },
+            };
+        });
     });
-
-    $('mode-toggle').addEventListener('click', function () { setMode(!signUp); });
-    $('mode-switch').classList.toggle('hidden', !registrationOpen);
-
-    const darkIcon = $('theme-toggle-dark-icon');
-    const lightIcon = $('theme-toggle-light-icon');
-    (document.documentElement.classList.contains('dark') ? lightIcon : darkIcon).classList.remove('hidden');
-    $('theme-toggle').addEventListener('click', function () {
-        const dark = document.documentElement.classList.toggle('dark');
-        darkIcon.classList.toggle('hidden', dark);
-        lightIcon.classList.toggle('hidden', !dark);
-        try { localStorage.setItem('color-theme', dark ? 'dark' : 'light'); } catch (e) { /* storage unavailable */ }
-    });
-
-    setMode(registrationOpen && params.get('signup') === '1');
-    if (params.get('error')) showError('Utilisateur ou mot de passe incorrect.');
-    lucide.createIcons();
 })();

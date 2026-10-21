@@ -4,63 +4,58 @@
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>Connexion</title>
-    <script>
-        // Theme first, to avoid a flash (same storage key as the catalog pages)
-        try {
-            if (localStorage.getItem('color-theme') === 'dark' || (!('color-theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-                document.documentElement.classList.add('dark');
-            }
-        } catch (e) { /* storage unavailable */ }
-    </script>
+    <script src="/static/theme.js"></script>
     <link rel="stylesheet" href="/static/tailwind.css"/>
     <script src="https://unpkg.com/lucide@1.61.0"></script>
     <link rel="stylesheet" href="/static/reading.css"/>
+    <!-- Component registered on alpine:init, so before Alpine (deferred scripts run in order) -->
+    <script src="/static/account.js" defer></script>
+    <script src="/static/login.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.17.4/dist/cdn.min.js" defer></script>
 </head>
-<body class="bg-slate-50 font-sans dark:bg-slate-900 text-slate-800 dark:text-slate-200 min-h-screen">
+<!-- `login` component (static/login.js). The static texts and the plain form post (POST /login, `next`) also work without JavaScript. -->
+<body x-data="login" class="bg-slate-50 font-sans dark:bg-slate-900 text-slate-800 dark:text-slate-200 min-h-screen">
     <div class="bg-white/80 backdrop-blur-sm sticky top-0 z-10 shadow-sm px-4 py-2.5 flex items-center gap-3 dark:bg-slate-800/80 dark:shadow-slate-700">
-        <a id="back-link" href="/opds" class="flex items-center text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 gap-1.5 flex-shrink-0" style="text-decoration: none;">
+        <a id="back-link" href="/opds" :href="next" class="flex items-center text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 gap-1.5 flex-shrink-0" style="text-decoration: none;">
             <i data-lucide="arrow-left" class="w-4 h-4"></i>
             <span class="text-sm">Catalogue</span>
         </a>
         <h1 class="text-lg font-light text-slate-800 truncate dark:text-slate-200">Mon compte</h1>
         <div class="flex-grow"></div>
-        <button id="theme-toggle" type="button" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Changer de thème">
-            <i id="theme-toggle-dark-icon" class="hidden w-4 h-4" data-lucide="moon"></i>
-            <i id="theme-toggle-light-icon" class="hidden w-4 h-4" data-lucide="sun"></i>
+        <button id="theme-toggle" type="button" x-data="themeToggle" @click="toggle()" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Changer de thème">
+            <span x-show="!dark" x-cloak><i class="w-4 h-4" data-lucide="moon"></i></span>
+            <span x-show="dark" x-cloak><i class="w-4 h-4" data-lucide="sun"></i></span>
         </button>
     </div>
 
     <!-- One sign-in for the catalog and the reading page; the account also syncs KoReader / CrossPoint -->
     <section class="p-4 sm:p-6" data-registration="open" id="account-section">
-        <form id="login-form" method="post" action="/login" class="max-w-sm mx-auto mt-6 sm:mt-12 bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 p-5 space-y-4">
+        <form id="login-form" method="post" action="/login" @submit.prevent="submit()" class="max-w-sm mx-auto mt-6 sm:mt-12 bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 p-5 space-y-4">
             <div class="flex items-center gap-2 text-slate-700 dark:text-slate-200">
                 <i data-lucide="book-open" class="w-5 h-5"></i>
-                <h2 id="form-title" class="text-base font-medium">Se connecter</h2>
+                <h2 id="form-title" class="text-base font-medium" x-text="text.title">Se connecter</h2>
             </div>
-            <p id="form-intro" class="text-sm text-slate-500 dark:text-slate-400">Retrouvez vos suggestions de lecture et vos statistiques. Le même compte synchronise votre progression sur KoReader et CrossPoint.</p>
-            <input id="login-next" type="hidden" name="next" value="/opds"/>
+            <p id="form-intro" class="text-sm text-slate-500 dark:text-slate-400" x-text="text.intro">Retrouvez vos suggestions de lecture et vos statistiques. Le même compte synchronise votre progression sur KoReader et CrossPoint.</p>
+            <input id="login-next" type="hidden" name="next" value="/opds" :value="next"/>
             <label class="block">
                 <span class="text-sm text-slate-600 dark:text-slate-300">Utilisateur</span>
-                <input id="login-user" name="username" autocomplete="username" autocapitalize="none" required autofocus class="mt-1 w-full h-9 px-3 text-sm rounded-md border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100"/>
+                <input id="login-user" x-ref="user" name="username" autocomplete="username" autocapitalize="none" required autofocus class="mt-1 w-full h-9 px-3 text-sm rounded-md border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100"/>
             </label>
             <label class="block">
                 <span class="text-sm text-slate-600 dark:text-slate-300">Mot de passe</span>
-                <input id="login-password" name="password" type="password" autocomplete="current-password" required class="mt-1 w-full h-9 px-3 text-sm rounded-md border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100"/>
+                <input id="login-password" x-ref="password" name="password" type="password" autocomplete="current-password" :autocomplete="signUp ? 'new-password' : 'current-password'" required class="mt-1 w-full h-9 px-3 text-sm rounded-md border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100"/>
             </label>
-            <label id="confirm-field" class="hidden block">
+            <label id="confirm-field" x-show="signUp" x-cloak class="block">
                 <span class="text-sm text-slate-600 dark:text-slate-300">Confirmer le mot de passe</span>
-                <input id="login-confirm" type="password" autocomplete="new-password" class="mt-1 w-full h-9 px-3 text-sm rounded-md border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100"/>
+                <input id="login-confirm" x-ref="confirm" type="password" autocomplete="new-password" :required="signUp" class="mt-1 w-full h-9 px-3 text-sm rounded-md border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100"/>
             </label>
-            <p id="login-error" class="hidden text-sm text-red-600 dark:text-red-400"></p>
-            <button id="login-submit" type="submit" class="w-full h-9 bg-slate-700 text-white text-sm rounded-md hover:bg-slate-600 dark:bg-slate-600 dark:hover:bg-slate-500">Se connecter</button>
-            <p id="mode-switch" class="hidden text-sm text-center text-slate-500 dark:text-slate-400">
-                <span id="mode-question">Pas encore de compte ?</span>
-                <button id="mode-toggle" type="button" class="font-medium text-slate-700 underline underline-offset-2 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white">Créer un compte</button>
+            <p id="login-error" x-show="error" x-cloak x-text="error" class="text-sm text-red-600 dark:text-red-400"></p>
+            <button id="login-submit" type="submit" :disabled="busy" x-text="text.submit" class="w-full h-9 bg-slate-700 text-white text-sm rounded-md hover:bg-slate-600 dark:bg-slate-600 dark:hover:bg-slate-500">Se connecter</button>
+            <p id="mode-switch" x-show="registrationOpen" x-cloak class="text-sm text-center text-slate-500 dark:text-slate-400">
+                <span id="mode-question" x-text="text.question">Pas encore de compte ?</span>
+                <button id="mode-toggle" type="button" @click="toggleMode()" x-text="text.toggle" class="font-medium text-slate-700 underline underline-offset-2 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white">Créer un compte</button>
             </p>
         </form>
     </section>
-
-    <script src="/static/account.js"></script>
-    <script src="/static/login.js"></script>
 </body>
 </html>

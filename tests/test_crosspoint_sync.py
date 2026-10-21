@@ -401,6 +401,10 @@ class TestCrossPointSync(unittest.TestCase):
         # Versioned asset URLs: a proxy caching static files still serves the new ones after an update
         self.assertRegex(body, rb'/static/reading\.js\?v=\d+"')
         self.assertRegex(body, rb'/static/reading\.css\?v=\d+"')
+        # Alpine.js templates, pinned version (components registered before Alpine starts)
+        self.assertIn(b'https://cdn.jsdelivr.net/npm/alpinejs@3.17.4/dist/cdn.min.js', body)
+        self.assertIn(b'x-data="reading"', body)
+        self.assertLess(body.index(b'/static/reading.js'), body.index(b'alpinejs@'))
         status, content_type, _ = self.raw_get('/static/reading.js?v=1')
         self.assertEqual((status, content_type), (200, 'text/javascript; charset=utf-8'))
         status, content_type, _ = self.raw_get('/static/reading.css')

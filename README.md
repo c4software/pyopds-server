@@ -267,6 +267,8 @@ The connectors of crosspoint-sync (Hardcover, Spotify, Readwise... progress sync
 
 A synced book that matches no EPUB of the library (shown by its document hash, e.g. a file changed since it was downloaded, or sent to the reader another way) has an **« Associer à un livre »** button: search the catalog and pick the book; its title, cover, pages and links then come from that EPUB (« Dissocier » removes the association).
 
+The reading and sign-in pages are written with [Alpine.js](https://alpinejs.dev) (3.17.4, pinned, loaded from jsDelivr, no build step): the templates are in the HTML (`x-for`, `x-text`…), the scripts only call the API and compute the view data (`Alpine.data('reading')`, `Alpine.data('login')`); `static/theme.js` holds the shared light/dark toggle.
+
 The page assets are served with a version (`/static/reading.js?v=<modification time>`), so that a reverse proxy caching static files never serves an outdated script after an update.
 
 ## Web UI styles

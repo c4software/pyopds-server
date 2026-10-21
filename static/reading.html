@@ -4,19 +4,18 @@
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>Lecture et statistiques</title>
-    <script>
-        // Theme first, to avoid a flash (same storage key as the catalog pages)
-        try {
-            if (localStorage.getItem('color-theme') === 'dark' || (!('color-theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-                document.documentElement.classList.add('dark');
-            }
-        } catch (e) { /* storage unavailable */ }
-    </script>
+    <script src="/static/theme.js"></script>
     <link rel="stylesheet" href="/static/tailwind.css"/>
     <script src="https://unpkg.com/lucide@1.61.0"></script>
     <link rel="stylesheet" href="/static/reading.css"/>
+    <!-- Components registered on alpine:init, so before Alpine (deferred scripts run in order) -->
+    <script src="/static/account.js" defer></script>
+    <script src="/static/reading.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.17.4/dist/cdn.min.js" defer></script>
 </head>
-<body class="bg-slate-50 font-sans dark:bg-slate-900 text-slate-800 dark:text-slate-200 min-h-screen">
+<!-- Templates of the `reading` component (static/reading.js). Icons: <i data-lucide> placeholders, replaced by
+     lucide.createIcons() after each render; never put an Alpine directive on them except a static :data-lucide. -->
+<body x-data="reading" class="bg-slate-50 font-sans dark:bg-slate-900 text-slate-800 dark:text-slate-200 min-h-screen">
     <div class="bg-white/80 backdrop-blur-sm sticky top-0 z-10 shadow-sm px-4 py-2.5 flex items-center gap-3 dark:bg-slate-800/80 dark:shadow-slate-700">
         <a href="/opds" class="flex items-center text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 gap-1.5 flex-shrink-0" style="text-decoration: none;">
             <i data-lucide="arrow-left" class="w-4 h-4"></i>
@@ -25,34 +24,49 @@
         <h1 class="text-lg font-light text-slate-800 truncate dark:text-slate-200">Lecture</h1>
         <div class="flex-grow"></div>
         <div class="flex items-center gap-3 flex-shrink-0">
-            <span id="account-name" class="hidden sm:inline text-sm text-slate-500 dark:text-slate-400"></span>
-            <button id="refresh-button" type="button" class="hidden text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Actualiser">
+            <span id="account-name" class="hidden sm:inline text-sm text-slate-500 dark:text-slate-400" x-text="account && account.user"></span>
+            <button type="button" x-show="ready" x-cloak @click="load()" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Actualiser">
                 <i data-lucide="refresh-cw" class="w-4 h-4"></i>
             </button>
-            <button id="logout-button" type="button" class="hidden text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Se déconnecter">
+            <button type="button" x-show="ready" x-cloak @click="logout()" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Se déconnecter">
                 <i data-lucide="log-out" class="w-4 h-4"></i>
             </button>
             <a href="/opds" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center" title="Accueil">
                 <i data-lucide="home" class="w-4 h-4"></i>
             </a>
-            <button id="theme-toggle" type="button" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Changer de thème">
-                <i id="theme-toggle-dark-icon" class="hidden w-4 h-4" data-lucide="moon"></i>
-                <i id="theme-toggle-light-icon" class="hidden w-4 h-4" data-lucide="sun"></i>
+            <button id="theme-toggle" type="button" x-data="themeToggle" @click="toggle()" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Changer de thème">
+                <span x-show="!dark" x-cloak><i class="w-4 h-4" data-lucide="moon"></i></span>
+                <span x-show="dark" x-cloak><i class="w-4 h-4" data-lucide="sun"></i></span>
             </button>
         </div>
     </div>
 
+    <main x-show="ready" x-cloak class="flex p-4 sm:p-6 max-w-6xl mx-auto flex-col gap-8">
+        <p x-show="loading" class="text-sm text-slate-500 dark:text-slate-400">Chargement…</p>
+        <p x-show="error" x-text="error" class="text-sm text-red-600 dark:text-red-400"></p>
 
-    <main id="stats-view" class="hidden p-4 sm:p-6 max-w-6xl mx-auto flex-col gap-8">
-        <p id="loading" class="hidden text-sm text-slate-500 dark:text-slate-400">Chargement…</p>
-        <p id="load-error" class="hidden text-sm text-red-600 dark:text-red-400"></p>
+        <div x-show="kpis.length" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <template x-for="kpi in kpis" :key="kpi.label">
+                <div class="card p-3">
+                    <div class="flex items-center gap-1.5 kpi-label"><i :data-lucide="kpi.icon" class="w-3.5 h-3.5"></i><span x-text="kpi.label"></span></div>
+                    <div class="kpi-value mt-1" x-text="kpi.value"></div>
+                </div>
+            </template>
+        </div>
 
-        <div id="kpis" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3"></div>
-
-        <section id="activity-section" class="hidden">
+        <section x-show="showActivity">
             <h2 class="section-title"><i data-lucide="calendar-days" class="w-4 h-4"></i>Activité de lecture</h2>
             <div class="card p-4">
-                <div id="heatmap" class="heatmap-scroll"></div>
+                <div id="heatmap" x-ref="heatmap" class="heatmap-scroll">
+                    <div class="heatmap-months">
+                        <template x-for="month in heatmap.months" :key="month.key"><span x-text="month.label"></span></template>
+                    </div>
+                    <div class="heatmap">
+                        <template x-for="cell in heatmap.cells" :key="cell.key">
+                            <span :class="cell.cls" @mouseenter="cell.tip && showTip($event, cell.tip)" @mouseleave="hideTip()"></span>
+                        </template>
+                    </div>
+                </div>
                 <div class="flex items-center justify-end gap-1 mt-2 text-xs text-slate-500 dark:text-slate-400">
                     <span>Moins</span>
                     <span class="heat-cell heat-0"></span><span class="heat-cell heat-1"></span><span class="heat-cell heat-2"></span><span class="heat-cell heat-3"></span><span class="heat-cell heat-4"></span>
@@ -60,54 +74,143 @@
                 </div>
             </div>
             <div class="grid gap-3 md:grid-cols-3 mt-3">
-                <div class="card p-4 md:col-span-3"><h3 class="card-title" id="daily-title">30 derniers jours</h3><div id="daily-bars" class="bars"></div></div>
-                <div id="tod-card" class="card p-4 hidden"><h3 class="card-title">Moment de la journée</h3><div id="tod-bars"></div></div>
-                <div id="dow-card" class="card p-4 hidden"><h3 class="card-title">Jour de la semaine</h3><div id="dow-bars"></div></div>
-                <div id="devices-card" class="card p-4 hidden"><h3 class="card-title">Appareils</h3><ul id="devices-list" class="space-y-2 text-sm"></ul></div>
+                <div class="card p-4 md:col-span-3">
+                    <h3 class="card-title" x-text="daily.title"></h3>
+                    <div class="bars">
+                        <template x-for="bar in daily.bars" :key="bar.key">
+                            <div class="bar-slot" @mouseenter="showTip($event, bar.tip)" @mouseleave="hideTip()"><div class="bar" :style="'height:' + bar.height + '%'"></div></div>
+                        </template>
+                    </div>
+                    <div class="bars-axis"><span x-text="daily.start"></span><span x-text="daily.max"></span><span>Aujourd'hui</span></div>
+                </div>
+                <div x-show="tod.length" class="card p-4">
+                    <h3 class="card-title">Moment de la journée</h3>
+                    <template x-for="row in tod" :key="row.label">
+                        <div class="hbar"><span x-text="row.label"></span><div class="progress-track"><div class="progress-fill" :style="'width:' + row.width + '%'"></div></div><span class="value" x-text="row.value"></span></div>
+                    </template>
+                </div>
+                <div x-show="dow.length" class="card p-4">
+                    <h3 class="card-title">Jour de la semaine</h3>
+                    <template x-for="row in dow" :key="row.label">
+                        <div class="hbar"><span x-text="row.label"></span><div class="progress-track"><div class="progress-fill" :style="'width:' + row.width + '%'"></div></div><span class="value" x-text="row.value"></span></div>
+                    </template>
+                </div>
+                <div x-show="devices.length" class="card p-4">
+                    <h3 class="card-title">Appareils</h3>
+                    <ul class="space-y-2 text-sm">
+                        <template x-for="device in devices" :key="device.key">
+                            <li class="flex items-start gap-2">
+                                <i data-lucide="tablet" class="w-4 h-4 mt-0.5 text-slate-400"></i>
+                                <div class="min-w-0">
+                                    <div class="truncate"><span x-text="device.name"></span><template x-if="device.stats"><span> <span class="badge">stats</span></span></template></div>
+                                    <div class="text-xs text-slate-500 dark:text-slate-400" x-text="device.detail"></div>
+                                </div>
+                            </li>
+                        </template>
+                    </ul>
+                </div>
             </div>
         </section>
 
-        <section id="reading-section" class="hidden">
-            <h2 class="section-title"><i data-lucide="book-open" class="w-4 h-4"></i>En cours <span id="reading-count" class="count"></span></h2>
-            <div id="reading-list" class="grid gap-3 md:grid-cols-2"></div>
+        <!-- En cours, Terminés, Abandonnés: same card, progress details for the books in progress only -->
+        <template x-for="section in sections" :key="section.id">
+            <section x-show="section.books.length">
+                <h2 class="section-title"><i :data-lucide="section.icon" class="w-4 h-4"></i><span x-text="section.title"></span> <span class="count" x-text="section.count"></span></h2>
+                <div :class="section.grid">
+                    <template x-for="book in section.books" :key="book.key">
+                        <article class="card p-3 flex gap-3">
+                            <template x-if="book.cover && !book.broken">
+                                <img class="book-thumb" alt="" loading="lazy" :src="book.cover" @error="coverError(book)"/>
+                            </template>
+                            <template x-if="!book.cover || book.broken">
+                                <div class="book-thumb flex items-center justify-center text-slate-400 dark:text-slate-500"><i data-lucide="book" class="w-5 h-5"></i></div>
+                            </template>
+                            <div class="min-w-0 flex-1">
+                                <div class="font-medium text-sm leading-snug" x-text="book.title"></div>
+                                <div x-show="book.author" class="text-xs text-slate-500 dark:text-slate-400 truncate" x-text="book.author"></div>
+                                <template x-if="book.reading">
+                                    <div>
+                                        <div class="flex items-center gap-2 mt-2">
+                                            <div class="progress-track flex-1"><div class="progress-fill" :style="'width:' + book.progress + '%'"></div></div>
+                                            <span class="text-xs font-medium" x-text="book.percent"></span>
+                                        </div>
+                                        <div class="text-xs text-slate-500 dark:text-slate-400 mt-1"><span x-text="book.meta"></span><template x-if="book.paused"><span> <span class="badge">en pause</span></span></template></div>
+                                        <div x-show="book.started" class="text-xs text-slate-500 dark:text-slate-400" x-text="book.started"></div>
+                                        <ul x-show="book.devices.length" class="mt-2 space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                                            <template x-for="row in book.devices" :key="row.key">
+                                                <li class="grid grid-cols-[1fr_auto] gap-x-2 items-center">
+                                                    <span class="truncate" x-text="row.label"></span><span x-text="row.percent"></span>
+                                                    <div class="progress-track col-span-2" style="height:3px"><div class="progress-fill" :style="'width:' + row.progress + '%'"></div></div>
+                                                </li>
+                                            </template>
+                                        </ul>
+                                    </div>
+                                </template>
+                                <div x-show="!book.reading" class="text-xs text-slate-500 dark:text-slate-400 mt-1" x-text="book.detail"></div>
+                                <!-- Books the hashes did not match: associate them by hand with a library EPUB -->
+                                <template x-if="book.linkable">
+                                    <div class="flex flex-wrap gap-3 mt-2">
+                                        <button type="button" @click="openLink(book)" class="inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200"><i data-lucide="link" class="w-3.5 h-3.5"></i>Associer à un livre</button>
+                                    </div>
+                                </template>
+                                <template x-if="!book.linkable">
+                                    <div class="flex flex-wrap gap-3 mt-2">
+                                        <a class="inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" :href="book.catalog"><i data-lucide="library" class="w-3.5 h-3.5"></i>Voir dans le catalogue</a>
+                                        <a class="inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" :href="book.download"><i data-lucide="download" class="w-3.5 h-3.5"></i>Télécharger</a>
+                                        <template x-if="book.unlink">
+                                            <button type="button" @click="unlink(book)" class="inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200"><i data-lucide="unlink" class="w-3.5 h-3.5"></i>Dissocier</button>
+                                        </template>
+                                    </div>
+                                </template>
+                            </div>
+                        </article>
+                    </template>
+                </div>
+            </section>
+        </template>
+
+        <section x-show="clippings.length">
+            <h2 class="section-title"><i data-lucide="highlighter" class="w-4 h-4"></i>Derniers surlignages <span class="count" x-text="clippingsCount"></span></h2>
+            <div class="grid gap-3 md:grid-cols-2">
+                <template x-for="clip in clippings" :key="clip.key">
+                    <figure class="card p-3 text-sm">
+                        <blockquote class="clip-text" x-text="clip.text"></blockquote>
+                        <p x-show="clip.note" class="mt-2 text-xs italic text-slate-600 dark:text-slate-300" x-text="clip.note"></p>
+                        <figcaption class="mt-2 text-xs text-slate-500 dark:text-slate-400" x-text="clip.caption"></figcaption>
+                    </figure>
+                </template>
+            </div>
         </section>
 
-        <section id="finished-section" class="hidden">
-            <h2 class="section-title"><i data-lucide="check-circle-2" class="w-4 h-4"></i>Terminés <span id="finished-count" class="count"></span></h2>
-            <div id="finished-list" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"></div>
-        </section>
-
-        <section id="dnf-section" class="hidden">
-            <h2 class="section-title"><i data-lucide="circle-slash" class="w-4 h-4"></i>Abandonnés <span id="dnf-count" class="count"></span></h2>
-            <div id="dnf-list" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"></div>
-        </section>
-
-        <section id="clippings-section" class="hidden">
-            <h2 class="section-title"><i data-lucide="highlighter" class="w-4 h-4"></i>Derniers surlignages <span id="clippings-count" class="count"></span></h2>
-            <div id="clippings-list" class="grid gap-3 md:grid-cols-2"></div>
-        </section>
-
-        <p id="empty" class="hidden text-sm text-slate-500 dark:text-slate-400">Aucune progression synchronisée pour ce compte pour l'instant.</p>
+        <p x-show="empty" class="text-sm text-slate-500 dark:text-slate-400">Aucune progression synchronisée pour ce compte pour l'instant.</p>
     </main>
 
-    <dialog id="link-dialog" class="link-dialog">
-        <form id="link-search" class="flex flex-col gap-3" method="dialog">
+    <dialog id="link-dialog" x-ref="linkDialog" class="link-dialog">
+        <form class="flex flex-col gap-3" method="dialog" @submit.prevent="search()">
             <div class="flex items-center justify-between gap-2">
                 <h2 class="text-base font-medium">Associer à un livre du catalogue</h2>
-                <button type="button" id="link-close" class="text-slate-500 hover:text-slate-900 dark:hover:text-slate-200" title="Fermer"><i data-lucide="x" class="w-4 h-4"></i></button>
+                <button type="button" @click="$refs.linkDialog.close()" class="text-slate-500 hover:text-slate-900 dark:hover:text-slate-200" title="Fermer"><i data-lucide="x" class="w-4 h-4"></i></button>
             </div>
-            <p id="link-document" class="text-xs text-slate-500 dark:text-slate-400 break-all"></p>
+            <p id="link-document" class="text-xs text-slate-500 dark:text-slate-400 break-all" x-text="link.label"></p>
             <div class="flex gap-2">
-                <input id="link-query" type="search" placeholder="Titre, auteur…" class="flex-1 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-1.5 text-sm" autocomplete="off"/>
+                <input id="link-query" x-ref="linkQuery" x-model="link.query" type="search" placeholder="Titre, auteur…" class="flex-1 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-1.5 text-sm" autocomplete="off"/>
                 <button type="submit" class="rounded-md bg-slate-700 hover:bg-slate-800 text-white px-3 py-1.5 text-sm">Chercher</button>
             </div>
-            <p id="link-status" class="text-xs text-slate-500 dark:text-slate-400"></p>
-            <ul id="link-results" class="flex flex-col gap-1 max-h-80 overflow-y-auto"></ul>
+            <p id="link-status" class="text-xs text-slate-500 dark:text-slate-400" x-text="link.status"></p>
+            <ul id="link-results" class="flex flex-col gap-1 max-h-80 overflow-y-auto">
+                <template x-for="result in link.results" :key="result.path">
+                    <li>
+                        <button type="button" class="link-result" @click="associate(result.path)">
+                            <span class="block text-sm font-medium" x-text="result.title"></span>
+                            <span class="block text-xs text-slate-500 dark:text-slate-400" x-text="result.detail"></span>
+                        </button>
+                    </li>
+                </template>
+            </ul>
         </form>
     </dialog>
 
-    <div id="tooltip" class="chart-tooltip" role="tooltip" hidden></div>
-    <script src="/static/account.js"></script>
-    <script src="/static/reading.js"></script>
+    <div id="tooltip" x-ref="tooltip" class="chart-tooltip" role="tooltip" hidden :hidden="!tooltip.show" x-text="tooltip.text"
+         :style="'left:' + tooltip.left + 'px;top:' + tooltip.top + 'px'"></div>
 </body>
 </html>
