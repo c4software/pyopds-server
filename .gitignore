@@ -1,4 +1,5 @@
-docker-compose.yml
+# Machine-specific settings (see docker-compose.override.example.yml)
+docker-compose.override.yml
 .DS_Store
 .venv
 koreader_sync.db

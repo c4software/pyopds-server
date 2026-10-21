@@ -1,0 +1,39 @@
+# Optional and machine-specific settings, apart from the versioned docker-compose.yml:
+#
+#   cp docker-compose.override.example.yml docker-compose.override.yml
+#
+# then keep only the blocks you need. Compose reads and merges it on its own; it is
+# not tracked by git, so `git pull` never conflicts with it. In a stack using
+# `include`, list both files:
+#
+#   include:
+#     - path:
+#         - ./opds-server/docker-compose.yml
+#         - ./opds-server/docker-compose.override.yml
+#
+# Check the merge with `docker compose config`.
+# Update: `docker compose pull cops && docker compose up -d cops`.
+
+services:
+  cops:
+    # ── Pin a version instead of following `latest` ─────────────────────
+    # image: ghcr.io/c4software/pyopds-server:2.1.0
+
+    # ── Library elsewhere on the host ───────────────────────────────────
+    # A volume with the same container path replaces the one of the base file.
+    # volumes:
+    #   - /srv/epub:/books
+
+    # ── Behind a reverse proxy: no published port ───────────────────────
+    # ports: !reset []
+
+    # ── Other settings (see the README's environment variables) ─────────
+    # environment:
+    #   - REGISTRATION_DISABLED=true
+    #   - PAGE_SIZE=50
+
+    # ── Example: frontal (~/stacks), the host's common base and a fixed name ──
+    # extends:
+    #   file: ../bases-configuration/base.yml
+    #   service: base
+    # container_name: cops

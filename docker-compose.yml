@@ -1,0 +1,20 @@
+# Generic deployment. Machine-specific settings (paths, names, reverse proxy…) go in a
+# git-ignored docker-compose.override.yml: see docker-compose.override.example.yml.
+services:
+  cops:
+    # Image published by the CI on each release tag (`docker compose pull`);
+    # `docker compose up --build` builds it locally from this checkout instead.
+    image: ghcr.io/c4software/pyopds-server:latest
+    build: .
+    environment:
+      - TZ=Europe/Paris
+      - KOREADER_SYNC_DB_PATH=/config/koreader_sync.db
+      # Custom genres completing genres.toml (ignored while the file does not exist)
+      - GENRES_CONFIG_PATH=/config/genres.toml
+    volumes:
+      # Sync database and custom genres: kept across restarts and image updates
+      - ./config:/config
+      - ./books:/books
+    ports:
+      - "8080:8080"
+    restart: unless-stopped

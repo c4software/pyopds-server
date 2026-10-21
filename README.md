@@ -48,16 +48,19 @@ If you browse your OPDS feed in a web browser, it will display a simple HTML rep
 3. Start the server with Docker Compose:
 
    ```bash
-   docker-compose up --build
+   docker compose up -d          # prebuilt image (see below)
+   docker compose up -d --build  # or built from this checkout
    ```
 
 4. Access the OPDS catalog at: `http://localhost:8080/opds`.
 
-A prebuilt image (amd64, arm64) is also published on each release tag to `ghcr.io/c4software/pyopds-server` (`latest` and the tag version):
+The prebuilt image (amd64, arm64) is also published on each release tag to `ghcr.io/c4software/pyopds-server` (`latest` and the tag version):
 
 ```bash
 docker run -p 8080:8080 -v ./books:/books ghcr.io/c4software/pyopds-server:latest
 ```
+
+Machine-specific settings (library path, pinned version, reverse proxy, extra variables) go in a git-ignored `docker-compose.override.yml`, merged automatically by Compose: start from [`docker-compose.override.example.yml`](docker-compose.override.example.yml). Update with `docker compose pull && docker compose up -d`.
 
 ### Without Docker
 
@@ -98,7 +101,7 @@ The following environment variables can be set:
   "Science-fiction" = ["cyberpunk"]
   ```
 
-For Docker, modify these variables in the `docker-compose.yml` file:
+For Docker, set these variables in `docker-compose.override.yml` (see above):
 
 ```yaml
 services:
