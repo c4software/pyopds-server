@@ -183,6 +183,10 @@
                         <a href="/reading" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center" title="Lecture et statistiques">
                             <i data-lucide="bar-chart-3" class="w-4 h-4"></i>
                         </a>
+                        <!-- Shown when signed in through the sign-in page (OPDS_AUTH) -->
+                        <a id="logout-link" href="/logout" class="hidden text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 items-center" title="Se déconnecter">
+                            <i data-lucide="log-out" class="w-4 h-4"></i>
+                        </a>
                         <a href="/opds/refresh" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center" title="Rafraîchir le cache">
                             <i data-lucide="refresh-cw" class="w-4 h-4"></i>
                         </a>
@@ -820,6 +824,16 @@
                             observer.observe(mosaic);
                         });
                     }
+
+                    // Catalog session opened by the sign-in page: show who is signed in and the logout button
+                    (function() {
+                        const match = document.cookie.match(/(?:^|;\s*)pyopds_user=([^;]*)/);
+                        const logout = document.getElementById('logout-link');
+                        if (!match || !logout) return;
+                        logout.classList.remove('hidden');
+                        logout.classList.add('flex');
+                        logout.title = 'Se déconnecter (' + decodeURIComponent(match[1]) + ')';
+                    })();
 
                     // Header button switching the mosaic on and off, applied without reloading
                     updateMosaicToggle(isMosaicEnabled());

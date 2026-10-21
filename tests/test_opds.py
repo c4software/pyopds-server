@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.parse
 import xml.etree.ElementTree as ET
 import zipfile
 from unittest import mock
@@ -509,12 +510,14 @@ class TestOPDSAuthAndRecommendations(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls._orig_env = {key: os.environ.get(key) for key in ('LIBRARY_DIR', 'PAGE_SIZE', 'OPDS_AUTH')}
+        cls._orig_env = {key: os.environ.get(key) for key in ('LIBRARY_DIR', 'PAGE_SIZE', 'OPDS_AUTH', 'OPDS_SESSION_SECRET')}
         cls.library_dir = tempfile.TemporaryDirectory()
         cls.db_dir = tempfile.TemporaryDirectory()
         os.environ['LIBRARY_DIR'] = cls.library_dir.name
         os.environ['PAGE_SIZE'] = '25'
         os.environ.pop('OPDS_AUTH', None)
+        # Session signing key from the environment: no session.secret file written by the tests
+        os.environ['OPDS_SESSION_SECRET'] = 'test-session-secret'
         books = {
             'dune.epub': ('Dune', 'Frank Herbert', ['Science Fiction']),
             'messiah.epub': ('Dune Messiah', 'Frank Herbert', ['Science Fiction']),
@@ -525,7 +528,8 @@ class TestOPDSAuthAndRecommendations(unittest.TestCase):
         for name, (title, author, subjects) in books.items():
             create_epub(os.path.join(cls.library_dir.name, name), title, author, subjects=subjects)
         for module in ('controllers.opds', 'controllers.sync_storage', 'controllers.koreader_sync',
-                       'controllers.library_index', 'controllers.recommendations', 'controllers.crosspoint_sync'):
+                       'controllers.library_index', 'controllers.recommendations', 'controllers.crosspoint_sync',
+                       'controllers.opds_auth'):
             importlib.reload(importlib.import_module(module))
         importlib.reload(importlib.import_module('routes'))
         cls.server = importlib.reload(importlib.import_module('server'))
@@ -591,7 +595,7 @@ class TestOPDSAuthAndRecommendations(unittest.TestCase):
     def test_catalog_requires_basic_auth_when_enabled(self):
         with mock.patch.dict(os.environ, {'OPDS_AUTH': 'true'}):
             for path in ('/', '/opds', '/opds/books', '/opds/search?q=dune', '/opds/opensearch.xml', '/opds_to_html.xslt',
-                         '/download/dune.epub', '/reading', '/static/reading.js', '/opds/refresh', '/opds/recommendations'):
+                         '/download/dune.epub', '/reading', '/opds/refresh', '/opds/recommendations'):
                 status, headers, _ = self._request('GET', path)
                 self.assertEqual(status, 401, path)
                 self.assertEqual(headers.get('WWW-Authenticate'), 'Basic realm="PyOPDS", charset="UTF-8"')
@@ -603,7 +607,66 @@ class TestOPDSAuthAndRecommendations(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertIn(b'urn:recommendations', body)
             self.assertEqual(self._request('GET', '/download/dune.epub', headers=good)[0], 200)
-            self.assertEqual(self._request('GET', '/static/reading.js', headers=good)[0], 200)
+            # Page assets hold no library data: public, the sign-in page needs them
+            self.assertEqual(self._request('GET', '/static/reading.js')[0], 200)
+
+    def test_browsers_sign_in_with_a_session(self):
+        browser = {'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8'}
+        with mock.patch.dict(os.environ, {'OPDS_AUTH': 'true'}):
+            # Browser navigation: sent to the sign-in page (no Basic pop-up), OPDS clients still get Basic
+            status, headers, _ = self._request('GET', '/opds/books?page=2', headers=browser)
+            self.assertEqual((status, headers.get('Location')), (303, '/login?next=%2Fopds%2Fbooks%3Fpage%3D2'))
+            self.assertNotIn('WWW-Authenticate', headers)
+            status, headers, body = self._request('GET', '/login')
+            self.assertEqual(status, 200)
+            self.assertIn(b'/static/login.js', body)
+
+            self.assertEqual(self._request('POST', '/login', {'username': 'reader', 'password': 'wrong'})[0], 401)
+            # Both cookies are needed: read them with http.client (the helper keeps one header per name)
+            conn = http.client.HTTPConnection('localhost', self.port, timeout=10)
+            conn.request('POST', '/login', body=json.dumps({'username': 'reader', 'password': self.password}),
+                         headers={'Content-Type': 'application/json'})
+            response = conn.getresponse()
+            response.read()
+            self.assertEqual(response.status, 204)
+            set_cookies = response.headers.get_all('Set-Cookie')
+            conn.close()
+            session = next(c for c in set_cookies if c.startswith('pyopds_session='))
+            self.assertIn('HttpOnly', session)
+            self.assertIn('pyopds_user=reader', ' '.join(set_cookies))
+            cookie = {'Cookie': session.split(';')[0]}
+            status, _, body = self._request('GET', '/opds', headers={**browser, **cookie})
+            self.assertEqual(status, 200)
+            self.assertIn(b'urn:recommendations', body)
+            # Tampered session: back to the sign-in page
+            tampered = {'Cookie': session.split(';')[0].replace('pyopds_session=', 'pyopds_session=x')}
+            self.assertEqual(self._request('GET', '/opds', headers={**browser, **tampered})[0], 303)
+
+            # Plain form post (no JavaScript): redirected to `next`, never to another site
+            for target, expected in (('/reading', '/reading'), ('//evil.example', '/opds')):
+                conn = http.client.HTTPConnection('localhost', self.port, timeout=10)
+                form = urllib.parse.urlencode({'username': 'reader', 'password': self.password, 'next': target})
+                conn.request('POST', '/login', body=form, headers={'Content-Type': 'application/x-www-form-urlencoded'})
+                response = conn.getresponse()
+                response.read()
+                self.assertEqual((response.status, response.headers['Location']), (303, expected))
+                conn.close()
+
+            status, headers, _ = self._request('GET', '/logout?next=/reading')
+            self.assertEqual((status, headers.get('Location')), (303, '/login?next=%2Freading'))
+        # Without OPDS_AUTH the sign-in page leads straight to the catalog
+        self.assertEqual(self._request('GET', '/login')[1].get('Location'), '/opds')
+
+    def test_session_cookie_signature_and_expiry(self):
+        opds_auth = importlib.import_module('controllers.opds_auth')
+        value = opds_auth.make_session('réader', now=1000)
+        self.assertEqual(opds_auth.session_user(value, now=2000), 'réader')
+        self.assertIsNone(opds_auth.session_user(value, now=1000 + opds_auth.SESSION_SECONDS + 1))
+        self.assertIsNone(opds_auth.session_user(value[:-1] + ('0' if value[-1] != '0' else '1'), now=2000))
+        self.assertIsNone(opds_auth.session_user('garbage', now=2000))
+        self.assertEqual(opds_auth.safe_next('/opds?x=1'), '/opds?x=1')
+        for unsafe in (None, '', 'https://evil.example', '//evil.example', '/\\evil.example'):
+            self.assertEqual(opds_auth.safe_next(unsafe), '/opds')
 
     def test_covers_and_sync_routes_stay_public(self):
         with mock.patch.dict(os.environ, {'OPDS_AUTH': 'true'}):

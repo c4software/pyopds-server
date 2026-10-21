@@ -8,6 +8,7 @@ import re
 from controllers.crosspoint_sync import CrossPointSyncController
 from controllers.koreader_sync import KoReaderSyncController
 from controllers.opds import OPDSController
+from controllers.opds_auth import AuthController
 from controllers.webui import WebUIController
 
 
@@ -100,7 +101,12 @@ def register_routes(router):
 
     # Web UI: reading statistics / sync page (data fetched from the sync API by the page)
     router.get('/reading', (WebUIController, 'reading_page'), name='webui.reading', auth=opds)
-    router.get(r'/static/(?P<name>[^/]+)', (WebUIController, 'static_file'), name='webui.static', auth=opds)
+    # Page assets only (no library data): public, the sign-in page needs them
+    router.get(r'/static/(?P<name>[^/]+)', (WebUIController, 'static_file'), name='webui.static')
+    # Sign-in page of the browsers (OPDS_AUTH), one session for the catalog and the reading page
+    router.get('/login', (AuthController, 'login_page'), name='auth.login.page')
+    router.post('/login', (AuthController, 'login'), name='auth.login')
+    router.get('/logout', (AuthController, 'logout'), name='auth.logout')
 
     # Sync API, mounted at the root (CrossPoint Sync app: "host:port") and under /koreader/sync (KoReader)
     for prefix in ('', '/koreader/sync'):

@@ -31,6 +31,10 @@ class WebUIController:
         """GET /static/{name}: a web UI asset (scripts, stylesheets) from the static/ folder."""
         self._serve(self.params.get('name') or '')
 
+    def serve_page(self, name: str) -> None:
+        """Serve a page of static/ (e.g. the sign-in page), with versioned asset URLs."""
+        self._serve(name)
+
     def _serve(self, name: str) -> None:
         match = STATIC_NAME_RE.match(name)
         path = os.path.join(STATIC_DIR, name)

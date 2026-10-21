@@ -10,3 +10,4 @@ config/
 
 # Claude Code worktrees
 .claude/
+session.secret

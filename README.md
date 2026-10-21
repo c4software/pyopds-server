@@ -139,11 +139,12 @@ services:
 
 ### Catalog authentication (`OPDS_AUTH`)
 
-With `OPDS_AUTH=true`, the catalog and the web UI ask for HTTP Basic credentials (`WWW-Authenticate: Basic realm="PyOPDS", charset="UTF-8"`): `/`, every `/opds…` feed (search, OpenSearch, refresh included), `/download/…`, `/opds_to_html.xslt`, `/reading` and `/static/…`. The accounts are the **sync accounts** (user name and password created from KoReader, a CrossPoint reader or the CrossPoint Sync app): the server checks the MD5 of the password against the stored sync key. UTF-8 passwords are supported.
+With `OPDS_AUTH=true`, the catalog and the web UI require a sign-in: `/`, every `/opds…` feed (search, OpenSearch, refresh included), `/download/…`, `/opds_to_html.xslt` and `/reading`. The accounts are the **sync accounts** (user name and password created from KoReader, a CrossPoint reader or the CrossPoint Sync app): the server checks the MD5 of the password against the stored sync key. UTF-8 passwords are supported.
 
-Left public on purpose: the whole sync API (KOSync at the root and under `/koreader/sync`, `/api/v1/…`, `/healthz`), which keeps its own `x-auth-user` / `x-auth-key` authentication, `/cover/…` (the CrossPoint Sync app shows covers with plain image requests) and the `/health` monitoring probe. Basic authentication sends the password in clear text: use HTTPS (reverse proxy) when exposing the server.
+- **OPDS clients** (KoReader, CrossPoint readers, the CrossPoint Sync app) use HTTP Basic (`WWW-Authenticate: Basic realm="PyOPDS", charset="UTF-8"`): enter the user name and password in the catalog settings.
+- **Browsers** are sent to a sign-in page (`/login`). One sign-in opens a session (signed `HttpOnly` cookie, 90 days) for the catalog **and** the reading page; the header shows a logout button (`/logout`). The signing key is `OPDS_SESSION_SECRET` when set, otherwise a random key written once to `session.secret` next to the sync database.
 
-In KoReader, enter the user name and password in the catalog settings; browsers show their login prompt.
+Left public on purpose: the page assets `/static/…` (no library data), the whole sync API (KOSync at the root and under `/koreader/sync`, `/api/v1/…`, `/healthz`), which keeps its own `x-auth-user` / `x-auth-key` authentication, `/cover/…` (the CrossPoint Sync app shows covers with plain image requests) and the `/health` monitoring probe. Basic authentication sends the password in clear text: use HTTPS (reverse proxy) when exposing the server.
 
 ### Read Next recommendations
 

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Connexion</title>
+    <script>
+        // Theme first, to avoid a flash (same storage key as the catalog pages)
+        try {
+            if (localStorage.getItem('color-theme') === 'dark' || (!('color-theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                document.documentElement.classList.add('dark');
+            }
+        } catch (e) { /* storage unavailable */ }
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>tailwind.config = { darkMode: 'class' }</script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="/static/reading.css"/>
+</head>
+<body class="bg-slate-50 font-sans dark:bg-slate-900 text-slate-800 dark:text-slate-200 min-h-screen">
+    <div class="bg-white/80 backdrop-blur-sm sticky top-0 z-10 shadow-sm px-4 py-2.5 flex items-center gap-3 dark:bg-slate-800/80 dark:shadow-slate-700">
+        <h1 class="text-lg font-light text-slate-800 truncate dark:text-slate-200">My Library</h1>
+        <div class="flex-grow"></div>
+        <button id="theme-toggle" type="button" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Changer de thème">
+            <i id="theme-toggle-dark-icon" class="hidden w-4 h-4" data-lucide="moon"></i>
+            <i id="theme-toggle-light-icon" class="hidden w-4 h-4" data-lucide="sun"></i>
+        </button>
+    </div>
+
+    <!-- One sign-in for the catalog and the reading page, with the sync account -->
+    <section class="p-4 sm:p-6">
+        <form id="login-form" method="post" action="/login" class="max-w-sm mx-auto mt-6 sm:mt-12 bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 p-5 space-y-4">
+            <div class="flex items-center gap-2 text-slate-700 dark:text-slate-200">
+                <i data-lucide="book-open" class="w-5 h-5"></i>
+                <h2 class="text-base font-medium">Compte de synchronisation</h2>
+            </div>
+            <p class="text-sm text-slate-500 dark:text-slate-400">Identifiants utilisés par KoReader ou CrossPoint pour synchroniser la progression.</p>
+            <input id="login-next" type="hidden" name="next" value="/opds"/>
+            <label class="block">
+                <span class="text-sm text-slate-600 dark:text-slate-300">Utilisateur</span>
+                <input id="login-user" name="username" autocomplete="username" autocapitalize="none" required autofocus class="mt-1 w-full h-9 px-3 text-sm rounded-md border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100"/>
+            </label>
+            <label class="block">
+                <span class="text-sm text-slate-600 dark:text-slate-300">Mot de passe</span>
+                <input id="login-password" name="password" type="password" autocomplete="current-password" required class="mt-1 w-full h-9 px-3 text-sm rounded-md border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100"/>
+            </label>
+            <p id="login-error" class="hidden text-sm text-red-600 dark:text-red-400"></p>
+            <button id="login-submit" type="submit" class="w-full h-9 bg-slate-700 text-white text-sm rounded-md hover:bg-slate-600 dark:bg-slate-600 dark:hover:bg-slate-500">Se connecter</button>
+        </form>
+    </section>
+
+    <script src="/static/account.js"></script>
+    <script src="/static/login.js"></script>
+</body>
+</html>
