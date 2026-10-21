@@ -1,5 +1,6 @@
 """Web UI pages that are not OPDS feeds (reading page, sign-in page) and the static assets of the web UI."""
 import email.utils
+import gzip
 import os
 import re
 
@@ -11,6 +12,19 @@ STATIC_NAME_RE = re.compile(r'^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.(html|js|css
 ASSET_REF_RE = re.compile(r'(/static/([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.(?:js|css|svg)))"')
 # A versioned URL never changes content: cached for a year (the version changes with the file)
 IMMUTABLE = 'public, max-age=31536000, immutable'
+# Scripts and stylesheets sent gzip-compressed when the browser accepts it (polyfill: 1.5 MB -> 0.5 MB),
+# compressed once per file version
+GZIP_TYPES = ('js', 'css', 'svg')
+_gzip_cache: dict[str, tuple[int, bytes]] = {}
+
+
+def _gzipped(path: str, mtime: int, data: bytes) -> bytes:
+    cached = _gzip_cache.get(path)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    compressed = gzip.compress(data, compresslevel=6, mtime=0)
+    _gzip_cache[path] = (mtime, compressed)
+    return compressed
 
 
 def asset_url(name: str) -> str:
@@ -73,8 +87,16 @@ class WebUIController:
         except (OSError, UnicodeDecodeError):
             self._send_error(500, 'Unable to read file')
             return
+        encoding = None
+        if match.group(1) in GZIP_TYPES and 'gzip' in (self.request.headers.get('Accept-Encoding') or ''):
+            data = _gzipped(path, mtime, data)
+            encoding = 'gzip'
         self.request.send_response(200)
         self.request.send_header('Content-Type', CONTENT_TYPES[match.group(1)])
+        if encoding:
+            self.request.send_header('Content-Encoding', encoding)
+        if match.group(1) in GZIP_TYPES:
+            self.request.send_header('Vary', 'Accept-Encoding')
         self.request.send_header('Content-Length', str(len(data)))
         if match.group(1) == 'html':
             self.request.send_header('Cache-Control', 'no-cache')

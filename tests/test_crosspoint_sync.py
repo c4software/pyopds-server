@@ -1,4 +1,5 @@
 """Tests of the CrossPoint Sync API (/api/v1) as used by CrossPoint readers and the CrossPoint Sync app."""
+import gzip
 import hashlib
 import http.client
 import importlib
@@ -420,6 +421,15 @@ class TestCrossPointSync(unittest.TestCase):
         conn.close()
         self.assertEqual(response.status, 304)
         self.assertEqual(response.getheader('Cache-Control'), 'no-cache')
+        # Compressed when the browser accepts gzip
+        conn = http.client.HTTPConnection('localhost', self.port, timeout=5)
+        conn.request('GET', '/static/xslt-polyfill.min.js', headers={'Accept-Encoding': 'gzip, br'})
+        response = conn.getresponse()
+        body = response.read()
+        conn.close()
+        self.assertEqual(response.getheader('Content-Encoding'), 'gzip')
+        with open(os.path.join(PROJECT_ROOT, 'static', 'xslt-polyfill.min.js'), 'rb') as f:
+            self.assertEqual(gzip.decompress(body), f.read())
 
     def test_static_route_refuses_other_files(self):
         for path in ('/static/missing.js', '/static/opds_to_html.xslt', '/static/..%2Fserver.py', '/static/.hidden.js',
