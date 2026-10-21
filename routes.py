@@ -8,6 +8,7 @@ import re
 from controllers.crosspoint_sync import CrossPointSyncController
 from controllers.koreader_sync import KoReaderSyncController
 from controllers.opds import OPDSController
+from controllers.webui import WebUIController
 
 
 class Route:
@@ -89,6 +90,10 @@ def register_routes(router):
     router.get('/opds_to_html.xslt', (OPDSController, 'serve_xslt'), name='opds.xslt')
     router.get(r'/download/.*', (OPDSController, 'download_book'), name='opds.download')
     router.get(r'/cover/.*', (OPDSController, 'download_cover'), name='opds.cover')
+
+    # Web UI: reading statistics / sync page (data fetched from the sync API by the page)
+    router.get('/reading', (WebUIController, 'reading_page'), name='webui.reading')
+    router.get(r'/static/(?P<name>[^/]+)', (WebUIController, 'static_file'), name='webui.static')
 
     # Sync API, mounted at the root (CrossPoint Sync app: "host:port") and under /koreader/sync (KoReader)
     for prefix in ('', '/koreader/sync'):

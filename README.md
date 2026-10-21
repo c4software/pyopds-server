@@ -25,6 +25,7 @@ If you browse your OPDS feed in a web browser, it will display a simple HTML rep
 - **CrossPoint Sync Compatible**: Implements the [crosspoint-sync](https://github.com/crosspoint-reader/crosspoint-sync) extensions (`/api/v1`): the CrossPoint Sync app shows your library, reading statuses, statistics, activity and clippings, and CrossPoint readers sync rich positions and clippings.
 - **Docker Deployment**: Includes a `Dockerfile` and `docker-compose.yml` for easy containerized deployment.
 - **Visual HTML Representation**: Provides a simple HTML view of the OPDS feed for easy browsing in web browsers (using XSLT transformation).
+- **Reading Page**: `/reading` (chart icon in the web UI header) signs in with the sync account and shows the books in progress per device with their last sync, finished and abandoned books, reading time, pages, a reading calendar, recent activity, devices and the latest highlights, with links to the matching books of the catalog.
 
 ## Prerequisites
 
@@ -149,7 +150,13 @@ Errors, status codes and timestamps follow the reference KOSync server.
 - Clippings and bookmarks: `GET /clippings`, `GET|PUT /clippings/{document}`, `GET|PUT /bookmarks/{document}`.
 - Account: `POST /account/password`, `DELETE /account/data`, `DELETE /account`.
 
+`GET /api/v1/progress` also returns `library_path`, the path of the matching library EPUB (or `null`), used by the reading page for its catalog and download links.
+
 External services of crosspoint-sync (Hardcover, Spotify, Readwise... connectors, online cover and description lookups) are not provided: `GET /api/v1/connectors` returns an empty list and the app hides those features.
+
+### Reading page (web UI)
+
+`/reading` is a static page (`static/reading.html`, `reading.js`, `reading.css`) that calls the sync API from the browser with the `x-auth-user` / `x-auth-key` headers: progress (`/api/v1/progress`, and `/api/v1/progress/{document}` for the per-device positions), `/api/v1/stats/summary`, `/api/v1/stats/activity` and `/api/v1/clippings`. The user name and the MD5 of the password are kept in the browser's `localStorage` until you sign out. Reading time, time of day and weekday charts need readers that upload statistics (CrossPoint); with KoReader alone, pages and reading days come from the progress history.
 
 ## Security Consideration
 

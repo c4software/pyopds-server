@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Lecture et statistiques</title>
+    <script>
+        // Theme first, to avoid a flash (same storage key as the catalog pages)
+        try {
+            if (localStorage.getItem('color-theme') === 'dark' || (!('color-theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                document.documentElement.classList.add('dark');
+            }
+        } catch (e) { /* storage unavailable */ }
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>tailwind.config = { darkMode: 'class' }</script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="/static/reading.css"/>
+</head>
+<body class="bg-slate-50 font-sans dark:bg-slate-900 text-slate-800 dark:text-slate-200 min-h-screen">
+    <div class="bg-white/80 backdrop-blur-sm sticky top-0 z-10 shadow-sm px-4 py-2.5 flex items-center gap-3 dark:bg-slate-800/80 dark:shadow-slate-700">
+        <a href="/opds" class="flex items-center text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 gap-1.5 flex-shrink-0" style="text-decoration: none;">
+            <i data-lucide="arrow-left" class="w-4 h-4"></i>
+            <span class="text-sm">Catalogue</span>
+        </a>
+        <h1 class="text-lg font-light text-slate-800 truncate dark:text-slate-200">Lecture</h1>
+        <div class="flex-grow"></div>
+        <div class="flex items-center gap-3 flex-shrink-0">
+            <span id="account-name" class="hidden sm:inline text-sm text-slate-500 dark:text-slate-400"></span>
+            <button id="refresh-button" type="button" class="hidden text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Actualiser">
+                <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+            </button>
+            <button id="logout-button" type="button" class="hidden text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Se déconnecter">
+                <i data-lucide="log-out" class="w-4 h-4"></i>
+            </button>
+            <a href="/opds" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center" title="Accueil">
+                <i data-lucide="home" class="w-4 h-4"></i>
+            </a>
+            <button id="theme-toggle" type="button" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Changer de thème">
+                <i id="theme-toggle-dark-icon" class="hidden w-4 h-4" data-lucide="moon"></i>
+                <i id="theme-toggle-light-icon" class="hidden w-4 h-4" data-lucide="sun"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Sign-in with the sync account (same credentials as KoReader / CrossPoint) -->
+    <section id="login-view" class="hidden p-4 sm:p-6">
+        <form id="login-form" class="max-w-sm mx-auto mt-6 sm:mt-12 bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 p-5 space-y-4">
+            <div class="flex items-center gap-2 text-slate-700 dark:text-slate-200">
+                <i data-lucide="book-open" class="w-5 h-5"></i>
+                <h2 class="text-base font-medium">Compte de synchronisation</h2>
+            </div>
+            <p class="text-sm text-slate-500 dark:text-slate-400">Identifiants utilisés par KoReader ou CrossPoint pour synchroniser la progression.</p>
+            <label class="block">
+                <span class="text-sm text-slate-600 dark:text-slate-300">Utilisateur</span>
+                <input id="login-user" name="username" autocomplete="username" required class="mt-1 w-full h-9 px-3 text-sm rounded-md border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100"/>
+            </label>
+            <label class="block">
+                <span class="text-sm text-slate-600 dark:text-slate-300">Mot de passe</span>
+                <input id="login-password" name="password" type="password" autocomplete="current-password" required class="mt-1 w-full h-9 px-3 text-sm rounded-md border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100"/>
+            </label>
+            <p id="login-error" class="hidden text-sm text-red-600 dark:text-red-400"></p>
+            <button type="submit" class="w-full h-9 bg-slate-700 text-white text-sm rounded-md hover:bg-slate-600 dark:bg-slate-600 dark:hover:bg-slate-500">Se connecter</button>
+        </form>
+    </section>
+
+    <main id="stats-view" class="hidden p-4 sm:p-6 max-w-6xl mx-auto flex-col gap-8">
+        <p id="loading" class="hidden text-sm text-slate-500 dark:text-slate-400">Chargement…</p>
+        <p id="load-error" class="hidden text-sm text-red-600 dark:text-red-400"></p>
+
+        <div id="kpis" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3"></div>
+
+        <section id="activity-section" class="hidden">
+            <h2 class="section-title"><i data-lucide="calendar-days" class="w-4 h-4"></i>Activité de lecture</h2>
+            <div class="card p-4">
+                <div id="heatmap" class="heatmap-scroll"></div>
+                <div class="flex items-center justify-end gap-1 mt-2 text-xs text-slate-500 dark:text-slate-400">
+                    <span>Moins</span>
+                    <span class="heat-cell heat-0"></span><span class="heat-cell heat-1"></span><span class="heat-cell heat-2"></span><span class="heat-cell heat-3"></span><span class="heat-cell heat-4"></span>
+                    <span>Plus</span>
+                </div>
+            </div>
+            <div class="grid gap-3 md:grid-cols-3 mt-3">
+                <div class="card p-4 md:col-span-3"><h3 class="card-title" id="daily-title">30 derniers jours</h3><div id="daily-bars" class="bars"></div></div>
+                <div id="tod-card" class="card p-4 hidden"><h3 class="card-title">Moment de la journée</h3><div id="tod-bars"></div></div>
+                <div id="dow-card" class="card p-4 hidden"><h3 class="card-title">Jour de la semaine</h3><div id="dow-bars"></div></div>
+                <div id="devices-card" class="card p-4 hidden"><h3 class="card-title">Appareils</h3><ul id="devices-list" class="space-y-2 text-sm"></ul></div>
+            </div>
+        </section>
+
+        <section id="reading-section" class="hidden">
+            <h2 class="section-title"><i data-lucide="book-open" class="w-4 h-4"></i>En cours <span id="reading-count" class="count"></span></h2>
+            <div id="reading-list" class="grid gap-3 md:grid-cols-2"></div>
+        </section>
+
+        <section id="finished-section" class="hidden">
+            <h2 class="section-title"><i data-lucide="check-circle-2" class="w-4 h-4"></i>Terminés <span id="finished-count" class="count"></span></h2>
+            <div id="finished-list" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"></div>
+        </section>
+
+        <section id="dnf-section" class="hidden">
+            <h2 class="section-title"><i data-lucide="circle-slash" class="w-4 h-4"></i>Abandonnés <span id="dnf-count" class="count"></span></h2>
+            <div id="dnf-list" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"></div>
+        </section>
+
+        <section id="clippings-section" class="hidden">
+            <h2 class="section-title"><i data-lucide="highlighter" class="w-4 h-4"></i>Derniers surlignages <span id="clippings-count" class="count"></span></h2>
+            <div id="clippings-list" class="grid gap-3 md:grid-cols-2"></div>
+        </section>
+
+        <p id="empty" class="hidden text-sm text-slate-500 dark:text-slate-400">Aucune progression synchronisée pour ce compte pour l'instant.</p>
+    </main>
+
+    <div id="tooltip" class="chart-tooltip" role="tooltip" hidden></div>
+    <script src="/static/reading.js"></script>
+</body>
+</html>

@@ -37,8 +37,9 @@ Le projet suit une architecture de type MVC (Modèle-Vue-Contrôleur) simplifié
     * `reading_activity.py` : Calculs purs des statistiques et de l'activité de lecture.
     * `genres.py` : Normalisation des sujets EPUB (`dc:subject`) en genres pour la navigation « By Genre », selon les règles de `genres.toml`.
     * `library_index.py` : Correspondance entre les hash de documents KoReader et les EPUB de la bibliothèque.
+    * `webui.py` : Pages statiques de l'interface web hors flux OPDS (page « Lecture » `/reading` et ses fichiers `/static/...`).
 * `genres.toml` : Correspondances sujets → genres, sujets ignorés et seuil d'affichage (complétable via `GENRES_CONFIG_PATH`).
-* `static/` : Fichiers statiques (XSLT pour l'affichage navigateur).
+* `static/` : Fichiers statiques (XSLT pour l'affichage navigateur, page `reading.html/js/css` des statistiques qui interroge l'API de synchronisation).
 * `tests/` : Tests unitaires (`unittest`).
 
 ### Ajout de fonctionnalités

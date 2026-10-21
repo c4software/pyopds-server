@@ -170,6 +170,9 @@
                         <a href="/opds" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center" title="Accueil">
                             <i data-lucide="home" class="w-4 h-4"></i>
                         </a>
+                        <a href="/reading" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center" title="Lecture et statistiques">
+                            <i data-lucide="bar-chart-3" class="w-4 h-4"></i>
+                        </a>
                         <a href="/opds/refresh" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center" title="Rafraîchir le cache">
                             <i data-lucide="refresh-cw" class="w-4 h-4"></i>
                         </a>

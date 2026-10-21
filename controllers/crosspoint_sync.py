@@ -329,9 +329,11 @@ class CrossPointSyncController(SyncControllerBase):
             title, author, filename, cover_url = row['title'], row['author'], row['filename'], row['cover_url']
             page_count = row['page_count']
             genres: list[str] = []
+            library_path = None
             library_book = self._library_book([row['document'], *document_aliases], filename)
             if library_book:
                 genres = library_book['genres']
+                library_path = library_book['relative_path']
                 title = title or library_book['title']
                 author = author or library_book['author']
                 filename = filename or library_book['filename']
@@ -369,6 +371,8 @@ class CrossPointSyncController(SyncControllerBase):
                 'device': row['device'],
                 'timestamp': row['updated_at'],
                 'aliases': document_aliases,
+                # Path of the matching library EPUB (relative to LIBRARY_DIR), for the web UI's catalog links
+                'library_path': library_path,
             })
         self._send_json_response({'items': items})
 

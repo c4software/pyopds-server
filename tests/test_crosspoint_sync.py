@@ -222,6 +222,33 @@ class TestCrossPointSync(unittest.TestCase):
         self.assertEqual(book['filename'], 'Le Rouge et le Noir.epub')
         self.assertEqual(book['genres'], ['Roman historique'])
         self.assertEqual(book['status'], 'reading')
+        self.assertEqual(book['library_path'], 'Le Rouge et le Noir.epub')
+        self.put_progress(user, 'e' * 32, 0.2, device_id='koreader')
+        self.assertIsNone(self.books(user)['e' * 32]['library_path'])
+
+    # ------------------------------------------------------------------ web UI
+
+    def raw_get(self, path):
+        conn = http.client.HTTPConnection('localhost', self.port, timeout=5)
+        conn.request('GET', path)
+        response = conn.getresponse()
+        body = response.read()
+        conn.close()
+        return response.status, response.getheader('Content-Type'), body
+
+    def test_reading_page_and_assets(self):
+        status, content_type, body = self.raw_get('/reading')
+        self.assertEqual((status, content_type), (200, 'text/html; charset=utf-8'))
+        self.assertIn(b'/static/reading.js', body)
+        status, content_type, _ = self.raw_get('/static/reading.js')
+        self.assertEqual((status, content_type), (200, 'text/javascript; charset=utf-8'))
+        status, content_type, _ = self.raw_get('/static/reading.css')
+        self.assertEqual((status, content_type), (200, 'text/css; charset=utf-8'))
+
+    def test_static_route_refuses_other_files(self):
+        for path in ('/static/missing.js', '/static/opds_to_html.xslt', '/static/..%2Fserver.py', '/static/.hidden.js'):
+            status, _, _ = self.raw_get(path)
+            self.assertEqual(status, 404, path)
 
     def test_print_pages_estimated_from_library_epub(self):
         user = self.create_user('pages')
