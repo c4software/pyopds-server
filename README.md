@@ -82,7 +82,14 @@ The following environment variables can be set:
 - **LIBRARY_DIR**: Path to the directory containing EPUB files (default: `books`).
 - **KOREADER_SYNC_DB_PATH**: Path to the SQLite database file used by the KoReader sync helper (default: `koreader_sync.db`).
 - **REGISTRATION_DISABLED**: Set to `true` to refuse new sync accounts (default: registration open).
-- **GENRES_CONFIG_PATH**: Path to a custom genre file replacing [`genres.toml`](genres.toml): subject-to-genre aliases, ignored subjects and minimum number of books per genre. Copy the default file as a starting point (for example into the mounted `config/` folder) and restart the server after editing it.
+- **GENRES_CONFIG_PATH**: Path to a custom genre file completing [`genres.toml`](genres.toml), with the same format: its subject-to-genre aliases and ignored subjects are added to the default ones (and win over them), and its `min_books` overrides the default threshold. Restart the server after editing it. Example (for instance in the mounted `config/` folder):
+
+  ```toml
+  ignored = ["my series", "release team"]
+
+  [aliases]
+  "Science-fiction" = ["cyberpunk"]
+  ```
 
 For Docker, modify these variables in the `docker-compose.yml` file:
 

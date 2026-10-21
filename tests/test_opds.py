@@ -351,18 +351,26 @@ class TestGenres(unittest.TestCase):
                 [('imaginaire', 'Imaginaire'), ('polar', 'Polar')],
             )
 
+            default = genres.load_genre_config(genres.DEFAULT_GENRES_CONFIG_PATH)
             genres.get_genre_config.cache_clear()
             try:
                 with mock.patch.dict(os.environ, {'GENRES_CONFIG_PATH': path}):
-                    self.assertEqual(genres.get_genre_config(), config)
+                    merged = genres.get_genre_config()
+                # The custom file completes the default rules and wins over them
+                self.assertEqual(merged.min_books, 5)
+                self.assertEqual(
+                    genres.normalize_genres(['sf', 'Polar', 'divers', 'Fiction'], config=merged),
+                    [('imaginaire', 'Imaginaire'), ('policier', 'Policier')],
+                )
+                self.assertIn('policier', merged.aliases)
+                self.assertNotIn('fantasy', merged.ignored)
                 genres.get_genre_config.cache_clear()
                 with open(path, 'w', encoding='utf-8') as f:
                     f.write('min_books = "trois"\n')
                 with mock.patch.dict(os.environ, {'GENRES_CONFIG_PATH': path}), \
                         contextlib.redirect_stdout(io.StringIO()):
                     # Invalid custom file: the default rules still apply
-                    self.assertEqual(genres.get_genre_config(),
-                                     genres.load_genre_config(genres.DEFAULT_GENRES_CONFIG_PATH))
+                    self.assertEqual(genres.get_genre_config(), default)
             finally:
                 genres.get_genre_config.cache_clear()
 

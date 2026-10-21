@@ -1,8 +1,10 @@
 # Genre navigation ("By Genre") built from the EPUB subjects (dc:subject).
 #
-# To customize it, copy this file (for example to config/genres.toml) and point
-# the GENRES_CONFIG_PATH environment variable to the copy; it then replaces this
-# file entirely. Restart the server to apply changes.
+# To customize it, write your own rules in another file (for example
+# config/genres.toml) and point the GENRES_CONFIG_PATH environment variable to it.
+# That file completes this one, with the same format: its `min_books` overrides
+# the value below, its `ignored` subjects and `[aliases]` are added and win over
+# the rules below. Restart the server to apply changes.
 #
 # Subjects are compared without case, accents or punctuation:
 # "Science fiction", "science-fiction" and "SCIENCE FICTION" are the same subject.

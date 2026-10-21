@@ -1,7 +1,7 @@
 """Normalize EPUB subjects (dc:subject) into browsable genres.
 
 The correspondence between subjects and genres is read from a TOML file:
-`genres.toml` at the project root, or the file named by GENRES_CONFIG_PATH.
+`genres.toml` at the project root, completed by the file named by GENRES_CONFIG_PATH.
 """
 import functools
 import os
@@ -34,13 +34,18 @@ class GenreConfig:
     ignored: frozenset[str] = frozenset()
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'GenreConfig':
+    def from_dict(cls, data: dict, base: 'GenreConfig | None' = None) -> 'GenreConfig':
         """Build the rules from parsed TOML (`min_books`, `ignored`, `[aliases]` genre = [subjects]).
+
+        With `base`, the TOML completes those rules instead of replacing them:
+        `min_books` overrides the base value, and subjects listed in `ignored` or
+        `[aliases]` take precedence over the way the base handled them.
 
         Raises:
             ValueError: When a value has the wrong type.
         """
-        min_books = data.get('min_books', 3)
+        base = base or cls()
+        min_books = data.get('min_books', base.min_books)
         ignored = data.get('ignored', [])
         aliases = data.get('aliases', {})
         if isinstance(min_books, bool) or not isinstance(min_books, int) or min_books < 1:
@@ -57,37 +62,42 @@ class GenreConfig:
             for subject in [display, *subjects]:
                 if key := genre_key(subject):
                     alias_keys[key] = display
-        return cls(min_books, alias_keys, frozenset(filter(None, map(genre_key, ignored))))
+        ignored_keys = frozenset(filter(None, map(genre_key, ignored)))
+        aliases_with_base = {k: v for k, v in base.aliases.items() if k not in ignored_keys} | alias_keys
+        return cls(min_books, aliases_with_base, (base.ignored - alias_keys.keys()) | ignored_keys)
 
 
-def load_genre_config(path: str | os.PathLike) -> GenreConfig:
-    """Read the genre rules from a TOML file.
+def load_genre_config(path: str | os.PathLike, base: GenreConfig | None = None) -> GenreConfig:
+    """Read the genre rules from a TOML file, completing `base` when given.
 
     Raises:
         OSError: When the file cannot be read.
         tomllib.TOMLDecodeError, ValueError: When the file is invalid.
     """
     with open(path, 'rb') as f:
-        return GenreConfig.from_dict(tomllib.load(f))
+        return GenreConfig.from_dict(tomllib.load(f), base)
 
 
 @functools.cache
 def get_genre_config() -> GenreConfig:
-    """Genre rules of the server, loaded once from GENRES_CONFIG_PATH or the default file.
+    """Genre rules of the server, loaded once: the default file completed by GENRES_CONFIG_PATH.
 
-    An unreadable or invalid custom file falls back to the default rules
-    instead of preventing the catalog from working.
+    An unreadable or invalid file is skipped (default rules, or none) instead
+    of preventing the catalog from working.
     """
-    path = os.environ.get('GENRES_CONFIG_PATH') or DEFAULT_GENRES_CONFIG_PATH
     try:
-        return load_genre_config(path)
+        config = load_genre_config(DEFAULT_GENRES_CONFIG_PATH)
     except (OSError, ValueError) as e:  # tomllib.TOMLDecodeError is a ValueError
-        print(f"Invalid genre configuration {path}: {e}")
-    try:
-        return load_genre_config(DEFAULT_GENRES_CONFIG_PATH)
-    except (OSError, ValueError) as e:
         print(f"Invalid default genre configuration {DEFAULT_GENRES_CONFIG_PATH}: {e}")
-        return GenreConfig()
+        config = GenreConfig()
+    path = os.environ.get('GENRES_CONFIG_PATH')
+    if not path:
+        return config
+    try:
+        return load_genre_config(path, config)
+    except (OSError, ValueError) as e:
+        print(f"Invalid genre configuration {path}: {e}")
+        return config
 
 
 def normalize_genres(subjects: list[str], series: str | None = None,
