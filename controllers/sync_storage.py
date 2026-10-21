@@ -36,6 +36,10 @@ DOCUMENT_COLUMNS = {
     'page_count': 'INTEGER',
     # Library EPUB (relative to LIBRARY_DIR) chosen by hand for a document the hashes do not match
     'library_path': 'TEXT',
+    # Sent by CrossPoint readers with their progress (metadata of the EPUB on the device)
+    'series': 'TEXT',
+    'series_index': 'REAL',
+    'isbn': 'TEXT',
     'meta_manual': 'INTEGER NOT NULL DEFAULT 0',
     'updated_at': 'INTEGER NOT NULL DEFAULT 0',
 }
@@ -397,14 +401,20 @@ class SyncStorage:
     def _upsert_metadata(conn: sqlite3.Connection, user: str, document: str, metadata: dict, now: int) -> None:
         conn.execute(
             """
-            INSERT INTO documents (user, document, title, author, filename, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO documents (user, document, title, author, filename, series, series_index, isbn, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (user, document) DO UPDATE SET
                 title = CASE WHEN documents.meta_manual THEN documents.title ELSE COALESCE(excluded.title, documents.title) END,
                 author = CASE WHEN documents.meta_manual THEN documents.author ELSE COALESCE(excluded.author, documents.author) END,
                 filename = COALESCE(excluded.filename, documents.filename),
+                series = COALESCE(excluded.series, documents.series),
+                series_index = COALESCE(excluded.series_index, CASE WHEN excluded.series IS NULL OR excluded.series = documents.series
+                                                                    THEN documents.series_index END),
+                isbn = COALESCE(excluded.isbn, documents.isbn),
                 updated_at = excluded.updated_at
             """,
-            (user, document, metadata.get('title'), metadata.get('authors'), metadata.get('filename'), now),
+            (user, document, metadata.get('title'), metadata.get('authors'), metadata.get('filename'),
+             metadata.get('series'), metadata.get('series_index'), metadata.get('isbn'), now),
         )
 
     def _write_progress(self, conn: sqlite3.Connection, user: str, record: dict, adopt_twin: bool, now: int) -> str:
@@ -498,6 +508,7 @@ class SyncStorage:
                 f"""
                 SELECT p.document, p.device_id, p.device, p.percentage, p.progress, p.position, p.updated_at,
                        d.title, d.author, d.filename, d.cover_url, d.page_count, d.library_path, d.status_at, d.pause_reason,
+                       d.series, d.series_index,
                        COALESCE(d.status, CASE WHEN p.percentage >= {FINISHED_PERCENTAGE} OR {completed_sql('p.user', 'p.document')}
                                                THEN 'finished' ELSE 'reading' END) AS status
                 FROM progress p

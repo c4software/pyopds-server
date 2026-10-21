@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.parse
 import zipfile
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -39,6 +40,35 @@ def create_novel_epub(path, chapter_chars, spine=True):
                         f'<style>p {{ margin: 0 }}</style></head><body>{paragraphs}</body></html>')
 
 
+def create_series_epub(path, title, series, index, epub3=False, description=None, rating=None, date=None, cover=False):
+    """EPUB of a series volume: calibre:series metadata (EPUB 2 style) or an EPUB 3 collection."""
+    if epub3:
+        series_meta = (f'<meta property="belongs-to-collection" id="c01">{series}</meta>'
+                       '<meta refines="#c01" property="collection-type">series</meta>'
+                       f'<meta refines="#c01" property="group-position">{index}</meta>')
+    else:
+        series_meta = f'<meta name="calibre:series" content="{series}"/><meta name="calibre:series_index" content="{index}"/>'
+    if rating is not None:
+        series_meta += f'<meta name="calibre:rating" content="{rating}"/>'
+    if cover:
+        series_meta += '<meta name="cover" content="cover-img"/>'
+    extra = f'<dc:description>{description}</dc:description>' if description else ''
+    extra += f'<dc:date>{date}</dc:date>' if date else ''
+    manifest = '<item id="cover-img" href="cover.jpg" media-type="image/jpeg"/>' if cover else ''
+    with zipfile.ZipFile(path, 'w') as zf:
+        zf.writestr('mimetype', 'application/epub+zip')
+        zf.writestr('META-INF/container.xml', '<?xml version="1.0"?><container version="1.0" '
+                    'xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles>'
+                    '<rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>'
+                    '</rootfiles></container>')
+        zf.writestr('content.opf', '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0">'
+                    f'<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>{title}</dc:title>'
+                    f'<dc:creator>Glen Cook</dc:creator>{extra}{series_meta}</metadata>'
+                    f'<manifest>{manifest}</manifest><spine/></package>')
+        if cover:
+            zf.writestr('cover.jpg', b'\xff\xd8\xff\xe0fake-jpeg')
+
+
 class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     allow_reuse_address = True
 
@@ -58,6 +88,20 @@ class TestCrossPointSync(unittest.TestCase):
         create_epub(cls.book_path, 'Le Rouge et le Noir', 'Stendhal', date='1830-11-01', subjects=['romans historiques', 'lang:fr'])
         cls.novel_path = os.path.join(cls.library_dir.name, 'Roman.epub')
         create_novel_epub(cls.novel_path, [9000, 9000])
+        series_dir = os.path.join(cls.library_dir.name, 'Compagnie noire')
+        os.makedirs(series_dir)
+        cls.series_paths = {
+            1: os.path.join(series_dir, 'Tome 1.epub'),
+            1.5: os.path.join(series_dir, 'Nouvelle.epub'),
+            2: os.path.join(series_dir, 'Tome 2.epub'),
+            3: os.path.join(series_dir, 'Tome 3.epub'),
+        }
+        create_series_epub(cls.series_paths[1], 'La Compagnie noire', 'La Compagnie noire', '1.0', rating='8.0', date='1984-05-01',
+                           description='&lt;div&gt;&lt;p&gt;Une compagnie de &lt;b&gt;mercenaires&lt;/b&gt;&lt;br/&gt;au service'
+                                       ' de la Dame.&lt;/p&gt;&lt;p&gt;Second   paragraphe &amp;amp; fin.&lt;/p&gt;&lt;/div&gt;')
+        create_series_epub(cls.series_paths[1.5], 'Interlude', 'La Compagnie noire', '1.5')
+        create_series_epub(cls.series_paths[2], 'Le Château noir', 'la compagnie  NOIRE', 2, epub3=True, date='1984', cover=True)
+        create_series_epub(cls.series_paths[3], 'La Rose blanche', 'La Compagnie Noire', 3, rating=0)
 
         for module in ('controllers.opds', 'controllers.sync_storage', 'controllers.koreader_sync',
                        'controllers.library_index', 'controllers.reading_activity', 'controllers.crosspoint_sync'):
@@ -245,6 +289,100 @@ class TestCrossPointSync(unittest.TestCase):
         self.assertEqual(status, 200)
         book = self.books(user)[document]
         self.assertEqual((book['library_path'], book['library_linked']), (None, False))
+
+    def test_series_rating_year_and_description_from_library_epub(self):
+        user = self.create_user('series')
+        first = self.library_index.koreader_partial_md5(self.series_paths[1])
+        third = self.library_index.koreader_partial_md5(self.series_paths[3])
+        self.put_progress(user, first, 0.95, device_id='koreader')
+        self.put_progress(user, third, 0.1, device_id='koreader')
+        books = self.books(user)
+        book = books[first]
+        self.assertEqual((book['series'], book['series_position']), ('La Compagnie noire', 1))
+        self.assertEqual((book['release_year'], book['rating']), (1984, 4.0))
+        self.assertIsInstance(book['rating'], float)
+        self.assertEqual((book['moods'], book['content_warnings'], book['hardcover_slug']), ([], [], None))
+        # Calibre rating 0 means "not rated"
+        self.assertEqual((books[third]['series_position'], books[third]['rating'], books[third]['release_year']), (3, None, None))
+
+        status, data = self.request('GET', f'/api/v1/documents/{first}/about', user=user)
+        self.assertEqual(status, 200)
+        self.assertEqual(data, {'description': 'Une compagnie de mercenaires\nau service de la Dame.\n\nSecond paragraphe & fin.'})
+        status, data = self.request('GET', f"/api/v1/documents/{'7' * 32}/about", user=user)
+        self.assertEqual((status, data), (200, {'description': None}))
+
+        details = self.library_index.LibraryIndex.get_instance().details(self.series_paths[2])
+        self.assertEqual((details['series'], details['series_index'], details['year']), ('la compagnie  NOIRE', 2, 1984))
+        self.assertIsNone(details['description'])
+
+    def test_next_in_series_from_library(self):
+        user = self.create_user('nextbook')
+        first = self.library_index.koreader_partial_md5(self.series_paths[1])
+        status, data = self.request('GET', f'/api/v1/documents/{first}/next', user=user)
+        self.assertEqual(status, 200)
+        # The novella 1.5 is skipped for the next whole-numbered volume; series names compared normalized
+        self.assertEqual(data, {
+            'series': 'La Compagnie noire',
+            'next': {
+                'position': 2, 'title': 'Le Château noir', 'author': 'Glen Cook', 'year': 1984, 'slug': None,
+                'cover': 'http://books.example:8080/cover/Compagnie%20noire/Tome%202.epub',
+            },
+        })
+        # The cover URL serves the image
+        conn = http.client.HTTPConnection('localhost', self.port, timeout=5)
+        conn.request('GET', '/cover/Compagnie%20noire/Tome%202.epub')
+        response = conn.getresponse()
+        response.read()
+        conn.close()
+        self.assertEqual(response.status, 200)
+
+        second = self.library_index.koreader_partial_md5(self.series_paths[2])
+        data = self.request('GET', f'/api/v1/documents/{second}/next', user=user)[1]
+        self.assertEqual((data['series'], data['next']['position'], data['next']['title'], data['next']['cover']),
+                         ('la compagnie  NOIRE', 3, 'La Rose blanche', None))
+        last = self.library_index.koreader_partial_md5(self.series_paths[3])
+        self.assertEqual(self.request('GET', f'/api/v1/documents/{last}/next', user=user)[1],
+                         {'series': 'La Compagnie Noire', 'next': None})
+        # Not in a series
+        rouge = self.library_index.koreader_partial_md5(self.book_path)
+        self.assertEqual(self.request('GET', f'/api/v1/documents/{rouge}/next', user=user)[1], {'next': None})
+
+        # "Find it in your catalogs" searches the title in the OPDS catalog
+        conn = http.client.HTTPConnection('localhost', self.port, timeout=5)
+        conn.request('GET', '/opds/search?q=' + urllib.parse.quote('Le Château noir'))
+        response = conn.getresponse()
+        feed = response.read().decode('utf-8')
+        conn.close()
+        self.assertEqual(response.status, 200)
+        self.assertIn('Le Château noir', feed)
+        self.assertIn('/download/Compagnie%20noire/Tome%202.epub', feed)
+
+    def test_series_sent_by_firmware(self):
+        user = self.create_user('fwseries')
+        document = '6' * 32
+        self.put_progress(user, document, 0.5, metadata={
+            'filename': 'Autre.epub', 'title': 'Le Château noir', 'authors': 'Glen Cook',
+            'series': 'La Compagnie Noire', 'series_index': 2.0, 'isbn': '9782841720000'})
+        book = self.books(user)[document]
+        self.assertEqual((book['series'], book['series_position'], book['library_path']), ('La Compagnie Noire', 2, None))
+        self.assertIsInstance(book['series_position'], int)
+        stored = self.koreader_sync.SyncControllerBase._sync_storage_instance.get_document(user, document)
+        self.assertEqual(stored['isbn'], '9782841720000')
+
+        # A later upload without these fields keeps them
+        self.put_progress(user, document, 0.6, metadata={'filename': 'Autre.epub'})
+        self.put_progress(user, document, 0.7, metadata={'series': 'La Compagnie Noire', 'series_index': 'x'})
+        book = self.books(user)[document]
+        self.assertEqual((book['series'], book['series_position']), ('La Compagnie Noire', 2))
+
+        # The next volume is looked up in the library from the reader's series
+        data = self.request('GET', f'/api/v1/documents/{document}/next', user=user)[1]
+        self.assertEqual((data['series'], data['next']['position'], data['next']['title']), ('La Compagnie Noire', 3, 'La Rose blanche'))
+
+        self.put_progress(user, document, 0.8, metadata={'series': 'Autre série', 'series_index': 1.5})
+        book = self.books(user)[document]
+        self.assertEqual((book['series'], book['series_position']), ('Autre série', 1.5))
+        self.assertEqual(self.request('GET', f'/api/v1/documents/{document}/next', user=user)[1], {'series': 'Autre série', 'next': None})
 
     # ------------------------------------------------------------------ web UI
 

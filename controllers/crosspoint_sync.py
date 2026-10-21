@@ -3,7 +3,9 @@
 Wire format follows crosspoint-sync (https://github.com/crosspoint-reader/crosspoint-sync).
 External services (Hardcover, Spotify, Readwise... connectors, online cover lookup) are not
 provided: those endpoints answer with empty results, which the app handles by hiding the feature.
-Book details missing from the sync data are taken from the OPDS library when the hash matches.
+Book details missing from the sync data are taken from the OPDS library when the hash matches:
+title, author, cover, print pages, genres, series, year, rating, description (/about) and the
+next book of the series found in the library (/next).
 """
 import json
 import math
@@ -21,6 +23,7 @@ from controllers.koreader_sync import (
     utf8_length,
 )
 from controllers.library_index import LibraryIndex
+from controllers.opds import LIBRARY_DIR
 from controllers.reading_activity import (
     HISTORY_BYTES,
     combine_book_stats,
@@ -72,6 +75,13 @@ def js_number(value: str | None, default: float) -> float:
         return float(value)
     except ValueError:
         return math.nan
+
+
+def json_number(value: float | int | None) -> int | float | None:
+    """A stored number as JSON: an int when whole (1.0 -> 1), None stays None."""
+    if value is None:
+        return None
+    return int(value) if float(value).is_integer() else value
 
 
 def is_count(value: object) -> bool:
@@ -330,6 +340,9 @@ class CrossPointSyncController(SyncControllerBase):
             page_count = row['page_count']
             genres: list[str] = []
             library_path = None
+            # Series sent by the reader (CrossPoint), replaced by the library EPUB's when it has one
+            series, series_position = row['series'], json_number(row['series_index'])
+            release_year = rating = None
             library_book = self._library_book([row['document'], *document_aliases], filename, row['library_path'])
             if library_book:
                 genres = library_book['genres']
@@ -339,6 +352,9 @@ class CrossPointSyncController(SyncControllerBase):
                 filename = filename or library_book['filename']
                 cover_url = cover_url or library_book['cover_url']
                 page_count = page_count or library_book['page_count']
+                if library_book['series']:
+                    series, series_position = library_book['series'], library_book['series_index']
+                release_year, rating = library_book['year'], library_book['rating']
             position = None
             if row['position']:
                 try:
@@ -359,10 +375,10 @@ class CrossPointSyncController(SyncControllerBase):
                 'moods': [],
                 'genres': genres,
                 'content_warnings': [],
-                'rating': None,
-                'series': None,
-                'series_position': None,
-                'release_year': None,
+                'rating': rating,
+                'series': series,
+                'series_position': series_position,
+                'release_year': release_year,
                 'percentage': row['percentage'],
                 'progress': row['progress'],
                 'page': (position or {}).get('page'),
@@ -596,15 +612,63 @@ class CrossPointSyncController(SyncControllerBase):
             })
         self._send_json_response({'items': items})
 
+    def _document_library_book(self, user: str, document: str) -> tuple[dict, dict | None]:
+        """Stored row of a document (after alias resolution) and its library EPUB details, if any."""
+        row = self.sync_storage.get_document(user, document) or {}
+        canonical = self.sync_storage.resolve_document(user, document)
+        return row, self._library_book([canonical, document], row.get('filename'), row.get('library_path'))
+
     def document_about(self) -> None:
-        """GET /api/v1/documents/{document}/about: no online description source."""
-        if self._require_user() and self._document_param():
-            self._send_json_response({'description': None})
+        """GET /api/v1/documents/{document}/about: the library EPUB's description (plain text), else null."""
+        user = self._require_user()
+        if not user:
+            return
+        document = self._document_param()
+        if not document:
+            return
+        _, library_book = self._document_library_book(user, document)
+        self._send_json_response({'description': library_book['description'] if library_book else None})
 
     def document_next(self) -> None:
-        """GET /api/v1/documents/{document}/next: no series lookup (needs Hardcover)."""
-        if self._require_user() and self._document_param():
+        """GET /api/v1/documents/{document}/next: the next book of the series found in the library.
+
+        The series comes from the library EPUB, else from the reader's metadata. Answers
+        `{series, next: {position, title, author, year, slug, cover}}`, `next` null when the
+        library holds no later book, and `{next: null}` for a book outside any known series.
+        """
+        user = self._require_user()
+        if not user:
+            return
+        document = self._document_param()
+        if not document:
+            return
+        row, library_book = self._document_library_book(user, document)
+        series, position, current = row.get('series'), json_number(row.get('series_index')), None
+        if library_book and library_book['series']:
+            series, position = library_book['series'], library_book['series_index']
+            current = os.path.join(LIBRARY_DIR, library_book['relative_path'])
+        if not series or position is None:
             self._send_json_response({'next': None})
+            return
+        try:
+            found = self.library.next_in_series(series, position, current)
+            details = self.library.details(found[1]) if found else None
+        except OSError:
+            found = details = None
+        if not found or details is None:
+            self._send_json_response({'series': series, 'next': None})
+            return
+        self._send_json_response({
+            'series': series,
+            'next': {
+                'position': found[0],
+                'title': details['title'] or os.path.splitext(os.path.basename(found[1]))[0],
+                'author': details['author'],
+                'year': details['year'],
+                'slug': None,
+                'cover': f"{self._base_url()}/cover/{quote(details['relative_path'])}" if details['has_cover'] else None,
+            },
+        })
 
     def document_matches(self) -> None:
         """GET /api/v1/documents/{document}/matches: no connected services."""

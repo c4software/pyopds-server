@@ -73,27 +73,89 @@ class BookMetadata:
         Returns:
             tuple: (title, author, publication_date, genres), (None, None, None, []) if not found
         """
+        info = BookMetadata.extract_epub_info(epub_path)
+        if info is None:
+            return None, None, None, []
+        return info['title'], info['author'], info['date'], info['genres']
+
+    @staticmethod
+    def extract_epub_info(epub_path: str) -> dict | None:
+        """Extract every OPF metadata used by the server in a single read (see `opf_metadata`).
+
+        Returns:
+            dict: the metadata, or None when the EPUB or its OPF cannot be read
+        """
         try:
             with zipfile.ZipFile(epub_path) as zf:
                 opf_root, _ = BookMetadata._parse_opf_from_epub(zf)
-                if opf_root is None:
-                    return None, None, None, []
-
-                ns_dc = {'dc': 'http://purl.org/dc/elements/1.1/'}
-                title_elem = opf_root.find(".//dc:title", ns_dc)
-                title = title_elem.text if title_elem is not None else None
-                author_elem = opf_root.find(".//dc:creator", ns_dc)
-                author = author_elem.text if author_elem is not None else None
-                date_elem = opf_root.find(".//dc:date", ns_dc)
-                publication_date = date_elem.text if date_elem is not None else None
-                subjects = [e.text for e in opf_root.findall(".//dc:subject", ns_dc) if e.text]
-                series_elem = opf_root.find(".//opf:meta[@name='calibre:series']", {'opf': 'http://www.idpf.org/2007/opf'})
-                series = series_elem.get('content') if series_elem is not None else None
-                genres = [name for _, name in normalize_genres(subjects, series)]
-
-                return title, author, publication_date, genres
+                return BookMetadata.opf_metadata(opf_root) if opf_root is not None else None
         except Exception:
-            return None, None, None, []
+            return None
+
+    @staticmethod
+    def opf_metadata(opf_root: ET.Element) -> dict:
+        """Metadata of a parsed OPF package.
+
+        Keys: title, author, date (raw dc:date), genres (normalized dc:subject), series and
+        series_index (calibre:series / calibre:series_index, else the EPUB 3 `belongs-to-collection`
+        of collection-type "series" with its group-position), description (raw dc:description,
+        often escaped HTML) and rating (calibre:rating, 0-10).
+        """
+        ns_dc = {'dc': 'http://purl.org/dc/elements/1.1/'}
+
+        def dc_text(name: str) -> str | None:
+            elem = opf_root.find(f'.//dc:{name}', ns_dc)
+            if elem is None:
+                return None
+            return ''.join(elem.itertext()) or None
+
+        calibre: dict[str, str] = {}
+        collections: dict[str, dict] = {}
+        for elem in opf_root.iter():
+            if not isinstance(elem.tag, str) or elem.tag.rpartition('}')[2] != 'meta':
+                continue
+            name = (elem.get('name') or '').lower()
+            if name.startswith('calibre:'):
+                calibre.setdefault(name, (elem.get('content') or '').strip())
+                continue
+            prop = (elem.get('property') or '').lower()
+            text = (elem.text or '').strip()
+            if prop == 'belongs-to-collection' and elem.get('id'):
+                collections.setdefault(elem.get('id'), {})['title'] = text
+            elif prop in ('collection-type', 'group-position') and elem.get('refines'):
+                collections.setdefault(elem.get('refines').lstrip('#'), {})[prop] = text
+
+        series = calibre.get('calibre:series') or None
+        series_index = BookMetadata._number(calibre.get('calibre:series_index')) if series else None
+        if not series:
+            for collection in collections.values():
+                if collection.get('title') and collection.get('collection-type', '').lower() == 'series':
+                    series = collection['title']
+                    series_index = BookMetadata._number(collection.get('group-position'))
+                    break
+
+        subjects = [e.text for e in opf_root.findall('.//dc:subject', ns_dc) if e.text]
+        return {
+            'title': dc_text('title'),
+            'author': dc_text('creator'),
+            'date': dc_text('date'),
+            'genres': [name for _, name in normalize_genres(subjects, series)],
+            'series': series,
+            'series_index': series_index,
+            'description': dc_text('description'),
+            'rating': BookMetadata._number(calibre.get('calibre:rating')),
+        }
+
+    @staticmethod
+    def _number(value: str | None) -> int | float | None:
+        """Finite number of a metadata value (an int when whole), None when missing or invalid."""
+        try:
+            number = float(value) if value else None
+        except ValueError:
+            return None
+        if number is None or number != number or number in (float('inf'), float('-inf')):
+            return None
+        return int(number) if number.is_integer() else number
 
     @staticmethod
     def extract_epub_cover(epub_path: str) -> tuple[bytes | None, str | None]:

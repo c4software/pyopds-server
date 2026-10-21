@@ -2,11 +2,13 @@
 import hashlib
 import os
 import posixpath
+import re
 import time
 import zipfile
 from html.parser import HTMLParser
 from urllib.parse import unquote
 
+from controllers.genres import genre_key
 from controllers.opds import LIBRARY_DIR, BookMetadata, BookScanner, SecurityUtils
 
 CHUNK_SIZE = 1024
@@ -14,6 +16,10 @@ INDEX_TTL = 300
 # Characters of text per printed page (~300 words, a typical paperback novel page)
 CHARS_PER_PAGE = 1800
 HTML_EXTENSIONS = ('.xhtml', '.html', '.htm')
+DESCRIPTION_MAX_LENGTH = 6000
+# Elements starting a new line (br) or a new paragraph (the others) in a description
+BLOCK_TAGS = frozenset(('p', 'div', 'li', 'ul', 'ol', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+                        'tr', 'table', 'section', 'article', 'pre', 'dd', 'dt'))
 
 
 def koreader_partial_md5(path: str) -> str | None:
@@ -57,6 +63,71 @@ class _TextLengthParser(HTMLParser):
     def handle_data(self, data):
         if not self._skip_depth:
             self.length += len(' '.join(data.split()))
+
+
+class _PlainTextParser(HTMLParser):
+    """Plain text of an HTML fragment: paragraphs separated by a blank line, <br> kept as a line break."""
+
+    def __init__(self):
+        super().__init__()
+        self.parts: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ('script', 'style'):
+            self._skip_depth += 1
+        elif tag == 'br':
+            self.parts.append('\n')
+        elif tag in BLOCK_TAGS:
+            self.parts.append('\n\n')
+            if tag == 'li':
+                self.parts.append('• ')
+
+    def handle_startendtag(self, tag, attrs):
+        if tag == 'br':
+            self.parts.append('\n')
+
+    def handle_endtag(self, tag):
+        if tag in ('script', 'style'):
+            self._skip_depth = max(0, self._skip_depth - 1)
+        elif tag in BLOCK_TAGS:
+            self.parts.append('\n\n')
+
+    def handle_data(self, data):
+        if not self._skip_depth:
+            self.parts.append(re.sub(r'\s+', ' ', data))
+
+
+def description_text(value: str | None, max_length: int = DESCRIPTION_MAX_LENGTH) -> str | None:
+    """Plain text of an EPUB description (often HTML), line breaks kept, cut at `max_length` characters."""
+    if not value or not value.strip():
+        return None
+    if '<' in value:
+        parser = _PlainTextParser()
+        parser.feed(value)
+        parser.close()
+        text = ''.join(parser.parts)
+    else:
+        text = value
+    lines = [' '.join(line.split()) for line in text.split('\n')]
+    text = re.sub(r'\n{3,}', '\n\n', '\n'.join(lines)).strip()
+    if len(text) > max_length:
+        cut = text[:max_length]
+        text = (cut[:cut.rfind(' ')] if ' ' in cut[max_length // 2:] else cut).rstrip() + '…'
+    return text or None
+
+
+def series_key(series: str | None) -> str:
+    """Comparison key of a series name: accents, case and punctuation ignored (casefolded when non-Latin)."""
+    if not series:
+        return ''
+    return genre_key(series) or ' '.join(series.casefold().split())
+
+
+def release_year(date: str | None) -> int | None:
+    """Year of a dc:date value, None when missing or Calibre's "undefined" date (year 101)."""
+    year = (date or '').strip()[:4]
+    return int(year) if len(year) == 4 and year.isdigit() and int(year) not in (0, 101) else None
 
 
 def _content_documents(zf: zipfile.ZipFile) -> list[str]:
@@ -110,6 +181,10 @@ class LibraryIndex:
         self._hash_cache: dict[str, tuple[float, int, str | None]] = {}
         self._details_cache: dict[str, tuple[float, dict]] = {}
         self._built_at = 0.0
+        # {path: (mtime, series, series index)} and {series key: [(series index, path)]}
+        self._series_cache: dict[str, tuple[float, str | None, int | float | None]] = {}
+        self._series_index: dict[str, list[tuple[int | float, str]]] = {}
+        self._series_built_at = 0.0
 
     def _refresh(self) -> None:
         if time.time() - self._built_at < INDEX_TTL:
@@ -152,28 +227,82 @@ class LibraryIndex:
         return None
 
     def details(self, path: str) -> dict:
-        """Title, author, genres, cover presence and estimated print pages, cached per file modification time."""
+        """Title, author, genres, series, description, year, rating, cover presence and estimated
+        print pages, cached per file modification time."""
         mtime = os.path.getmtime(path)
         cached = self._details_cache.get(path)
         if cached and cached[0] == mtime:
             return cached[1]
-        title, author, _, genres = BookMetadata.extract_epub_details(path)
+        info = BookMetadata.extract_epub_info(path) or {}
         cover, _ = BookMetadata.extract_epub_cover(path)
+        rating = info.get('rating')
         details = {
-            'title': title,
-            'author': author,
-            'genres': genres,
+            'title': info.get('title'),
+            'author': info.get('author'),
+            'genres': info.get('genres', []),
+            'series': info.get('series'),
+            'series_index': info.get('series_index'),
+            'description': description_text(info.get('description')),
+            'year': release_year(info.get('date')),
+            # calibre:rating counts half stars (0-10); 0 means "not rated"
+            'rating': min(5.0, rating / 2) if rating and rating > 0 else None,
             'has_cover': cover is not None,
             'page_count': estimate_print_pages(path),
             'relative_path': os.path.relpath(path, LIBRARY_DIR).replace(os.sep, '/'),
         }
         self._details_cache[path] = (mtime, details)
+        self._series_cache[path] = (mtime, details['series'], details['series_index'])
         return details
+
+    def _refresh_series(self) -> None:
+        """Rebuild the {series key: books} index every few minutes, reading only new or changed OPFs."""
+        if time.time() - self._series_built_at < INDEX_TTL:
+            return
+        series_cache: dict[str, tuple[float, str | None, int | float | None]] = {}
+        index: dict[str, list[tuple[int | float, str]]] = {}
+        for path in BookScanner.get_instance().collect_all_epub_paths():
+            try:
+                mtime = os.path.getmtime(path)
+            except OSError:
+                continue
+            cached = self._series_cache.get(path)
+            if not cached or cached[0] != mtime:
+                info = BookMetadata.extract_epub_info(path) or {}
+                cached = (mtime, info.get('series'), info.get('series_index'))
+            series_cache[path] = cached
+            _, series, position = cached
+            if series_key(series) and position is not None:
+                index.setdefault(series_key(series), []).append((position, path))
+        self._series_cache = series_cache
+        self._series_index = index
+        self._series_built_at = time.time()
+
+    def next_in_series(self, series: str, position: int | float, exclude: str | None = None) -> tuple[int | float, str] | None:
+        """(position, path) of the library book coming after `position` in `series` (names compared
+        normalized): the next whole-numbered one (skipping novellas like 1.5), else whatever comes next."""
+        key = series_key(series)
+        if not key:
+            return None
+        self._refresh_series()
+        excluded = os.path.realpath(exclude) if exclude else None
+
+        def same(path: str) -> bool:
+            return excluded is not None and os.path.realpath(path) == excluded
+
+        later = sorted(
+            (book for book in self._series_index.get(key, []) if book[0] > position and not same(book[1])),
+            key=lambda book: (book[0], os.path.basename(book[1]).lower()),
+        )
+        later = [book for book in later if os.path.exists(book[1])]
+        return next((book for book in later if float(book[0]).is_integer()), later[0] if later else None)
 
 
 __all__ = [
     'LibraryIndex',
+    'description_text',
     'estimate_print_pages',
     'filename_md5',
     'koreader_partial_md5',
+    'release_year',
+    'series_key',
 ]

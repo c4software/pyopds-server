@@ -73,15 +73,23 @@ def parse_position(value: object) -> dict | None:
 
 
 def parse_metadata(value: object) -> dict | None:
-    """Keep the file name, title and authors a reader sends along with its progress."""
+    """Keep the file name, title, authors, series, series index and ISBN a reader sends along with its progress.
+
+    CrossPoint readers add `series`, `series_index` and `isbn` (servers of type "Other").
+    """
     if not isinstance(value, dict):
         return None
 
     def clean(field: object) -> str | None:
         return field[:METADATA_MAX_LENGTH] if isinstance(field, str) and field else None
 
-    metadata = {key: clean(value.get(key)) for key in ('filename', 'title', 'authors')}
-    return metadata if any(metadata.values()) else None
+    metadata: dict = {key: clean(value.get(key)) for key in ('filename', 'title', 'authors', 'series', 'isbn')}
+    index = value.get('series_index')
+    is_number = isinstance(index, (int, float)) and not isinstance(index, bool) and math.isfinite(index)
+    metadata['series_index'] = (int(index) if float(index).is_integer() else index) if is_number and 0 <= index < 1e6 else None
+    if not metadata['series']:
+        metadata['series_index'] = None
+    return metadata if any(v is not None for v in metadata.values()) else None
 
 
 def parse_progress_body(body: object) -> tuple[dict | None, tuple[int, int, str] | None]:
