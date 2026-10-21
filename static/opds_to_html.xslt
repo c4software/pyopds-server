@@ -67,7 +67,7 @@
                         grid-template-columns: repeat(2, 1fr);
                         grid-template-rows: repeat(2, 1fr);
                         opacity: 0;
-                        transition: opacity 0.8s ease-in-out;
+                        transition: opacity 0.6s ease-out;
                     }
 
                     .tile-mosaic.single {
@@ -83,8 +83,6 @@
                         background:
                             radial-gradient(ellipse at center, rgba(248, 250, 252, 0.55), rgba(248, 250, 252, 0) 70%),
                             linear-gradient(to bottom, rgba(248, 250, 252, 0.68), rgba(248, 250, 252, 0.82));
-                        -webkit-backdrop-filter: blur(1.5px) saturate(0.8);
-                        backdrop-filter: blur(1.5px) saturate(0.8);
                         transition: opacity 0.3s ease-in-out;
                     }
 
@@ -114,12 +112,24 @@
                         width: 100%;
                         height: 100%;
                         object-fit: cover;
+                        filter: saturate(0.8);
                         opacity: 0;
                         transition: opacity 1.5s ease-in-out;
                     }
 
+                    /* First covers of a tile: shown at once, the whole mosaic fades in a single time */
+                    .tile-mosaic-cover.instant {
+                        transition: none;
+                    }
+
                     .tile-mosaic-cover.loaded {
                         opacity: 1;
+                    }
+
+                    /* Text and icons change color along with the mosaic fade, not at once */
+                    .relative > .tile-mosaic ~ *,
+                    .relative > .tile-mosaic ~ * * {
+                        transition: color 0.6s ease-out, text-shadow 0.6s ease-out;
                     }
 
                     .has-mosaic > :not(.tile-mosaic) {
@@ -716,9 +726,9 @@
                         }
 
                         // Fade a cover in above the previous one, then drop the previous one
-                        function showCover(cell, src) {
+                        function showCover(cell, src, instant) {
                             const img = document.createElement('img');
-                            img.className = 'tile-mosaic-cover';
+                            img.className = instant ? 'tile-mosaic-cover instant' : 'tile-mosaic-cover';
                             img.alt = '';
                             img.src = session.thumbs.get(src) || src;
                             cell.appendChild(img);
@@ -727,6 +737,7 @@
                             img.addEventListener('transitionend', function() {
                                 while (cell.firstChild !== img) cell.firstChild.remove();
                             }, { once: true });
+                            return img;
                         }
 
                         async function startMosaic(mosaic, state) {
@@ -742,13 +753,17 @@
                             // Too few covers for a grid: a single cover filling the tile
                             const shown = first.length &lt; CELLS ? first.slice(0, 1) : first;
                             mosaic.classList.toggle('single', shown.length === 1);
+                            const images = [];
                             const cells = shown.map(function(src) {
                                 const cell = document.createElement('div');
                                 cell.className = 'tile-mosaic-cell';
                                 mosaic.appendChild(cell);
-                                showCover(cell, src);
+                                images.push(showCover(cell, src, true));
                                 return cell;
                             });
+                            // Fade the tile in once its covers are decoded, not cell by cell as they paint
+                            await Promise.all(images.map(function(img) { return img.decode().catch(function() {}); }));
+                            if (!session.active) return;
                             mosaic.parentElement.classList.add('has-mosaic');
                             coverCache.remember(state.tile, shown);
                             if (reduceMotion) return;
