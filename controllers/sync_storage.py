@@ -514,10 +514,18 @@ class SyncStorage:
                 FROM progress p
                 LEFT JOIN documents d ON d.user = p.user AND d.document = p.document
                 WHERE p.user = ? AND p.device_id = {NEWEST_DEVICE_SQL}
-                ORDER BY p.updated_at DESC
+                UNION ALL
+                -- Books marked as read without any progress (web UI): finished, at 100 %
+                SELECT d.document, '' AS device_id, '' AS device, 1.0 AS percentage, '' AS progress, NULL AS position,
+                       d.status_at AS updated_at, d.title, d.author, d.filename, d.cover_url, d.page_count, d.library_path,
+                       d.status_at, d.pause_reason, d.series, d.series_index, d.isbn, d.status
+                FROM documents d
+                WHERE d.user = ? AND d.status = 'finished'
+                  AND NOT EXISTS (SELECT 1 FROM progress p3 WHERE p3.user = d.user AND p3.document = d.document)
+                ORDER BY updated_at DESC
                 LIMIT ?
                 """,
-                (user, limit),
+                (user, user, limit),
             ).fetchall()
             aliases = self._aliases_by_document(conn, user)
         return [dict(row) for row in rows], aliases
@@ -658,6 +666,72 @@ class SyncStorage:
                 (user, canonical, status, now, 'manual' if status == 'paused' else None, now),
             )
         return {'document': canonical, 'status': status, 'status_at': now}
+
+    def find_library_document(self, user: str, relative_path: str, documents: list[str], filename: str) -> str | None:
+        """Canonical document of a library EPUB already known to the user: associated by hand
+        (library_path), synced under one of its hashes, or under its device file name; None otherwise."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                'SELECT document FROM documents WHERE user = ? AND library_path = ? ORDER BY updated_at DESC LIMIT 1',
+                (user, relative_path),
+            ).fetchone()
+            if row:
+                return self._resolve(conn, user, row['document'])
+            for document in documents:
+                canonical = self._resolve(conn, user, document)
+                known = conn.execute('SELECT 1 FROM documents WHERE user = ? AND document = ?', (user, canonical)).fetchone()
+                if known or self._has_progress(conn, user, canonical):
+                    return canonical
+            row = conn.execute(
+                'SELECT document FROM documents WHERE user = ? AND filename = ? ORDER BY updated_at DESC LIMIT 1',
+                (user, filename),
+            ).fetchone()
+            return self._resolve(conn, user, row['document']) if row else None
+
+    def reading_state(self, user: str, document: str) -> dict:
+        """Effective reading status (manual status, else finished from the progress or the device
+        statistics, else reading; None when never synced) and newest percentage of a document."""
+        with self._get_connection() as conn:
+            canonical = self._resolve(conn, user, document)
+            stored = conn.execute('SELECT status FROM documents WHERE user = ? AND document = ?', (user, canonical)).fetchone()
+            newest = self._newest_row(conn, user, canonical)
+            completed = conn.execute(f'SELECT {completed_sql("?", "?")}', (user, canonical, user, canonical)).fetchone()[0]
+        percentage = newest['percentage'] if newest else None
+        status = stored['status'] if stored else None
+        if status is None and (completed or (percentage or 0) >= FINISHED_PERCENTAGE):
+            status = 'finished'
+        elif status is None and newest:
+            status = 'reading'
+        return {'document': canonical, 'status': status, 'percentage': percentage}
+
+    def mark_library_book(self, user: str, document: str, finished: bool, info: dict) -> dict:
+        """Mark a library EPUB as read (manual 'finished' status) or not read, from the web UI.
+
+        A new document stores the EPUB's details (title, author, file name, library_path) so that
+        the reading page shows it. Unmarking clears the manual status, or sets 'reading' when the
+        progress itself says finished.
+        """
+        now = now_seconds()
+        with self._get_connection() as conn:
+            canonical = self._resolve(conn, user, document)
+            conn.execute(
+                """
+                INSERT INTO documents (user, document, title, author, filename, library_path, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (user, document) DO UPDATE SET
+                    title = COALESCE(documents.title, excluded.title),
+                    author = COALESCE(documents.author, excluded.author),
+                    filename = COALESCE(documents.filename, excluded.filename)
+                """,
+                (user, canonical, info.get('title'), info.get('author'), info.get('filename'), info.get('library_path'), now),
+            )
+        if finished:
+            self.set_status(user, canonical, 'finished')
+        else:
+            self.set_status(user, canonical, None)
+            if self.reading_state(user, canonical)['status'] == 'finished':
+                self.set_status(user, canonical, 'reading')
+        return self.reading_state(user, canonical)
 
     def set_dates(self, user: str, document: str, dates: dict) -> dict | None:
         """Set the manual start / finish dates; None when the start would be after the finish."""

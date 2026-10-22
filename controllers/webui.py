@@ -1,8 +1,11 @@
-"""Web UI pages that are not OPDS feeds (reading page, sign-in page) and the static assets of the web UI."""
+"""Web UI pages that are not OPDS feeds (reading page, sign-in page), the static assets of the web UI
+and the reading status of a catalog book (book sheet)."""
 import email.utils
 import gzip
+import json
 import os
 import re
+from urllib.parse import parse_qs, urlparse
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static')
 
@@ -15,6 +18,8 @@ STATIC_NAME_RE = re.compile(rf'^(?:[A-Za-z0-9_-]+/)?{_PART}\.(html|js|css|svg)$'
 ASSET_REF_RE = re.compile(rf'(/static/((?:[A-Za-z0-9_-]+/)?{_PART}\.(?:js|css|svg)))"')
 # A versioned URL never changes content: cached for a year (the version changes with the file)
 IMMUTABLE = 'public, max-age=31536000, immutable'
+# Largest JSON body accepted by the web UI endpoints
+JSON_BODY_MAX = 4096
 # Scripts and stylesheets sent gzip-compressed when the browser accepts it (polyfill: 1.5 MB -> 0.5 MB),
 # compressed once per file version
 GZIP_TYPES = ('js', 'css', 'svg')
@@ -74,6 +79,89 @@ class WebUIController:
     def static_file(self) -> None:
         """GET /static/{name} or /static/{folder}/{name}: a web UI asset (scripts, stylesheets) from static/."""
         self._serve(self.params.get('name') or '')
+
+    def book_status(self) -> None:
+        """GET /webui/book-status?path=<EPUB relative to LIBRARY_DIR>: reading status of a catalog book
+        for the signed-in reader ({read, status, percentage}; status None when never synced)."""
+        path = (parse_qs(urlparse(self.request.path).query).get('path') or [''])[0]
+        book = self._library_book(path)
+        if not book:
+            return
+        storage, document = book[0], book[1]
+        state = storage.reading_state(self.request.opds_user, document) if document else {'status': None, 'percentage': None}
+        self._send_json(self._status_body(state))
+
+    def book_status_update(self) -> None:
+        """PUT /webui/book-status {path, read}: mark a catalog book as read (manual "finished" status)
+        or not read for the signed-in reader."""
+        body = self._read_json()
+        if body is None:
+            return
+        read = body.get('read')
+        if not isinstance(read, bool) or not isinstance(body.get('path'), str):
+            self._send_json({'message': 'Champs invalides'}, 400)
+            return
+        book = self._library_book(body['path'])
+        if not book:
+            return
+        storage, document, epub, relative = book
+        from controllers.library_index import LibraryIndex, koreader_partial_md5, filename_md5
+
+        info = {'filename': os.path.basename(epub), 'library_path': relative}
+        try:
+            meta = LibraryIndex.get_instance().book_meta(epub)
+            info.update(title=meta.get('title'), author=meta.get('author'))
+        except OSError:
+            pass
+        # Not synced yet: KOReader's binary id of the file, so that a later reading on a device continues it
+        document = document or koreader_partial_md5(epub) or filename_md5(epub)
+        self._send_json(self._status_body(storage.mark_library_book(self.request.opds_user, document, read, info)))
+
+    @staticmethod
+    def _status_body(state: dict) -> dict:
+        return {'read': state.get('status') == 'finished', 'status': state.get('status'), 'percentage': state.get('percentage')}
+
+    def _library_book(self, relative: str) -> tuple | None:
+        """(sync storage, user's document or None, EPUB path, relative path) of a library EPUB; answers 404 otherwise."""
+        from controllers.koreader_sync import get_sync_storage
+        from controllers.library_index import LibraryIndex, koreader_partial_md5, filename_md5
+
+        relative = relative.strip().lstrip('/')
+        epub = LibraryIndex.resolve_relative(relative) if relative else None
+        if not epub:
+            self._send_json({'message': 'Livre introuvable'}, 404)
+            return None
+        storage = get_sync_storage()
+        hashes = [h for h in (koreader_partial_md5(epub), filename_md5(epub)) if h]
+        document = storage.find_library_document(self.request.opds_user, relative, hashes, os.path.basename(epub))
+        return storage, document, epub, relative
+
+    def _read_json(self) -> dict | None:
+        """JSON object body of the request; answers 400 (and returns None) when missing or invalid."""
+        try:
+            length = int(self.request.headers.get('Content-Length') or 0)
+        except ValueError:
+            length = -1
+        if length <= 0 or length > JSON_BODY_MAX:
+            self._send_json({'message': 'Corps de requête invalide'}, 400)
+            return None
+        try:
+            body = json.loads(self.request.rfile.read(length).decode('utf-8'))
+        except (UnicodeDecodeError, ValueError):
+            body = None
+        if not isinstance(body, dict):
+            self._send_json({'message': 'Corps de requête invalide'}, 400)
+            return None
+        return body
+
+    def _send_json(self, data: dict, status: int = 200) -> None:
+        body = json.dumps(data).encode('utf-8')
+        self.request.send_response(status)
+        self.request.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.request.send_header('Content-Length', str(len(body)))
+        self.request.send_header('Cache-Control', 'no-store')
+        self.request.end_headers()
+        self.request.wfile.write(body)
 
     def serve_page(self, name: str, replacements: dict[str, str] | None = None) -> None:
         """Serve a page of static/ (e.g. the sign-in page), with versioned asset URLs and text replacements."""

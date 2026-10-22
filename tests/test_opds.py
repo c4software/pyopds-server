@@ -994,6 +994,51 @@ class TestOPDSAuthAndRecommendations(unittest.TestCase):
                       if link.get('rel') == 'urn:pyopds:mosaic-cover'}
             self.assertEqual(mosaic, {'/cover/messiah.epub', '/cover/hyperion.epub'})
 
+    def test_book_sheet_marks_a_book_as_read(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(self._request('POST', '/users/create', {'username': 'marker', 'password': self.password})[0], 201)
+        auth = basic_header('marker', self.password)
+
+        def book_status(path):
+            status, _, body = self._request('GET', '/webui/book-status?path=' + urllib.parse.quote(path), headers=auth)
+            self.assertEqual(status, 200, body)
+            return json.loads(body)
+
+        def mark(path, read):
+            status, _, body = self._request('PUT', '/webui/book-status', {'path': path, 'read': read}, auth)
+            self.assertEqual(status, 200, body)
+            return json.loads(body)
+
+        def progress_items():
+            _, _, body = self._request('GET', '/api/v1/progress', headers=self._sync_headers('marker'))
+            return {item['library_path']: item for item in json.loads(body)['items']}
+
+        # An account is always required
+        self.assertEqual(self._request('GET', '/webui/book-status?path=cuisine.epub')[0], 401)
+        # Never synced book: marked as read, listed as finished by the reading page, then unmarked
+        self.assertEqual(book_status('cuisine.epub'), {'read': False, 'status': None, 'percentage': None})
+        self.assertEqual(mark('cuisine.epub', True)['status'], 'finished')
+        self.assertTrue(book_status('cuisine.epub')['read'])
+        item = progress_items()['cuisine.epub']
+        self.assertEqual((item['status'], item['title'], item['percentage']), ('finished', 'Cuisine facile', 1.0))
+        self.assertFalse(mark('cuisine.epub', False)['read'])
+        self.assertNotIn('cuisine.epub', progress_items())
+        # Book synced by KOReader (file name hash), finished by its progress: unmarking keeps it in progress
+        self._push_progress('marker', 'hyperion.epub', 1.0)
+        self.assertEqual(book_status('hyperion.epub'), {'read': True, 'status': 'finished', 'percentage': 1.0})
+        self.assertEqual(mark('hyperion.epub', False)['status'], 'reading')
+        self.assertEqual(progress_items()['hyperion.epub']['status'], 'reading')
+        self.assertTrue(mark('hyperion.epub', True)['read'])
+        self.assertEqual(len([path for path in progress_items() if path == 'hyperion.epub']), 1)
+        # Other readers are not affected
+        status, _, body = self._request('GET', '/webui/book-status?path=hyperion.epub', headers=basic_header('newbie', self.password))
+        self.assertFalse(json.loads(body)['read'])
+        # Unknown books, paths outside the library and invalid bodies
+        self.assertEqual(self._request('GET', '/webui/book-status?path=missing.epub', headers=auth)[0], 404)
+        self.assertEqual(self._request('GET', '/webui/book-status?path=../sync.db', headers=auth)[0], 404)
+        self.assertEqual(self._request('PUT', '/webui/book-status', {'path': 'dune.epub', 'read': 'yes'}, auth)[0], 400)
+        self.assertEqual(self._request('PUT', '/webui/book-status', None, auth)[0], 400)
+
 
 class TestRecommendationScoring(unittest.TestCase):
     """Pure scoring functions of controllers.recommendations and Basic credentials parsing."""

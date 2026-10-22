@@ -128,6 +128,8 @@
             return false;
         }
         fillBookDialog(link);
+        // Other features of the sheet (read-status.js) follow the opened book
+        bookDialog.dispatchEvent(new CustomEvent('book-sheet:open', { detail: { link: link } }));
         bookDialog.showModal();
         document.documentElement.style.overflow = 'hidden';
         bookDialog.scrollTop = 0;

@@ -227,10 +227,17 @@
                                 </div>
                                 <div id="book-dialog-facts" class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600 dark:text-slate-300"></div>
                                 <div id="book-dialog-genres" class="mt-3 flex flex-wrap gap-1.5"></div>
-                                <a id="book-dialog-download" class="mt-5 inline-flex items-center justify-center gap-2 w-full sm:w-auto px-5 py-2.5 rounded-lg bg-slate-800 text-white font-medium shadow hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white" download="">
-                                    <i data-lucide="download" class="w-4 h-4"></i>
-                                    <span>Télécharger</span>
-                                </a>
+                                <div class="mt-5 flex flex-col sm:flex-row gap-2">
+                                    <a id="book-dialog-download" class="inline-flex items-center justify-center gap-2 w-full sm:w-auto px-5 py-2.5 rounded-lg bg-slate-800 text-white font-medium shadow hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white" download="">
+                                        <i data-lucide="download" class="w-4 h-4"></i>
+                                        <span>Télécharger</span>
+                                    </a>
+                                    <!-- Signed-in readers only (static/catalog/read-status.js) -->
+                                    <button type="button" id="book-dialog-read" class="inline-flex items-center justify-center gap-2 w-full sm:w-auto px-5 py-2.5 rounded-lg border border-slate-300 text-slate-700 font-medium hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-60 aria-pressed:border-emerald-300 aria-pressed:bg-emerald-50 aria-pressed:text-emerald-800 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:aria-pressed:border-emerald-700 dark:aria-pressed:bg-emerald-950 dark:aria-pressed:text-emerald-200" aria-pressed="false" hidden="hidden">
+                                        <i data-lucide="book-check" class="w-4 h-4"></i>
+                                        <span id="book-dialog-read-label">Marquer comme lu</span>
+                                    </button>
+                                </div>
                                 <div id="book-dialog-description-block" class="mt-6" hidden="hidden">
                                     <p id="book-dialog-description" class="book-description text-sm leading-relaxed text-slate-700 dark:text-slate-300"></p>
                                     <button type="button" id="book-dialog-more" class="mt-2 text-sm font-medium text-indigo-700 hover:underline dark:text-indigo-300" hidden="hidden">Lire la suite</button>
@@ -251,6 +258,7 @@
                 <script src="/static/catalog/account-button.js"></script>
                 <script src="/static/catalog/pagination.js"></script>
                 <script src="/static/catalog/book-sheet.js"></script>
+                <script src="/static/catalog/read-status.js"></script>
                 <script src="/static/catalog/main.js"></script>
             </body>
         </html>
