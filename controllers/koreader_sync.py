@@ -154,9 +154,14 @@ class SyncControllerBase:
         return values[0] if values else None
 
     def _authorize(self) -> str | None:
-        """Authorize with the x-auth-user / x-auth-key headers; returns the username."""
+        """Authorize with the x-auth-user / x-auth-key headers (readers, apps); without them, with the web UI
+        session (same sign-in for the catalog and the pages). Returns the username."""
         user = self.request.headers.get('X-Auth-User')
         key = self.request.headers.get('X-Auth-Key')
+        if not user and not key:
+            # Imported here: opds_auth imports this module
+            from controllers.opds_auth import request_user
+            return request_user(self.request)
         if not user or not key:
             return None
         return self.sync_storage.authenticate(user, key)

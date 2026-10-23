@@ -1,9 +1,11 @@
-// Sync account shared by the sign-in page and the reading page: MD5 key (KOSync x-auth-key)
-// and the account kept in localStorage, so that one sign-in serves the catalog and the reading page.
+// Sync account of the web UI, shared by the sign-in page, the pages (reading, clippings) and the catalog:
+// one session (cookie set by POST /login) for everything, the sync API included; MD5 of a password for
+// the account creation (KOSync key).
 (function () {
     'use strict';
 
-    const STORAGE_KEY = 'sync-account';
+    // Former versions kept the sync key in the browser: forget it
+    try { localStorage.removeItem('sync-account'); } catch (e) { /* storage unavailable */ }
 
     function md5(text) {
         const bytes = new TextEncoder().encode(text);
@@ -41,39 +43,41 @@
         }).join('');
     }
 
-    function load() {
-        try {
-            const account = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
-            return account && account.user && account.key ? account : null;
-        } catch (e) {
-            return null;
-        }
-    }
-
-    function save(account) {
-        try {
-            if (account) localStorage.setItem(STORAGE_KEY, JSON.stringify(account));
-            else localStorage.removeItem(STORAGE_KEY);
-        } catch (e) { /* private mode: the account simply is not remembered */ }
-    }
-
-    // Catalog session opened by /login (OPDS_AUTH): its user name is readable, the session itself is not
+    // Session opened by /login: its user name is readable (cookie pyopds_name), the session itself is not
     function sessionUser() {
-        const match = document.cookie.match(/(?:^|;\s*)pyopds_user=([^;]*)/);
+        const match = document.cookie.match(/(?:^|;\s*)pyopds_name=([^;]*)/);
         return match ? decodeURIComponent(match[1]) : null;
     }
 
-    // Single sign-in page for the catalog and the pages (/logout also closes the catalog session),
-    // back to `next` once signed in
+    // Single sign-in page (/logout first closes an expired session), back to `next` once signed in
     function signIn(next) {
-        save(null);
         window.location.replace('/logout?next=' + encodeURIComponent(next));
     }
 
     function logout() {
-        save(null);
         window.location.href = '/logout';
     }
 
-    window.SyncAccount = { md5: md5, load: load, save: save, sessionUser: sessionUser, signIn: signIn, logout: logout };
+    /**
+     * Session part of a page component (spread into its Alpine.data): `account` for the header, `signIn()` /
+     * `logout()`, and `startSession()`, true when signed in (else it goes to the sign-in page, back to `next`).
+     */
+    function pageSession(next) {
+        return {
+            account: { user: sessionUser() },
+            ready: false,
+            signIn() { signIn(next); },
+            logout: logout,
+            startSession() {
+                if (!this.account.user) {
+                    signIn(next);
+                    return false;
+                }
+                this.ready = true;
+                return true;
+            },
+        };
+    }
+
+    window.SyncAccount = { md5: md5, sessionUser: sessionUser, signIn: signIn, logout: logout, pageSession: pageSession };
 })();

@@ -908,22 +908,33 @@ class TestOPDSAuthAndRecommendations(unittest.TestCase):
             self.assertEqual(self._request('POST', '/login', {'username': 'reader', 'password': 'wrong'})[0], 401)
             # Both cookies are needed: read them with http.client (the helper keeps one header per name)
             conn = http.client.HTTPConnection('localhost', self.port, timeout=10)
+            # Behind an HTTPS proxy too: never Secure, the same session works over HTTP and HTTPS
             conn.request('POST', '/login', body=json.dumps({'username': 'reader', 'password': self.password}),
-                         headers={'Content-Type': 'application/json'})
+                         headers={'Content-Type': 'application/json', 'X-Forwarded-Proto': 'https'})
             response = conn.getresponse()
             response.read()
             self.assertEqual(response.status, 204)
             set_cookies = response.headers.get_all('Set-Cookie')
             conn.close()
-            session = next(c for c in set_cookies if c.startswith('pyopds_session='))
+            session = next(c for c in set_cookies if c.startswith('pyopds_sid='))
             self.assertIn('HttpOnly', session)
-            self.assertIn('pyopds_user=reader', ' '.join(set_cookies))
+            self.assertIn('pyopds_name=reader', ' '.join(set_cookies))
+            self.assertNotIn('Secure', ' '.join(set_cookies))
             cookie = {'Cookie': session.split(';')[0]}
             status, _, body = self._request('GET', '/opds', headers={**browser, **cookie})
             self.assertEqual(status, 200)
             self.assertIn(b'urn:recommendations', body)
+            # One sign-in for everything: the reading page and the sync API calls of the pages use the session
+            self.assertEqual(self._request('GET', '/reading', headers={**browser, **cookie})[0], 200)
+            self.assertEqual(self._request('GET', '/reading', headers=browser)[0], 303)
+            status, _, body = self._request('GET', '/api/v1/progress', headers=cookie)
+            self.assertEqual(status, 200, body)
+            self.assertEqual(self._request('GET', '/api/v1/progress')[0], 401)
+            # Explicit sync credentials still win (readers, apps): a wrong key is refused despite the session
+            bad_key = {**cookie, 'X-Auth-User': 'reader', 'X-Auth-Key': '0' * 32}
+            self.assertEqual(self._request('GET', '/api/v1/progress', headers=bad_key)[0], 401)
             # Tampered session: back to the sign-in page
-            tampered = {'Cookie': session.split(';')[0].replace('pyopds_session=', 'pyopds_session=x')}
+            tampered = {'Cookie': session.split(';')[0].replace('pyopds_sid=', 'pyopds_sid=x')}
             self.assertEqual(self._request('GET', '/opds', headers={**browser, **tampered})[0], 303)
 
             # Plain form post (no JavaScript): redirected to `next`, never to another site

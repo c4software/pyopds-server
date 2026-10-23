@@ -27,9 +27,13 @@ from controllers.sync_storage import md5_hex
 
 REALM = 'PyOPDS'
 CHALLENGE = f'Basic realm="{REALM}", charset="UTF-8"'
-SESSION_COOKIE = 'pyopds_session'
-# Readable by the pages (not the session itself): shows the logout button, signs the reading page out
-USER_COOKIE = 'pyopds_user'
+# One session for every page (catalog, reading statistics, clippings), whether the site is opened over
+# HTTP or HTTPS: the cookies are never Secure (a Secure cookie set over HTTPS cannot be replaced over
+# HTTP, the sign-in then silently fails). Named *_sid / *_name since the former pyopds_session /
+# pyopds_user ones could be Secure and would shadow the new ones.
+SESSION_COOKIE = 'pyopds_sid'
+# Readable by the pages (not the session itself): shows the logout button and the account name
+USER_COOKIE = 'pyopds_name'
 SESSION_SECONDS = 90 * 86400
 MAX_LOGIN_BODY = 4096
 
@@ -136,10 +140,14 @@ def _cookies(request_handler) -> dict[str, str]:
     return cookies
 
 
-def _cookie_header(request_handler, name: str, value: str, max_age: int, http_only: bool) -> str:
-    secure = (request_handler.headers.get('X-Forwarded-Proto') or '').lower() == 'https'
-    return (f'{name}={value}; Path=/; Max-Age={max_age}; SameSite=Lax'
-            + ('; HttpOnly' if http_only else '') + ('; Secure' if secure else ''))
+def _cookie_header(name: str, value: str, max_age: int, http_only: bool) -> str:
+    return f'{name}={value}; Path=/; Max-Age={max_age}; SameSite=Lax' + ('; HttpOnly' if http_only else '')
+
+
+def request_user(request_handler) -> str | None:
+    """Sync account of a request: HTTP Basic credentials (OPDS clients), else the browser session cookie."""
+    user = authenticate_basic(request_handler.headers.get('Authorization'))
+    return user if user is not None else session_user(_cookies(request_handler).get(SESSION_COOKIE))
 
 
 def wants_html(request_handler) -> bool:
@@ -179,9 +187,7 @@ def guard(request_handler, auth: str | None) -> bool:
     request_handler.opds_user = None
     if auth not in ('opds', 'user'):
         return True
-    user = authenticate_basic(request_handler.headers.get('Authorization'))
-    if user is None:
-        user = session_user(_cookies(request_handler).get(SESSION_COOKIE))
+    user = request_user(request_handler)
     if user is None and (auth == 'user' or is_private()):
         if wants_html(request_handler):
             _redirect(request_handler, '/login?next=' + quote(request_handler.path, safe=''))
@@ -241,8 +247,8 @@ class AuthController:
                 _redirect(self.request, '/login?error=1&next=' + quote(target, safe=''))
             return
         cookies = [
-            _cookie_header(self.request, SESSION_COOKIE, make_session(user), SESSION_SECONDS, True),
-            _cookie_header(self.request, USER_COOKIE, quote(user, safe=''), SESSION_SECONDS, False),
+            _cookie_header(SESSION_COOKIE, make_session(user), SESSION_SECONDS, True),
+            _cookie_header(USER_COOKIE, quote(user, safe=''), SESSION_SECONDS, False),
         ]
         if is_json:
             send_body(self.request, status=204, headers=[*(('Set-Cookie', cookie) for cookie in cookies),
@@ -254,8 +260,8 @@ class AuthController:
         """GET /logout: close the session and go back to the sign-in page (then to `next`)."""
         target = safe_next(parse_qs(self.request.path.partition('?')[2]).get('next', ['/opds'])[0])
         _redirect(self.request, '/login?next=' + quote(target, safe=''), [
-            _cookie_header(self.request, SESSION_COOKIE, '', 0, True),
-            _cookie_header(self.request, USER_COOKIE, '', 0, False),
+            _cookie_header(SESSION_COOKIE, '', 0, True),
+            _cookie_header(USER_COOKIE, '', 0, False),
         ])
 
     def _status(self, code: int) -> None:

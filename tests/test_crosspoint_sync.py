@@ -402,7 +402,8 @@ class TestCrossPointSync(unittest.TestCase):
         return {'Authorization': 'Basic ' + base64.b64encode(f'{user}:{password}'.encode()).decode()}
 
     def test_reading_page_and_assets(self):
-        status, content_type, body = self.raw_get('/reading')
+        self.create_user('readingpage')
+        status, content_type, body = self.raw_get('/reading', self.basic('readingpage'))
         self.assertEqual((status, content_type), (200, 'text/html; charset=utf-8'))
         # Versioned asset URLs: a proxy caching static files still serves the new ones after an update
         self.assertRegex(body, rb'/static/reading\.js\?v=\d+"')

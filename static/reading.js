@@ -1,5 +1,5 @@
 // Reading statistics page: the `reading` Alpine component (templates in reading.html) loads the sync API
-// data of the account signed in on /login (key kept by static/account.js) and turns it into view models.
+// data of the account signed in on /login (web UI session, static/account.js) and turns it into view models.
 // It never builds HTML. Endpoints used: /api/v1/progress, /api/v1/progress/{document},
 // /api/v1/stats/summary, /api/v1/stats/activity, /api/v1/clippings, PUT /api/v1/documents/{document}/info.
 (function () {
@@ -70,22 +70,8 @@
 
     // --------------------------------------------------------------------- API
 
-    class Unauthorized extends Error {}
-
-    async function api(account, path, method, body) {
-        const headers = { 'x-auth-user': account.user, 'x-auth-key': account.key, 'Accept': 'application/json' };
-        if (body !== undefined) headers['Content-Type'] = 'application/json';
-        const response = await fetch(path, {
-            method: method || 'GET',
-            headers: headers,
-            body: body === undefined ? undefined : JSON.stringify(body),
-            cache: 'no-store',
-        });
-        if (response.status === 401) throw new Unauthorized('Identifiants invalides');
-        const data = await response.json().catch(function () { return null; });
-        if (!response.ok) throw new Error((data && data.message) || 'Erreur ' + response.status);
-        return data;
-    }
+    // Sync API calls with the web UI session (same sign-in as the catalog)
+    const api = window.PageKit.fetchJson;
 
     // Catalog search through the OPDS feed: each acquisition link gives the EPUB path in the library
     async function searchLibrary(query) {
@@ -315,8 +301,7 @@
     document.addEventListener('alpine:init', function () {
         window.Alpine.data('reading', function () {
             return {
-                account: window.SyncAccount.load(),
-                ready: false,
+                ...window.SyncAccount.pageSession('/reading'),
                 loading: false,
                 error: '',
                 empty: false,
@@ -334,11 +319,7 @@
                 link: { document: null, label: '', query: '', status: '', results: [] },
 
                 init() {
-                    if (!this.account) {
-                        this.signIn();
-                        return;
-                    }
-                    this.ready = true;
+                    if (!this.startSession()) return;
                     this.icons();
                     this.load();
                 },
@@ -347,18 +328,10 @@
                     window.PageKit.icons(this);
                 },
 
-                signIn() {
-                    window.SyncAccount.signIn('/reading');
-                },
-
-                logout() {
-                    window.SyncAccount.logout();
-                },
-
                 async load() {
                     this.loading = true;
                     this.error = '';
-                    const call = (path) => api(this.account, path);
+                    const call = api;
                     const tz = new Date().getTimezoneOffset();
                     const results = await Promise.allSettled([
                         call('/api/v1/progress?limit=500'),
@@ -367,7 +340,7 @@
                         call('/api/v1/clippings'),
                     ]);
                     this.loading = false;
-                    if (results.some(function (r) { return r.status === 'rejected' && r.reason instanceof Unauthorized; })) {
+                    if (results.some(function (r) { return r.status === 'rejected' && window.PageKit.signedOut(r.reason); })) {
                         this.signIn();
                         return;
                     }
@@ -491,7 +464,7 @@
                 },
 
                 async setLibraryPath(document, path) {
-                    await api(this.account, '/api/v1/documents/' + encodeURIComponent(document) + '/info', 'PUT', { library_path: path });
+                    await api('/api/v1/documents/' + encodeURIComponent(document) + '/info', 'PUT', { library_path: path });
                     this.load();
                 },
             };

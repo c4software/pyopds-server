@@ -1,5 +1,5 @@
-// Sign-in / sign-up page: the `login` Alpine component (template in login.html) opens the catalog session
-// (cookie set by POST /login) and keeps the sync key for the reading page, so that one sign-in serves both.
+// Sign-in / sign-up page: the `login` Alpine component (template in login.html) opens the web UI session
+// (cookie set by POST /login), the single sign-in of the catalog, the pages and their sync API calls.
 // Accounts are created with POST /users/create, the same account then syncs KoReader / CrossPoint.
 (function () {
     'use strict';
@@ -70,8 +70,6 @@
                     this.registrationOpen = document.getElementById('account-section').dataset.registration === 'open';
                     this.signUp = this.registrationOpen && params.get('signup') === '1';
                     if (params.get('error')) this.error = 'Utilisateur ou mot de passe incorrect.';
-                    // Signed out (or session expired): forget the sync key of the reading page too
-                    window.SyncAccount.save(null);
                     this.$nextTick(function () { window.lucide.createIcons(); });
                 },
 
@@ -96,7 +94,6 @@
                             this.error = error;
                             return;
                         }
-                        window.SyncAccount.save({ user: user, key: window.SyncAccount.md5(password) });
                         window.location.replace(this.next);
                     } catch (error) {
                         this.error = 'Serveur injoignable : ' + error.message;

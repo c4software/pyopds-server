@@ -35,8 +35,7 @@
     document.addEventListener('alpine:init', function () {
         window.Alpine.data('clippings', function () {
             return {
-                account: { user: window.SyncAccount.sessionUser() },
-                ready: false,
+                ...window.SyncAccount.pageSession('/clippings'),
                 loading: false,
                 error: '',
                 groups: [],
@@ -44,20 +43,12 @@
                 book: '',
 
                 init() {
-                    if (!this.account.user) {
-                        window.SyncAccount.signIn('/clippings');
-                        return;
-                    }
-                    this.ready = true;
+                    if (!this.startSession()) return;
                     window.PageKit.icons(this);
                     this.load();
                     // New matches show new placeholders (cover links, icons)
                     this.$watch('query', () => window.PageKit.icons(this));
                     this.$watch('book', () => window.PageKit.icons(this));
-                },
-
-                logout() {
-                    window.SyncAccount.logout();
                 },
 
                 coverError(key) {
@@ -73,8 +64,8 @@
                         this.groups = (await window.PageKit.fetchJson('/webui/clippings')).groups.map(groupView);
                     } catch (e) {
                         // Expired session: the sign-in page answers instead of the data
-                        if (e.status === 200 || e.status === 401) {
-                            window.SyncAccount.signIn('/clippings');
+                        if (window.PageKit.signedOut(e)) {
+                            this.signIn();
                             return;
                         }
                         this.error = 'Impossible de charger les surlignages : ' + e.message;

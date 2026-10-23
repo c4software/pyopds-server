@@ -27,8 +27,9 @@
     }
 
     /**
-     * JSON answer of a web UI endpoint (catalog session cookie); `body` is sent as JSON. A failure, or an
-     * expired session (the sign-in page answers instead), throws an Error whose `status` is the HTTP status.
+     * JSON answer of a web UI or sync API endpoint (session cookie); `body` is sent as JSON. A failure, or an
+     * expired session (401, or the sign-in page answering instead: 200), throws an Error whose `status` is
+     * the HTTP status and message the server's one when given.
      */
     async function fetchJson(url, method, body) {
         const response = await fetch(url, {
@@ -38,13 +39,19 @@
             cache: 'no-store',
             credentials: 'same-origin',
         });
-        const type = response.headers.get('Content-Type') || '';
-        if (!response.ok || type.indexOf('application/json') !== 0) {
-            const error = new Error('Erreur ' + response.status);
+        const isJson = (response.headers.get('Content-Type') || '').indexOf('application/json') === 0;
+        if (!response.ok || !isJson) {
+            const data = isJson ? await response.json().catch(function () { return null; }) : null;
+            const error = new Error((data && data.message) || 'Erreur ' + response.status);
             error.status = response.status;
             throw error;
         }
         return response.json();
+    }
+
+    /** Whether a fetchJson failure means the session expired (the page should sign in again). */
+    function signedOut(error) {
+        return Boolean(error) && (error.status === 401 || error.status === 200);
     }
 
     // lucide replaces the <i data-lucide> placeholders by SVGs: run after each render of `component` that may
@@ -54,6 +61,7 @@
     }
 
     window.PageKit = {
-        formatDate: formatDate, encodePath: encodePath, libraryLinks: libraryLinks, fetchJson: fetchJson, icons: icons,
+        formatDate: formatDate, encodePath: encodePath, libraryLinks: libraryLinks, fetchJson: fetchJson, signedOut: signedOut,
+        icons: icons,
     };
 })();

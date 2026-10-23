@@ -108,7 +108,7 @@ def register_routes(router):
     router.get(r'/cover/.*', (OPDSController, 'download_cover'), name='opds.cover')
 
     # Web UI: reading statistics / sync page (data fetched from the sync API by the page)
-    router.get('/reading', (WebUIController, 'reading_page'), name='webui.reading', auth=opds)
+    router.get('/reading', (WebUIController, 'reading_page'), name='webui.reading', auth='user')
     # Reading status of a catalog book for the signed-in reader (book sheet: "Marquer comme lu")
     router.get('/webui/book-status', (WebUIController, 'book_status'), name='webui.book-status', auth='user')
     router.put('/webui/book-status', (WebUIController, 'book_status_update'), name='webui.book-status.update', auth='user')

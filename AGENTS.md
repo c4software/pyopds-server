@@ -127,7 +127,7 @@ L'application doit respecter ces variables de configuration :
 * `PORT` : Port d'écoute (défaut: `8080`).
 * `KOREADER_SYNC_DB_PATH` : Chemin de la DB SQLite.
 * `REGISTRATION_DISABLED` : `true` pour refuser la création de comptes de synchronisation.
-* `OPDS_AUTH` : `true` pour rendre privés le catalogue et la webui (routes `auth='opds'` ; synchro, `/cover/*`, `/static/*` et `/health` restent publics). Par défaut le catalogue est public et la connexion facultative (HTTP Basic pour les clients OPDS, page `/login` et cookie de session pour les navigateurs, une seule connexion pour le catalogue et la page Lecture) ; elle active la tuile/flux « À lire ensuite » (`/opds/recommendations`).
+* `OPDS_AUTH` : `true` pour rendre privés le catalogue et la webui (routes `auth='opds'` ; synchro, `/cover/*`, `/static/*` et `/health` restent publics). Par défaut le catalogue est public et la connexion facultative (HTTP Basic pour les clients OPDS, page `/login` et cookie de session pour les navigateurs, une seule connexion pour le catalogue, les pages Lecture et Surlignages et leurs appels à `/api/v1` ; cookies jamais `Secure`, le site pouvant être ouvert en HTTP comme en HTTPS) ; elle active la tuile/flux « À lire ensuite » (`/opds/recommendations`).
 * `OPDS_SESSION_SECRET` : Clé de signature des cookies de session (par défaut, clé aléatoire écrite dans `session.secret` à côté de la DB de synchro).
 * `GENRES_CONFIG_PATH` : Fichier TOML de genres complétant `genres.toml` (mêmes clés, prioritaire).
 * `METADATA_CONFIG_PATH` : Fichier TOML de règles auteurs/séries complétant `metadata.toml` (mêmes clés, prioritaire).
