@@ -167,6 +167,12 @@ CREATE TABLE IF NOT EXISTS notes (
     modified INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_notes_user ON notes (user, category);
+CREATE TABLE IF NOT EXISTS preferences (
+    user TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (user, key)
+);
 """
 
 # Tables holding per-document data, cleared when a book is removed
@@ -174,7 +180,7 @@ DOCUMENT_TABLES = ('stats_device_book', 'clippings', 'bookmarks', 'notes', 'prog
 # Tables holding per-user data, cleared when the account data is deleted
 USER_TABLES = (
     'stats_device_global', 'stats_device_book', 'stats_device_day', 'clippings', 'bookmarks',
-    'document_aliases', 'documents', 'progress', 'progress_log', 'notes',
+    'document_aliases', 'documents', 'progress', 'progress_log', 'notes', 'preferences',
 )
 
 
@@ -702,6 +708,16 @@ class SyncStorage:
             ).fetchone()
             return self._resolve(conn, user, row['document']) if row else None
 
+    def epub_document(self, user: str, epub: str, relative_path: str, known_only: bool = False) -> str | None:
+        """Canonical document of a library EPUB for the user (find_library_document with the EPUB's
+        KOReader ids); unknown to the user: its KOReader binary id, or None with `known_only`."""
+        # Imported here: library_index imports the OPDS controller
+        from controllers.library_index import document_hashes
+
+        hashes = document_hashes(epub)
+        document = self.find_library_document(user, relative_path, hashes, os.path.basename(epub))
+        return document if document or known_only else hashes[0]
+
     def remember_document(self, user: str, document: str, info: dict) -> str:
         """Create the document with the given details (title, author, filename, library_path) or fill
         its empty title, author and file name; returns the canonical document."""
@@ -1022,6 +1038,23 @@ class SyncStorage:
             aliases = self._aliases_by_document(conn, user)
         return log_rows, documents, book_stats, aliases
 
+    # ------------------------------------------------------------- preferences
+
+    def get_preference(self, user: str, key: str) -> str | None:
+        """A reader's preference (web UI and catalog settings), None when never set."""
+        with self._get_connection() as conn:
+            row = conn.execute('SELECT value FROM preferences WHERE user = ? AND key = ?', (user, key)).fetchone()
+        return row['value'] if row else None
+
+    def set_preference(self, user: str, key: str, value: str) -> None:
+        """Store a reader's preference."""
+        with self._get_connection() as conn:
+            conn.execute(
+                'INSERT INTO preferences (user, key, value) VALUES (?, ?, ?) '
+                'ON CONFLICT (user, key) DO UPDATE SET value = excluded.value',
+                (user, key, value),
+            )
+
     # ------------------------------------------------------------------- notes
 
     def list_notes(self, user: str, category: str | None = None) -> list[dict]:
@@ -1169,6 +1202,19 @@ class SyncStorage:
         return now
 
 
+def manual_date(value: object) -> int | None:
+    """A reading date set by hand ('YYYY-MM-DD' or None) as unix seconds at UTC midnight.
+
+    Raises ValueError when it is not a real calendar date or is after tomorrow (time zones ahead of UTC).
+    """
+    if value is None:
+        return None
+    seconds = date_to_seconds(value) if isinstance(value, str) else None
+    if seconds is None or seconds > now_seconds() + 86400:
+        raise ValueError(f'invalid date: {value!r}')
+    return seconds
+
+
 def date_to_seconds(value: str) -> int | None:
     """'YYYY-MM-DD' -> unix seconds at UTC midnight, None if not a real date."""
     try:
@@ -1184,6 +1230,7 @@ __all__ = [
     'KOREADER_SYNC_DB_PATH',
     'SyncStorage',
     'date_to_seconds',
+    'manual_date',
     'md5_hex',
     'now_seconds',
 ]

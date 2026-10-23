@@ -10,6 +10,7 @@ from controllers.koreader_sync import KoReaderSyncController
 from controllers.nextcloud_notes import NextcloudNotesController
 from controllers.opds import OPDSController
 from controllers.opds_auth import AuthController
+from controllers.reader_feeds import ReaderFeedsController
 from controllers.webui import WebUIController
 
 
@@ -86,6 +87,8 @@ def register_routes(router):
     router.get('/opds/recent', (OPDSController, 'show_recent_books'), name='opds.recent', auth=opds)
     # Depends on the reader: an account is always required (sign-in page or HTTP Basic)
     router.get('/opds/recommendations', (OPDSController, 'show_recommendations'), name='opds.recommendations', auth='user')
+    router.get('/opds/reading', (ReaderFeedsController, 'show_reading'), name='opds.reading', auth='user')
+    router.get('/opds/series-next', (ReaderFeedsController, 'show_series_next'), name='opds.series-next', auth='user')
     router.get('/opds/by-year', (OPDSController, 'show_by_year_catalog'), name='opds.by-year', auth=opds)
     router.get(r'/opds/by-year/.*', (OPDSController, 'show_year_books'), name='opds.year', auth=opds)
     router.get('/opds/by-author', (OPDSController, 'show_by_author_catalog'), name='opds.by-author', auth=opds)

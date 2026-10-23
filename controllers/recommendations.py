@@ -5,7 +5,8 @@ built from the books read or being read (same author, shared genres, next volume
 each signal weighted by how recently the book was read.
 
 The scoring functions are pure (plain dicts in, plain values out); RecommendationService wires
-them to the sync storage, the LibraryIndex (document hash -> EPUB) and the BookScanner indexes.
+them to the user's reading state (controllers.reading_state: sync history matched to the library)
+and the BookScanner indexes.
 """
 import math
 import threading
@@ -14,8 +15,8 @@ from dataclasses import dataclass, field
 
 from controllers.genres import genre_key
 from controllers.metadata_rules import author_key, normalize_author_name
+from controllers.reading_state import ReadingStateService, reading_signal
 
-FINISHED_RATIO = 0.9
 RECENCY_HALF_LIFE_DAYS = 180.0
 SIGNAL_WEIGHTS = {'read': 1.0, 'reading': 0.8, 'paused': 0.4}
 AUTHOR_WEIGHT = 4.0
@@ -27,7 +28,6 @@ RECOMMENDATIONS_LIMIT = 30
 CACHE_TTL = 300
 # Candidates whose series is looked up (LibraryIndex.details opens the EPUB once, then caches it)
 MAX_SERIES_LOOKUPS = 200
-HISTORY_LIMIT = 100_000
 
 
 def normalize_author(author: str | None) -> str:
@@ -53,20 +53,6 @@ def series_number(value: object) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) else None
-
-
-def reading_signal(status: str | None, percentage: float | None) -> str | None:
-    """Classify a synced book: 'read', 'reading', 'paused', 'dnf' (abandoned) or None.
-
-    A book is read when marked finished or read to 90 % or more; abandoned (dnf) books never count as read.
-    """
-    if status == 'dnf':
-        return 'dnf'
-    if status == 'finished' or (percentage or 0) >= FINISHED_RATIO:
-        return 'read'
-    if status == 'paused':
-        return 'paused'
-    return 'reading'
 
 
 def recency_factor(updated_at: int | float | None, now: float) -> float:
@@ -191,8 +177,8 @@ class Recommendations:
 class RecommendationService:
     """Compute and cache the recommendations of a sync user.
 
-    The cache entry lives CACHE_TTL seconds and is dropped as soon as the user's sync history changes
-    (fingerprint of the progress rows, a single SQL query), so a new sync is reflected immediately.
+    The cache entry lives CACHE_TTL seconds and is dropped as soon as the user's reading state changes
+    (ReadingStateService fingerprint), so a new sync is reflected immediately.
     """
 
     _instance: 'RecommendationService | None' = None
@@ -217,56 +203,27 @@ class RecommendationService:
                 self._cache.pop(user, None)
 
     def for_user(self, user: str) -> Recommendations:
-        """Recommendations of a user, cached while fresh (CACHE_TTL) and while the sync history is unchanged."""
-        # Imported here: tests reload controllers.koreader_sync
-        from controllers.koreader_sync import get_sync_storage
-
-        rows, aliases = get_sync_storage().list_progress(user, HISTORY_LIMIT)
-        fingerprint = hash(tuple(
-            (row['document'], row.get('status'), row.get('percentage'), row.get('updated_at'), row.get('library_path'))
-            for row in rows
-        ))
+        """Recommendations of a user, cached while fresh (CACHE_TTL) and while the reading state is unchanged."""
+        state = ReadingStateService.get_instance().for_user(user)
         with self._lock:
             cached = self._cache.get(user)
-            if cached and cached[1] == fingerprint and time.time() - cached[0] < CACHE_TTL:
+            if cached and cached[1] == state.fingerprint and time.time() - cached[0] < CACHE_TTL:
                 return cached[2]
-        result = self._compute(rows, aliases)
+        result = self._compute(state.books)
         with self._lock:
-            self._cache[user] = (time.time(), fingerprint, result)
+            self._cache[user] = (time.time(), state.fingerprint, result)
         return result
 
     @staticmethod
-    def _compute(rows: list[dict], aliases: dict[str, list[str]]) -> Recommendations:
+    def _compute(history: list[dict]) -> Recommendations:
+        """Score the library books never opened against the profile of the history books."""
         # Imported here: library_index imports controllers.opds, which imports this module lazily
         from controllers.library_index import LibraryIndex
         from controllers.opds import BookScanner
 
         library = LibraryIndex.get_instance()
         scanner = BookScanner.get_instance()
-
-        history: list[dict] = []
-        opened: set[str] = set()
-        for row in rows:
-            try:
-                path = (row.get('library_path') and library.resolve_relative(row['library_path'])) or library.find(
-                    [row['document'], *aliases.get(row['document'], [])], row.get('filename')
-                )
-                if not path or path in opened:
-                    continue
-                opened.add(path)
-                details = library.book_meta(path)
-            except OSError:
-                continue
-            history.append({
-                'path': path,
-                'author': details.get('author') or row.get('author'),
-                'genres': details.get('genres') or [],
-                'series': details.get('series'),
-                'series_index': details.get('series_index'),
-                'status': row.get('status'),
-                'percentage': row.get('percentage'),
-                'updated_at': row.get('updated_at'),
-            })
+        opened = {book['path'] for book in history}
 
         if not history:
             return Recommendations([], 0, 'Aucun historique de lecture synchronisé ne correspond à un livre de la '

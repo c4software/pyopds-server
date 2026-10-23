@@ -95,7 +95,7 @@ class WebUIController:
         """PUT /webui/book-status {path, read, finished_date?}: mark a catalog book as read (manual "finished"
         status) or not read for the signed-in reader; finished_date ('YYYY-MM-DD' or null, left unchanged
         when absent) is the day it was read, used by the reading statistics instead of the day it was marked."""
-        from controllers.sync_storage import date_to_seconds, now_seconds
+        from controllers.sync_storage import manual_date
 
         body = self._read_json()
         if body is None:
@@ -106,17 +106,16 @@ class WebUIController:
             return
         dates = {}
         if 'finished_date' in body:
-            value = body['finished_date']
-            seconds = date_to_seconds(value) if isinstance(value, str) else None
-            if value is not None and (seconds is None or seconds > now_seconds() + 86400):
+            try:
+                dates['finished_date'] = manual_date(body['finished_date'])
+            except ValueError:
                 self._send_json({'message': 'Date invalide'}, 400)
                 return
-            dates['finished_date'] = seconds
         book = self._library_book(body['path'])
         if not book:
             return
-        storage, document, epub, relative = book
-        from controllers.library_index import LibraryIndex, koreader_partial_md5, filename_md5
+        storage, _, epub, relative = book
+        from controllers.library_index import LibraryIndex
 
         info = {'filename': os.path.basename(epub), 'library_path': relative}
         try:
@@ -125,7 +124,7 @@ class WebUIController:
         except OSError:
             pass
         # Not synced yet: KOReader's binary id of the file, so that a later reading on a device continues it
-        document = document or koreader_partial_md5(epub) or filename_md5(epub)
+        document = storage.epub_document(self.request.opds_user, epub, relative)
         self._send_json(self._status_body(storage.mark_library_book(self.request.opds_user, document, read, info, dates)))
 
     @staticmethod
@@ -140,7 +139,7 @@ class WebUIController:
     def _library_book(self, relative: str) -> tuple | None:
         """(sync storage, user's document or None, EPUB path, relative path) of a library EPUB; answers 404 otherwise."""
         from controllers.koreader_sync import get_sync_storage
-        from controllers.library_index import LibraryIndex, koreader_partial_md5, filename_md5
+        from controllers.library_index import LibraryIndex
 
         relative = relative.strip().lstrip('/')
         epub = LibraryIndex.resolve_relative(relative) if relative else None
@@ -148,9 +147,7 @@ class WebUIController:
             self._send_json({'message': 'Livre introuvable'}, 404)
             return None
         storage = get_sync_storage()
-        hashes = [h for h in (koreader_partial_md5(epub), filename_md5(epub)) if h]
-        document = storage.find_library_document(self.request.opds_user, relative, hashes, os.path.basename(epub))
-        return storage, document, epub, relative
+        return storage, storage.epub_document(self.request.opds_user, epub, relative, known_only=True), epub, relative
 
     def _read_json(self) -> dict | None:
         """JSON object body of the request; answers 400 (and returns None) when missing or invalid."""

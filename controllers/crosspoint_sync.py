@@ -33,7 +33,7 @@ from controllers.reading_activity import (
     lenient_b64decode,
     summarize_global_stats,
 )
-from controllers.sync_storage import date_to_seconds, now_seconds
+from controllers.sync_storage import date_to_seconds, manual_date, now_seconds
 
 UINT32_MAX = 0xFFFFFFFF
 SAFE_INTEGER_MAX = 2 ** 53 - 1
@@ -54,7 +54,6 @@ DOCUMENT_STATUSES = ('reading', 'paused', 'finished', 'dnf')
 
 ITEM_ID_RE = re.compile(r'^[\x21-\x7e]{1,64}$')
 DAILY_DATE_RE = re.compile(r'^20\d{2}-\d{2}-\d{2}$')
-DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 COVER_URL_RE = re.compile(r'^https?://\S{1,2000}$')
 
 GLOBAL_COUNT_FIELDS = ('v', 'sessions', 'seconds', 'pages', 'completed', 'anchor_day', 'streak')
@@ -276,7 +275,7 @@ class CrossPointSyncController(SyncControllerBase):
     def _library_book(self, documents: list[str], filename: str | None, library_path: str | None = None) -> dict | None:
         """Details of the library EPUB matching a synced document (or associated by hand), with an absolute cover URL."""
         try:
-            path = (library_path and self.library.resolve_relative(library_path)) or self.library.find(documents, filename)
+            path = self.library.locate(documents, filename, library_path)
             if not path:
                 return None
             details = dict(self.library.details(path))
@@ -514,19 +513,11 @@ class CrossPointSyncController(SyncControllerBase):
         body = self._json_object()
         if body is None:
             return
-        dates = {}
-        for key in ('start_date', 'finished_date'):
-            if key not in body:
-                continue
-            value = body[key]
-            if value is None:
-                dates[key] = None
-                continue
-            seconds = date_to_seconds(value) if isinstance(value, str) and DATE_RE.match(value) else None
-            if seconds is None or seconds > now_seconds() + 86400:
-                self._invalid()
-                return
-            dates[key] = seconds
+        try:
+            dates = {key: manual_date(body[key]) for key in ('start_date', 'finished_date') if key in body}
+        except ValueError:
+            self._invalid()
+            return
         result = self.sync_storage.set_dates(user, document, dates)
         if result is None:
             self._send_json_error(self.ERROR_INVALID_FIELDS, 'The start date is after the finish date', 400)

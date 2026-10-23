@@ -8,6 +8,7 @@ import time
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape as xml_escape
 import zipfile
+from collections.abc import Collection
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from controllers.genres import genre_key, get_genre_config, normalize_genres
@@ -29,6 +30,9 @@ XHTML_NS = 'http://www.w3.org/1999/xhtml'
 # XSLT engine in WebAssembly for browsers that dropped native XSLT (github.com/mfreed7/xslt_polyfill, BSD-3)
 XSLT_POLYFILL = 'xslt-polyfill.min.js'
 ACQUISITION_FEED = 'application/atom+xml;profile=opds-catalog;kind=acquisition'
+NAVIGATION_FEED = 'application/atom+xml;profile=opds-catalog;kind=navigation'
+# Link of every feed back to the root catalog
+START_LINK = ('start', '/opds', NAVIGATION_FEED)
 
 
 def format_series_index(index: int | float | None) -> str | None:
@@ -36,6 +40,21 @@ def format_series_index(index: int | float | None) -> str | None:
     if index is None:
         return None
     return str(int(index)) if float(index).is_integer() else f'{index:g}'
+
+
+def without(paths: list[str], exclude: Collection[str]) -> list[str]:
+    """`paths` minus the `exclude` ones, order kept (the same list when nothing is excluded)."""
+    return [path for path in paths if path not in exclude] if exclude else paths
+
+
+def navigation_tile(title: str, tile_id: str, href: str, feed_type: str, paths: list[str]) -> dict:
+    """Navigation entry leading to a feed (`href` of type `feed_type`), with the cover mosaic of `paths`."""
+    return {'title': title, 'id': tile_id, 'links': [('subsection', href, feed_type), *mosaic_links(paths)]}
+
+
+def prepend_summary(entry: dict, text: str | None) -> None:
+    """Put a line (why the book is listed, reading progress…) before the entry's description."""
+    entry['summary'] = '\n\n'.join(part for part in (text, entry.get('summary')) if part)
 
 
 def mosaic_links(paths: list[str]) -> list[tuple[str, str, str]]:
@@ -285,18 +304,22 @@ class OPDSFeedGenerator:
 
     @staticmethod
     def _link(parent: ET.Element, link: tuple) -> None:
-        """Append a (rel, href, type[, title]) link to an element."""
+        """Append a (rel, href, type[, title[, extra attributes]]) link to an element."""
         rel, href, type_, *rest = link
         attrs = {'rel': rel, 'href': href, 'type': type_}
         if rest and rest[0]:
             attrs['title'] = rest[0]
+        if len(rest) > 1 and rest[1]:
+            # e.g. the facet attributes opds:facetGroup / opds:activeFacet
+            attrs.update(rest[1])
         ET.SubElement(parent, 'link', attrs)
 
     def generate_feed(self, title: str, feed_id: str, links: list[tuple], entries: list[dict],
                       subtitle: str | None = None) -> str:
         """Build an Atom/OPDS feed.
 
-        Links are (rel, href, type) tuples, with an optional fourth item: the link title. Entries may
+        Links are (rel, href, type) tuples, with optional fourth and fifth items: the link title and a
+        dict of extra attributes. Entries may
         carry optional book metadata: 'summary' (text), 'categories' ([(term, label)]), 'issued'
         (year, dc:issued), 'series' ((name, index)) and 'rating' (0-5).
         """
@@ -403,9 +426,11 @@ class BookScanner:
         self._path_index = None
         self._recent_books_cache = None
         self._recent_books_cache_time = 0
-        # Series feeds and recommendations are derived from the library indexes
+        # Series feeds, reading states and recommendations are derived from the library indexes
         from controllers.library_index import LibraryIndex
         LibraryIndex.get_instance().invalidate()
+        from controllers.reading_state import ReadingStateService
+        ReadingStateService.get_instance().invalidate()
         from controllers.recommendations import RecommendationService
         RecommendationService.get_instance().invalidate()
     
@@ -452,11 +477,12 @@ class BookScanner:
 
         return sorted(file_list, key=lambda x: x['title'].lower())
 
-    def get_all_books_paginated(self, page: int, size: int) -> tuple[list[dict], int]:
+    def get_all_books_paginated(self, page: int, size: int, exclude: Collection[str] = ()) -> tuple[list[dict], int]:
+        """Page of every library book; `exclude`: EPUB paths left out (e.g. the books the reader finished)."""
         if self._all_paths_cache is None:
             self._all_paths_cache = self.collect_all_epub_paths()
 
-        paths = self._all_paths_cache
+        paths = without(self._all_paths_cache, exclude)
         total_count = len(paths)
 
         start = (page - 1) * size
@@ -484,7 +510,9 @@ class BookScanner:
 
         return paginated_books, total_count
 
-    def get_folder_content_paginated(self, folder_full_path: str, parent_folder_path: str, page: int, size: int, base_path: str | None = None) -> tuple[list[dict], int]:
+    def get_folder_content_paginated(self, folder_full_path: str, parent_folder_path: str, page: int, size: int,
+                                     base_path: str | None = None, exclude: Collection[str] = ()) -> tuple[list[dict], int]:
+        """Page of a folder: its subfolders, then its books except the `exclude` paths."""
         subfolders = []
         for item in os.listdir(folder_full_path):
             item_path = os.path.join(folder_full_path, item)
@@ -498,23 +526,15 @@ class BookScanner:
             subfolder_id = f'urn:folder:{hashlib.md5(subfolder_relative.encode()).hexdigest()}'
             encoded_subfolder = quote(subfolder_relative.replace(os.sep, '/'))
 
-            subfolder_entries.append(
-                {
-                    'title': subfolder,
-                    'id': subfolder_id,
-                    'type': 'folder',
-                    'links': [
-                        (
-                            'subsection',
-                            f'/opds/folder/{encoded_subfolder}?page=1',
-                            'application/atom+xml;profile=opds-catalog;kind=acquisition',
-                        ),
-                        *mosaic_links(self.get_folder_paths(subfolder_relative)),
-                    ],
-                }
-            )
+            subfolder_entries.append({
+                **navigation_tile(subfolder, subfolder_id, f'/opds/folder/{encoded_subfolder}?page=1', ACQUISITION_FEED,
+                                  self.get_folder_paths(subfolder_relative)),
+                'type': 'folder',
+            })
 
         book_list = self.scan_directory_single_level(folder_full_path, base_path=base_path)
+        if exclude:
+            book_list = [info for info in book_list if info['path'] not in exclude]
 
         book_entries = []
         for file_info in book_list:
@@ -547,10 +567,12 @@ class BookScanner:
 
         return paginated_entries, total_count
 
-    def scan_recent_books(self, directory_path: str, limit: int = 25) -> list[dict]:
+    def scan_recent_books(self, directory_path: str, limit: int = 25, exclude: Collection[str] = ()) -> list[dict]:
+        """The `limit` most recently modified EPUBs; `exclude` paths are skipped (not cached then)."""
         current_time = time.time()
         if (
-            self._recent_books_cache is not None
+            not exclude
+            and self._recent_books_cache is not None
             and current_time - self._recent_books_cache_time < self.RECENT_CACHE_TTL
         ):
             return self._recent_books_cache[:limit]
@@ -560,7 +582,7 @@ class BookScanner:
         def scan_for_recent_files(path):
             try:
                 for entry in os.scandir(path):
-                    if entry.is_file() and entry.name.endswith('.epub'):
+                    if entry.is_file() and entry.name.endswith('.epub') and entry.path not in exclude:
                         try:
                             stat_info = entry.stat()
                             mtime = stat_info.st_mtime
@@ -601,8 +623,9 @@ class BookScanner:
                     }
                 )
 
-        self._recent_books_cache = file_list
-        self._recent_books_cache_time = current_time
+        if not exclude:
+            self._recent_books_cache = file_list
+            self._recent_books_cache_time = current_time
 
         return file_list
 
@@ -824,7 +847,8 @@ class BookScanner:
         ]
         return sorted(genres, key=lambda g: g[0])
 
-    def get_books_for_genre(self, genre: str, page: int, size: int) -> tuple[str | None, list[dict], int]:
+    def get_books_for_genre(self, genre: str, page: int, size: int,
+                            exclude: Collection[str] = ()) -> tuple[str | None, list[dict], int]:
         """Get paginated books of a genre, matched like the subjects ("sf" finds Science-fiction).
 
         Returns:
@@ -835,7 +859,7 @@ class BookScanner:
         entry = self._genre_index.get(normalized[0][0] if normalized else genre_key(genre))
         if entry is None:
             return None, [], 0
-        paths = entry['paths']
+        paths = without(entry['paths'], exclude)
         start = (page - 1) * size
         books = [self._create_book_info_from_path(path) for path in paths[start:start + size]]
         return entry['name'], books, len(paths)
@@ -887,7 +911,7 @@ class BookScanner:
         
         return filtered_authors[start:end], total_count
 
-    def get_books_for_year(self, year: str, page: int, size: int) -> tuple[list[dict], int]:
+    def get_books_for_year(self, year: str, page: int, size: int, exclude: Collection[str] = ()) -> tuple[list[dict], int]:
         """Get paginated books for a specific year.
         
         Uses the same pattern as get_all_books_paginated: 
@@ -903,7 +927,7 @@ class BookScanner:
         """
         self._build_year_author_indexes()
         
-        paths = self._year_index.get(year, [])
+        paths = without(self._year_index.get(year, []), exclude)
         total_count = len(paths)
         
         start = (page - 1) * size
@@ -929,7 +953,7 @@ class BookScanner:
         
         return paginated_books, total_count
 
-    def get_books_for_author(self, author: str, page: int, size: int) -> tuple[list[dict], int]:
+    def get_books_for_author(self, author: str, page: int, size: int, exclude: Collection[str] = ()) -> tuple[list[dict], int]:
         """Get paginated books for a specific author.
         
         Uses the same pattern as get_all_books_paginated: 
@@ -945,7 +969,7 @@ class BookScanner:
         """
         self._build_year_author_indexes()
         
-        paths = self._author_index.get(self._author_display(author), [])
+        paths = without(self._author_index.get(self._author_display(author), []), exclude)
         total_count = len(paths)
         
         start = (page - 1) * size
@@ -971,7 +995,7 @@ class BookScanner:
         
         return paginated_books, total_count
 
-    def search_books(self, query: str, page: int, size: int) -> tuple[list[dict], int]:
+    def search_books(self, query: str, page: int, size: int, exclude: Collection[str] = ()) -> tuple[list[dict], int]:
         """Search books by title, author or series.
         
         Performs case-insensitive search across the title, author and series fields.
@@ -991,14 +1015,14 @@ class BookScanner:
         
         if not query_lower:
             # Empty query returns all books
-            return self.get_all_books_paginated(page, size)
+            return self.get_all_books_paginated(page, size, exclude)
         
         if self._all_paths_cache is None:
             self._all_paths_cache = self.collect_all_epub_paths()
         
         # First pass: find all matching paths
         matching_paths = []
-        for path in self._all_paths_cache:
+        for path in without(self._all_paths_cache, exclude):
             relative_path = os.path.relpath(path, LIBRARY_DIR)
             if self.security.has_path_traversal(relative_path) or not self.security.is_within_library_dir(path):
                 continue
@@ -1174,13 +1198,9 @@ class OPDSController:
             (
                 'self',
                 '/opds',
-                'application/atom+xml;profile=opds-catalog;kind=navigation',
+                NAVIGATION_FEED,
             ),
-            (
-                'start',
-                '/opds',
-                'application/atom+xml;profile=opds-catalog;kind=navigation',
-            ),
+            START_LINK,
             (
                 'search',
                 '/opds/opensearch.xml',
@@ -1197,109 +1217,31 @@ class OPDSController:
         all_paths = self.book_scanner.get_folder_paths('')
         recent_paths = [book['path'] for book in self.book_scanner.scan_recent_books(LIBRARY_DIR, limit=25)]
         entries = [
-            {
-                'title': 'All Books',
-                'id': 'urn:all-books',
-                'links': [
-                    (
-                        'subsection',
-                        '/opds/books?page=1',
-                        'application/atom+xml;profile=opds-catalog;kind=acquisition',
-                    ),
-                    *mosaic_links(all_paths),
-                ],
-            },
-            {
-                'title': 'Recent Books',
-                'id': 'urn:recent-books',
-                'links': [
-                    (
-                        'subsection',
-                        '/opds/recent',
-                        'application/atom+xml;profile=opds-catalog;kind=acquisition',
-                    ),
-                    *mosaic_links(recent_paths),
-                ],
-            },
-            {
-                'title': 'By Year',
-                'id': 'urn:by-year',
-                'links': [
-                    (
-                        'subsection',
-                        '/opds/by-year',
-                        'application/atom+xml;profile=opds-catalog;kind=navigation',
-                    ),
-                    *mosaic_links(all_paths),
-                ],
-            },
-            {
-                'title': 'By Author',
-                'id': 'urn:by-author',
-                'links': [
-                    (
-                        'subsection',
-                        '/opds/by-author',
-                        'application/atom+xml;profile=opds-catalog;kind=navigation',
-                    ),
-                    *mosaic_links(all_paths),
-                ],
-            },
-            {
-                'title': 'By Genre',
-                'id': 'urn:by-genre',
-                'links': [
-                    (
-                        'subsection',
-                        '/opds/by-genre',
-                        'application/atom+xml;profile=opds-catalog;kind=navigation',
-                    ),
-                    *mosaic_links(all_paths),
-                ],
-            },
+            *self._personal_root_entries(),
+            navigation_tile('All Books', 'urn:all-books', '/opds/books?page=1', ACQUISITION_FEED, all_paths),
+            navigation_tile('Recent Books', 'urn:recent-books', '/opds/recent', ACQUISITION_FEED, recent_paths),
+            navigation_tile('By Year', 'urn:by-year', '/opds/by-year', NAVIGATION_FEED, all_paths),
+            navigation_tile('By Author', 'urn:by-author', '/opds/by-author', NAVIGATION_FEED, all_paths),
+            navigation_tile('By Genre', 'urn:by-genre', '/opds/by-genre', NAVIGATION_FEED, all_paths),
         ]
-
-        recommendations_entry = self._recommendations_root_entry()
-        if recommendations_entry:
-            entries.append(recommendations_entry)
-
-
         for folder in sorted(os.listdir(LIBRARY_DIR)):
-            folder_path = os.path.join(LIBRARY_DIR, folder)
-            if os.path.isdir(folder_path):
-                folder_id = f'urn:folder:{hashlib.md5(folder.encode()).hexdigest()}'
-                encoded_folder = quote(folder)
-                entries.append(
-                    {
-                        'title': folder,
-                        'id': folder_id,
-                        'links': [
-                            (
-                                'subsection',
-                                f'/opds/folder/{encoded_folder}?page=1',
-                                'application/atom+xml;profile=opds-catalog;kind=acquisition',
-                            ),
-                            *mosaic_links(self.book_scanner.get_folder_paths(folder)),
-                        ],
-                    }
-                )
-
+            if os.path.isdir(os.path.join(LIBRARY_DIR, folder)):
+                entries.append(navigation_tile(
+                    folder, f'urn:folder:{hashlib.md5(folder.encode()).hexdigest()}',
+                    f'/opds/folder/{quote(folder)}?page=1', ACQUISITION_FEED, self.book_scanner.get_folder_paths(folder),
+                ))
         return entries
 
     def _handle_all_books(self):
         page, size, parsed_url = self._parse_url_params()
         path_base = parsed_url.path
 
-        paginated_books, total_count = self.book_scanner.get_all_books_paginated(page, size)
+        read = self._read_filter()
+        paginated_books, total_count = self.book_scanner.get_all_books_paginated(page, size, read.exclude)
 
         links = self._get_pagination_links(path_base, page, size, total_count)
-        links.append(
-            (
-                'start',
-                '/opds',
-                'application/atom+xml;profile=opds-catalog;kind=navigation',
-            )
-        )
+        links.append(START_LINK)
+        links.extend(read.links)
 
         entries = self._create_book_entries(paginated_books)
 
@@ -1314,16 +1256,14 @@ class OPDSController:
             (
                 'self',
                 '/opds/recent',
-                'application/atom+xml;profile=opds-catalog;kind=acquisition',
+                ACQUISITION_FEED,
             ),
-            (
-                'start',
-                '/opds',
-                'application/atom+xml;profile=opds-catalog;kind=navigation',
-            ),
+            START_LINK,
         ]
 
-        file_list = self.book_scanner.scan_recent_books(LIBRARY_DIR, limit=25)
+        read = self._read_filter()
+        links.extend(read.links)
+        file_list = self.book_scanner.scan_recent_books(LIBRARY_DIR, limit=25, exclude=read.exclude)
         entries = self._create_book_entries(file_list)
         xml = self.feed_generator.generate_feed('Recent Books', 'urn:recent-books', links, entries)
 
@@ -1343,19 +1283,14 @@ class OPDSController:
         if not books:
             self._send_error(404, 'Series not found')
             return
+        read = self._read_filter()
+        books = [book for book in books if book[1] not in read.exclude]
 
         total_count = len(books)
         total_pages = self._get_total_pages(total_count, size)
         page = min(page, total_pages)
-        path_base = f'/opds/series?name={quote(name)}'
-        links = [
-            ('self', f'{path_base}&page={page}', ACQUISITION_FEED),
-            ('start', '/opds', 'application/atom+xml;profile=opds-catalog;kind=navigation'),
-        ]
-        if page < total_pages:
-            links.append(('next', f'{path_base}&page={page + 1}', ACQUISITION_FEED))
-        if page > 1:
-            links.append(('previous', f'{path_base}&page={page - 1}', ACQUISITION_FEED))
+        links = [*self._get_pagination_links(f'/opds/series?name={quote(name)}', page, size, total_count), START_LINK]
+        links.extend(read.links)
 
         file_list = []
         display_name = name
@@ -1388,6 +1323,13 @@ class OPDSController:
         from controllers.recommendations import RecommendationService
         return RecommendationService.get_instance().for_user(user)
 
+    def _personal_root_entries(self) -> list[dict]:
+        """Tiles of the reader first: « En cours », « Suite de vos séries » (controllers.reader_feeds), then
+        « À lire ensuite »."""
+        from controllers.reader_feeds import root_entries
+        recommendations_entry = self._recommendations_root_entry()
+        return [*root_entries(self.request), *([recommendations_entry] if recommendations_entry else [])]
+
     def _recommendations_root_entry(self) -> dict | None:
         """'Read next' tile of the root catalog.
 
@@ -1404,18 +1346,7 @@ class OPDSController:
                 paths = []
         elif wants_html(self.request):
             return None
-        return {
-            'title': 'À lire ensuite',
-            'id': 'urn:recommendations',
-            'links': [
-                (
-                    'subsection',
-                    '/opds/recommendations',
-                    'application/atom+xml;profile=opds-catalog;kind=acquisition',
-                ),
-                *mosaic_links(paths),
-            ],
-        }
+        return navigation_tile('À lire ensuite', 'urn:recommendations', '/opds/recommendations', ACQUISITION_FEED, paths)
 
     def _handle_recommendations(self):
         try:
@@ -1431,18 +1362,14 @@ class OPDSController:
             (
                 'self',
                 '/opds/recommendations',
-                'application/atom+xml;profile=opds-catalog;kind=acquisition',
+                ACQUISITION_FEED,
             ),
-            (
-                'start',
-                '/opds',
-                'application/atom+xml;profile=opds-catalog;kind=navigation',
-            ),
+            START_LINK,
         ]
         entries = self._create_book_entries(result.books)
         for entry, book in zip(entries, result.books):
             # Why the book is suggested first (one line), then its description
-            entry['summary'] = '\n\n'.join(part for part in (' · '.join(book['reasons']), entry.get('summary')) if part)
+            prepend_summary(entry, ' · '.join(book['reasons']))
         xml = self.feed_generator.generate_feed(
             'À lire ensuite', 'urn:recommendations', links, entries, subtitle=result.message
         )
@@ -1458,12 +1385,14 @@ class OPDSController:
         if not self._validate_folder_access(folder_full_path):
             return
 
+        read = self._read_filter()
         paginated_entries, total_count = self.book_scanner.get_folder_content_paginated(
             folder_full_path,
             folder_path,
             page,
             size,
             base_path=LIBRARY_DIR,
+            exclude=read.exclude,
         )
 
         formatted_entries = []
@@ -1481,14 +1410,9 @@ class OPDSController:
                 formatted_entries.extend(self._create_book_entries([entry['file_info']]))
 
         links = self._get_pagination_links(path_base, page, size, total_count)
-        links.append(
-            (
-                'start',
-                '/opds',
-                'application/atom+xml;profile=opds-catalog;kind=navigation',
-            )
-        )
+        links.append(START_LINK)
 
+        links.extend(read.links)
         feed_id = f'urn:folder:{hashlib.md5(folder_path.encode()).hexdigest()}'
         title = os.path.basename(folder_path) or 'Library'
 
@@ -1506,13 +1430,9 @@ class OPDSController:
             (
                 'self',
                 '/opds/by-year',
-                'application/atom+xml;profile=opds-catalog;kind=navigation',
+                NAVIGATION_FEED,
             ),
-            (
-                'start',
-                '/opds',
-                'application/atom+xml;profile=opds-catalog;kind=navigation',
-            ),
+            START_LINK,
         ]
 
         years_with_counts = self.book_scanner.get_years_with_counts()
@@ -1527,7 +1447,7 @@ class OPDSController:
                     (
                         'subsection',
                         f'/opds/by-year/{encoded_year}?page=1',
-                        'application/atom+xml;profile=opds-catalog;kind=acquisition',
+                        ACQUISITION_FEED,
                     ),
                     *mosaic_links(self.book_scanner.get_indexed_paths('year', year)),
                 ],
@@ -1542,23 +1462,19 @@ class OPDSController:
         year = unquote(parsed_url.path[len('/opds/by-year/'):])
         path_base = parsed_url.path
 
-        paginated_books, total_count = self.book_scanner.get_books_for_year(year, page, size)
+        read = self._read_filter()
+        paginated_books, total_count = self.book_scanner.get_books_for_year(year, page, size, read.exclude)
 
         links = self._get_pagination_links(path_base, page, size, total_count)
-        links.append(
-            (
-                'start',
-                '/opds',
-                'application/atom+xml;profile=opds-catalog;kind=navigation',
-            )
-        )
+        links.append(START_LINK)
         links.append(
             (
                 'up',
                 '/opds/by-year',
-                'application/atom+xml;profile=opds-catalog;kind=navigation',
+                NAVIGATION_FEED,
             )
         )
+        links.extend(read.links)
 
         entries = self._create_book_entries(paginated_books)
 
@@ -1576,13 +1492,9 @@ class OPDSController:
             (
                 'self',
                 '/opds/by-genre',
-                'application/atom+xml;profile=opds-catalog;kind=navigation',
+                NAVIGATION_FEED,
             ),
-            (
-                'start',
-                '/opds',
-                'application/atom+xml;profile=opds-catalog;kind=navigation',
-            ),
+            START_LINK,
         ]
 
         entries = []
@@ -1594,7 +1506,7 @@ class OPDSController:
                     (
                         'subsection',
                         f'/opds/by-genre/{quote(name)}?page=1',
-                        'application/atom+xml;profile=opds-catalog;kind=acquisition',
+                        ACQUISITION_FEED,
                     ),
                     *mosaic_links(self.book_scanner.get_indexed_paths('genre', key)),
                 ],
@@ -1609,26 +1521,22 @@ class OPDSController:
         genre = unquote(parsed_url.path[len('/opds/by-genre/'):])
         path_base = parsed_url.path
 
-        name, paginated_books, total_count = self.book_scanner.get_books_for_genre(genre, page, size)
+        read = self._read_filter()
+        name, paginated_books, total_count = self.book_scanner.get_books_for_genre(genre, page, size, read.exclude)
         if name is None:
             self._send_error(404, 'Genre not found')
             return
 
         links = self._get_pagination_links(path_base, page, size, total_count)
-        links.append(
-            (
-                'start',
-                '/opds',
-                'application/atom+xml;profile=opds-catalog;kind=navigation',
-            )
-        )
+        links.append(START_LINK)
         links.append(
             (
                 'up',
                 '/opds/by-genre',
-                'application/atom+xml;profile=opds-catalog;kind=navigation',
+                NAVIGATION_FEED,
             )
         )
+        links.extend(read.links)
 
         entries = self._create_book_entries(paginated_books)
 
@@ -1646,13 +1554,9 @@ class OPDSController:
             (
                 'self',
                 '/opds/by-author',
-                'application/atom+xml;profile=opds-catalog;kind=navigation',
+                NAVIGATION_FEED,
             ),
-            (
-                'start',
-                '/opds',
-                'application/atom+xml;profile=opds-catalog;kind=navigation',
-            ),
+            START_LINK,
         ]
 
         letters = self.book_scanner.get_letters_with_author_counts()
@@ -1668,7 +1572,7 @@ class OPDSController:
                     (
                         'subsection',
                         f'/opds/by-author/letter/{encoded_letter}?page=1',
-                        'application/atom+xml;profile=opds-catalog;kind=navigation',
+                        NAVIGATION_FEED,
                     )
                 ],
             })
@@ -1685,18 +1589,12 @@ class OPDSController:
         paginated_authors, total_count = self.book_scanner.get_authors_by_letter(letter, page, size)
 
         links = self._get_pagination_links(path_base, page, size, total_count)
-        links.append(
-            (
-                'start',
-                '/opds',
-                'application/atom+xml;profile=opds-catalog;kind=navigation',
-            )
-        )
+        links.append(START_LINK)
         links.append(
             (
                 'up',
                 '/opds/by-author',
-                'application/atom+xml;profile=opds-catalog;kind=navigation',
+                NAVIGATION_FEED,
             )
         )
 
@@ -1708,7 +1606,7 @@ class OPDSController:
                 (
                     f'http://opds-spec.org/facet#{nav_letter}',
                     f'/opds/by-author/letter/{encoded_nav_letter}?page=1',
-                    'application/atom+xml;profile=opds-catalog;kind=navigation',
+                    NAVIGATION_FEED,
                 )
             )
 
@@ -1723,7 +1621,7 @@ class OPDSController:
                     (
                         'subsection',
                         f'/opds/by-author/{encoded_author}?page=1',
-                        'application/atom+xml;profile=opds-catalog;kind=acquisition',
+                        ACQUISITION_FEED,
                     ),
                     *mosaic_links(self.book_scanner.get_indexed_paths('author', author)),
                 ],
@@ -1744,23 +1642,19 @@ class OPDSController:
         author = unquote(parsed_url.path[len('/opds/by-author/'):])
         path_base = parsed_url.path
 
-        paginated_books, total_count = self.book_scanner.get_books_for_author(author, page, size)
+        read = self._read_filter()
+        paginated_books, total_count = self.book_scanner.get_books_for_author(author, page, size, read.exclude)
 
         links = self._get_pagination_links(path_base, page, size, total_count)
-        links.append(
-            (
-                'start',
-                '/opds',
-                'application/atom+xml;profile=opds-catalog;kind=navigation',
-            )
-        )
+        links.append(START_LINK)
         links.append(
             (
                 'up',
                 '/opds/by-author',
-                'application/atom+xml;profile=opds-catalog;kind=navigation',
+                NAVIGATION_FEED,
             )
         )
+        links.extend(read.links)
 
         entries = self._create_book_entries(paginated_books)
 
@@ -1772,44 +1666,26 @@ class OPDSController:
         xml = self.feed_generator.generate_feed(title, f'urn:author:{hashlib.md5(author.encode()).hexdigest()}', links, entries)
         self._send_xml_response(xml, 'acquisition')
 
+    def _read_filter(self):
+        """« Masquer les livres lus » filter of the signed-in reader (controllers.reader_feeds)."""
+        from controllers.reader_feeds import read_filter
+        return read_filter(self.request)
+
     def _get_total_pages(self, total_count, size=None):
         if size is None:
             size = PAGE_SIZE
         return max(1, (total_count + size - 1) // size)
 
     def _get_pagination_links(self, path_base, current_page, size, total_count):
-        links = []
-
-        total_pages = self._get_total_pages(total_count, size)
-
-        links.append(
-            (
-                'self',
-                f'{path_base}?page={current_page}',
-                'application/atom+xml;profile=opds-catalog;kind=acquisition',
-            )
-        )
-
+        """self / next / previous links of a paginated feed (`path_base` may already carry a query)."""
+        page_url = f"{path_base}{'&' if '?' in path_base else '?'}page="
+        links = [('self', f'{page_url}{current_page}', ACQUISITION_FEED)]
         # No rel="first"/"last": some clients (CrossPoint Sync app) list them as navigation rows;
         # the HTML view builds its first/last page buttons itself
-        if current_page < total_pages:
-            links.append(
-                (
-                    'next',
-                    f'{path_base}?page={current_page + 1}',
-                    'application/atom+xml;profile=opds-catalog;kind=acquisition',
-                )
-            )
-
+        if current_page < self._get_total_pages(total_count, size):
+            links.append(('next', f'{page_url}{current_page + 1}', ACQUISITION_FEED))
         if current_page > 1:
-            links.append(
-                (
-                    'previous',
-                    f'{path_base}?page={current_page - 1}',
-                    'application/atom+xml;profile=opds-catalog;kind=acquisition',
-                )
-            )
-
+            links.append(('previous', f'{page_url}{current_page - 1}', ACQUISITION_FEED))
         return links
 
     def _validate_folder_access(self, folder_full_path):
@@ -2011,54 +1887,13 @@ class OPDSController:
         query = query_params.get('q', [''])[0]
         
         # Perform search
-        search_results, total_count = self.book_scanner.search_books(query, page, size)
-        
-        # Generate pagination links
-        path_base = '/opds/search'
-        links = []
+        read = self._read_filter()
+        search_results, total_count = self.book_scanner.search_books(query, page, size, read.exclude)
         
         total_pages = self._get_total_pages(total_count, size)
-        
-        # Self link with query
-        query_string = f'q={quote(query)}&page={page}'
-        links.append(
-            (
-                'self',
-                f'{path_base}?{query_string}',
-                'application/atom+xml;profile=opds-catalog;kind=acquisition',
-            )
-        )
-        
-        # Start link (root catalog)
-        links.append(
-            (
-                'start',
-                '/opds',
-                'application/atom+xml;profile=opds-catalog;kind=navigation',
-            )
-        )
-        
-        # Pagination links
-        if page < total_pages:
-            next_query = f'q={quote(query)}&page={page + 1}'
-            links.append(
-                (
-                    'next',
-                    f'{path_base}?{next_query}',
-                    'application/atom+xml;profile=opds-catalog;kind=acquisition',
-                )
-            )
-        
-        if page > 1:
-            prev_query = f'q={quote(query)}&page={page - 1}'
-            links.append(
-                (
-                    'previous',
-                    f'{path_base}?{prev_query}',
-                    'application/atom+xml;profile=opds-catalog;kind=acquisition',
-                )
-            )
-        
+        links = [*self._get_pagination_links(f'/opds/search?q={quote(query)}', page, size, total_count), START_LINK]
+        links.extend(read.links)
+
         # Create book entries
         entries = self._create_book_entries(search_results)
         

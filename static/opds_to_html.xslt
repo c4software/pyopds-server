@@ -4,9 +4,13 @@
     xmlns:atom="http://www.w3.org/2005/Atom"
     xmlns:dc="http://purl.org/dc/terms/"
     xmlns:pyopds="urn:pyopds:metadata"
+    xmlns:opds="http://opds-spec.org/2010/catalog"
     exclude-result-prefixes="atom dc pyopds">
 
     <xsl:output method="html" encoding="UTF-8" indent="yes"/>
+
+    <!-- Ids of the system collection tiles (root catalog), space separated: one place to list them -->
+    <xsl:variable name="system-tiles" select="' urn:reading urn:series-next urn:recommendations urn:all-books urn:recent-books urn:by-year urn:by-author urn:by-genre '"/>
 
     <xsl:template match="/atom:feed">
         <html>
@@ -111,17 +115,31 @@
                 <xsl:if test="atom:subtitle">
                     <p class="px-4 sm:px-6 pt-4 text-sm text-slate-500 dark:text-slate-400"><xsl:value-of select="atom:subtitle"/></p>
                 </xsl:if>
+                <!-- Facets of the signed-in reader (e.g. « Masquer les livres lus », controllers/reader_feeds.py) -->
+                <xsl:if test="atom:link[@rel='http://opds-spec.org/facet']">
+                    <div class="px-4 sm:px-6 pt-4 flex flex-wrap items-center gap-2 text-sm">
+                        <span class="text-slate-500 dark:text-slate-400"><xsl:value-of select="atom:link[@rel='http://opds-spec.org/facet'][1]/@opds:facetGroup"/></span>
+                        <xsl:for-each select="atom:link[@rel='http://opds-spec.org/facet']">
+                            <a href="{@href}" class="px-3 py-1.5 rounded-full border border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700 aria-[current=true]:bg-slate-800 aria-[current=true]:border-slate-800 aria-[current=true]:text-white dark:aria-[current=true]:bg-slate-100 dark:aria-[current=true]:text-slate-900">
+                                <xsl:if test="@opds:activeFacet = 'true'">
+                                    <xsl:attribute name="aria-current">true</xsl:attribute>
+                                </xsl:if>
+                                <xsl:value-of select="@title"/>
+                            </a>
+                        </xsl:for-each>
+                    </div>
+                </xsl:if>
                 <!-- System Collections -->
-                <xsl:if test="atom:entry[atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author' or atom:id = 'urn:by-genre' or atom:id = 'urn:recommendations')]">
+                <xsl:if test="atom:entry[atom:link[@rel='subsection'] and contains($system-tiles, concat(' ', atom:id, ' '))]">
                     <div class="p-4 sm:p-6">
                         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 sm:gap-6">
-                            <xsl:apply-templates select="atom:entry[atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author' or atom:id = 'urn:by-genre' or atom:id = 'urn:recommendations')]"/>
+                            <xsl:apply-templates select="atom:entry[atom:link[@rel='subsection'] and contains($system-tiles, concat(' ', atom:id, ' '))]"/>
                         </div>
                     </div>
                 </xsl:if>
 
                 <!-- Divider between System Collections and Disk Folders -->
-                <xsl:if test="atom:entry[atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author' or atom:id = 'urn:by-genre' or atom:id = 'urn:recommendations')] and atom:entry[atom:link[@rel='subsection'] and not(atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author' or atom:id = 'urn:by-genre' or atom:id = 'urn:recommendations' or starts-with(atom:id, 'urn:author-letter:') or starts-with(atom:id, 'urn:author:'))]">
+                <xsl:if test="atom:entry[atom:link[@rel='subsection'] and contains($system-tiles, concat(' ', atom:id, ' '))] and atom:entry[atom:link[@rel='subsection'] and not(contains($system-tiles, concat(' ', atom:id, ' ')) or starts-with(atom:id, 'urn:author-letter:') or starts-with(atom:id, 'urn:author:'))]">
                     <div class="px-4 sm:px-6 py-6">
                         <div class="flex items-center gap-4">
                             <div class="flex-grow h-px bg-gradient-to-r from-transparent via-slate-300 to-transparent dark:via-slate-700"></div>
@@ -135,9 +153,9 @@
                 </xsl:if>
 
                 <!-- Disk Folders and other entries -->
-                <xsl:if test="atom:entry[not(atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author' or atom:id = 'urn:by-genre' or atom:id = 'urn:recommendations'))]">
+                <xsl:if test="atom:entry[not(atom:link[@rel='subsection'] and contains($system-tiles, concat(' ', atom:id, ' ')))]">
                     <div class="p-4 sm:p-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 sm:gap-6">
-                        <xsl:apply-templates select="atom:entry[not(atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author' or atom:id = 'urn:by-genre' or atom:id = 'urn:recommendations'))]"/>
+                        <xsl:apply-templates select="atom:entry[not(atom:link[@rel='subsection'] and contains($system-tiles, concat(' ', atom:id, ' ')))]"/>
                     </div>
                 </xsl:if>
 
@@ -272,7 +290,7 @@
 
     <xsl:template match="atom:entry">
         <xsl:choose>
-            <xsl:when test="atom:link[@rel='subsection'] and (atom:id = 'urn:all-books' or atom:id = 'urn:recent-books' or atom:id = 'urn:by-year' or atom:id = 'urn:by-author' or atom:id = 'urn:by-genre' or atom:id = 'urn:recommendations')">
+            <xsl:when test="atom:link[@rel='subsection'] and contains($system-tiles, concat(' ', atom:id, ' '))">
                 <a class="block group rounded-lg overflow-hidden transition-all duration-300 transform hover:-translate-y-1 hover:shadow-xl aspect-[2/3]">
                     <xsl:attribute name="href">
                         <xsl:value-of select="atom:link[@rel='subsection']/@href"/>
@@ -297,6 +315,12 @@
                             </xsl:when>
                             <xsl:when test="atom:id = 'urn:recommendations'">
                                 <i data-lucide="sparkles" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
+                            </xsl:when>
+                            <xsl:when test="atom:id = 'urn:reading'">
+                                <i data-lucide="book-open" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
+                            </xsl:when>
+                            <xsl:when test="atom:id = 'urn:series-next'">
+                                <i data-lucide="list-ordered" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
                             </xsl:when>
                         </xsl:choose>
                         <div class="font-semibold text-slate-700 transition-colors dark:text-slate-300"><xsl:value-of select="atom:title"/></div>

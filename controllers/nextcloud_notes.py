@@ -11,12 +11,10 @@ import hashlib
 import os
 import re
 
+from controllers.crosspoint_sync import CLIPPING_CHAPTER_MAX, CLIPPING_TEXT_MAX_BYTES
 from controllers.koreader_sync import MAX_BODY_BYTES, SyncControllerBase, utf8_length
 from controllers.sync_storage import md5_hex
 
-# Same limits as the clippings uploaded by the CrossPoint readers (crosspoint_sync.py)
-CLIPPING_TEXT_MAX_BYTES = 4096
-CLIPPING_CHAPTER_MAX = 64
 NOTE_TITLE_MAX = 512
 CATEGORY_MAX = 128
 
@@ -143,14 +141,13 @@ class NextcloudNotesController(SyncControllerBase):
     def _book_document(self, user: str, title: str, author: str | None) -> str:
         """Document of the book of a note: the library EPUB with this title (as synced by the user, else
         KOReader's id of the file), else the user's book with this title, else an id of its own."""
-        from controllers.library_index import LibraryIndex, filename_md5, koreader_partial_md5
+        from controllers.library_index import LibraryIndex
         from controllers.opds import LIBRARY_DIR
 
         epub = LibraryIndex.get_instance().find_by_title(title, author)
         if epub:
             relative = os.path.relpath(epub, LIBRARY_DIR).replace(os.sep, '/')
-            hashes = [h for h in (koreader_partial_md5(epub), filename_md5(epub)) if h]
-            document = self.sync_storage.find_library_document(user, relative, hashes, os.path.basename(epub)) or hashes[0]
+            document = self.sync_storage.epub_document(user, epub, relative)
             info = {'title': title, 'author': author, 'filename': os.path.basename(epub), 'library_path': relative}
             return self.sync_storage.remember_document(user, document, info)
         document = self.sync_storage.find_document_by_title(user, title)

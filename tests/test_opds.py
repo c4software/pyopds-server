@@ -24,7 +24,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-def create_epub(path, title, author, date=None, subjects=()):
+def create_epub(path, title, author, date=None, subjects=(), series=None, series_index=None):
         container_xml = """<?xml version='1.0' encoding='UTF-8'?>
 <container version='1.0' xmlns='urn:oasis:names:tc:opendocument:xmlns:container'>
     <rootfiles>
@@ -34,6 +34,9 @@ def create_epub(path, title, author, date=None, subjects=()):
 """
         date_element = f"<dc:date>{date}</dc:date>" if date else ""
         date_element += ''.join(f"<dc:subject>{subject}</dc:subject>" for subject in subjects)
+        if series:
+            date_element += (f'<meta name="calibre:series" content="{series}"/>'
+                             f'<meta name="calibre:series_index" content="{series_index}"/>')
         opf_template = f"""<?xml version='1.0' encoding='UTF-8'?>
 <package xmlns='http://www.idpf.org/2007/opf' version='3.0'>
     <metadata xmlns:dc='http://purl.org/dc/elements/1.1/'>
@@ -793,9 +796,13 @@ class TestOPDSAuthAndRecommendations(unittest.TestCase):
         }
         for name, (title, author, subjects) in books.items():
             create_epub(os.path.join(cls.library_dir.name, name), title, author, subjects=subjects)
+        # A series of its own (author and genre read by nobody else): « Suite de vos séries »
+        for index in (1, 2, 3):
+            create_epub(os.path.join(cls.library_dir.name, f'saga{index}.epub'), f'Saga {index}', 'Auteur Saga',
+                        subjects=['Poésie'], series='La Saga', series_index=index)
         for module in ('controllers.opds', 'controllers.sync_storage', 'controllers.koreader_sync',
-                       'controllers.library_index', 'controllers.recommendations', 'controllers.crosspoint_sync',
-                       'controllers.opds_auth'):
+                       'controllers.library_index', 'controllers.reading_state', 'controllers.recommendations',
+                       'controllers.crosspoint_sync', 'controllers.opds_auth', 'controllers.reader_feeds'):
             importlib.reload(importlib.import_module(module))
         importlib.reload(importlib.import_module('routes'))
         cls.server = importlib.reload(importlib.import_module('server'))
@@ -809,7 +816,7 @@ class TestOPDSAuthAndRecommendations(unittest.TestCase):
         cls.thread.start()
         time.sleep(0.1)
         with contextlib.redirect_stdout(io.StringIO()):
-            for user in ('reader', 'newbie', 'other'):
+            for user in ('reader', 'newbie', 'other', 'shelves'):
                 status, _, _ = http_request(cls.port, 'POST', '/users/create', {'username': user, 'password': cls.password})
                 assert status == 201, status
 
@@ -1049,6 +1056,57 @@ class TestOPDSAuthAndRecommendations(unittest.TestCase):
         self.assertEqual(self._request('GET', '/webui/book-status?path=../sync.db', headers=auth)[0], 404)
         self.assertEqual(self._request('PUT', '/webui/book-status', {'path': 'dune.epub', 'read': 'yes'}, auth)[0], 400)
         self.assertEqual(self._request('PUT', '/webui/book-status', None, auth)[0], 400)
+
+
+    def test_personal_feeds_and_hide_read_filter(self):
+        auth = basic_header('shelves', self.password)
+
+        def feed(path):
+            status, _, body = self._request('GET', path, headers=auth)
+            self.assertEqual(status, 200, body)
+            return self._feed(body)
+
+        def titles(root):
+            return [entry.find('atom:title', self.ns).text for entry in root.findall('atom:entry', self.ns)]
+
+        # An account is always required
+        self.assertEqual(self._request('GET', '/opds/reading')[0], 401)
+        self.assertEqual(self._request('GET', '/opds/series-next')[0], 401)
+        self._push_progress('shelves', 'saga1.epub', 1.0)
+        self._push_progress('shelves', 'hyperion.epub', 0.42)
+
+        # Root catalog: the reader's tiles come first
+        self.assertEqual(titles(feed('/opds'))[:3], ['En cours', 'Suite de vos séries', 'À lire ensuite'])
+        reading = feed('/opds/reading')
+        self.assertEqual(titles(reading), ['Hyperion'])
+        self.assertIn('Lu à 42 %', reading.find('atom:entry/atom:summary', self.ns).text)
+        series = feed('/opds/series-next')
+        self.assertEqual(titles(series), ['Saga 2'])
+        self.assertIn('Tome 2 de La Saga', series.find('atom:entry/atom:summary', self.ns).text)
+        # Volume 2 already opened: volume 3 comes next
+        self._push_progress('shelves', 'saga2.epub', 0.1)
+        self.assertEqual(titles(feed('/opds/series-next')), ['Saga 3'])
+
+        # « Masquer les livres lus »: facets of the lists, remembered for the next lists
+        books = feed('/opds/books?page=1')
+        facets = {link.get('title'): link for link in books.findall('atom:link', self.ns)
+                  if link.get('rel') == 'http://opds-spec.org/facet'}
+        self.assertEqual(set(facets), {'Tous les livres', 'Masquer les livres lus'})
+        self.assertEqual(facets['Tous les livres'].get('{http://opds-spec.org/2010/catalog}activeFacet'), 'true')
+        self.assertEqual(facets['Masquer les livres lus'].get('{http://opds-spec.org/2010/catalog}facetGroup'), 'Livres lus')
+        self.assertIn('Saga 1', titles(books))
+        hidden = feed(facets['Masquer les livres lus'].get('href'))
+        self.assertNotIn('Saga 1', titles(hidden))
+        self.assertIn('Saga 2', titles(hidden))
+        self.assertNotIn('Saga 1', titles(feed('/opds/series?name=La%20Saga')))
+        self.assertNotIn('Saga 1', titles(feed('/opds/search?q=saga')))
+        self.assertNotIn('Saga 1', titles(feed('/opds/recent')))
+        # Other readers and anonymous clients keep the full lists, without facets
+        _, _, body = self._request('GET', '/opds/books?page=1')
+        self.assertIn('Saga 1', titles(self._feed(body)))
+        self.assertNotIn(b'opds-spec.org/facet"', body)
+        self.assertIn('Saga 1', titles(feed('/opds/books?read=show&page=1')))
+        self.assertIn('Saga 1', titles(feed('/opds/books?page=1')))
 
 
 class TestRecommendationScoring(unittest.TestCase):

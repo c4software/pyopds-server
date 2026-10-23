@@ -41,6 +41,11 @@ def koreader_partial_md5(path: str) -> str | None:
     return md5.hexdigest()
 
 
+def document_hashes(path: str) -> list[str]:
+    """KOReader document ids of an EPUB: binary (partial MD5) first, then file name MD5."""
+    return [h for h in (koreader_partial_md5(path), filename_md5(path)) if h]
+
+
 def filename_md5(path: str) -> str:
     """KOReader's filename document id: MD5 of the file name."""
     return hashlib.md5(os.path.basename(path).encode('utf-8')).hexdigest()
@@ -232,6 +237,11 @@ class LibraryIndex:
                 return self._by_key[key]
         return None
 
+    def locate(self, documents: list[str], filename: str | None = None, library_path: str | None = None) -> str | None:
+        """EPUB of a synced book: associated by hand (library_path relative to LIBRARY_DIR), else matching
+        one of its document hashes or its device file name; None when none matches."""
+        return (library_path and self.resolve_relative(library_path)) or self.find(documents, filename)
+
     def book_meta(self, path: str) -> dict:
         """Light metadata of a library EPUB, read from its OPF only (no cover, no page estimate).
 
@@ -370,6 +380,7 @@ class LibraryIndex:
 __all__ = [
     'LibraryIndex',
     'description_text',
+    'document_hashes',
     'estimate_print_pages',
     'filename_md5',
     'koreader_partial_md5',

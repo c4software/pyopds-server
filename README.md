@@ -26,6 +26,7 @@ If you browse your OPDS feed in a web browser, it will display a simple HTML rep
 - **CrossPoint Sync Compatible**: Implements the [crosspoint-sync](https://github.com/crosspoint-reader/crosspoint-sync) extensions (`/api/v1`): the CrossPoint Sync app shows your library, reading statuses, statistics, activity and clippings, and CrossPoint readers sync rich positions and clippings.
 - **Accounts**: the catalog is public; readers can sign in (or create an account) from the web UI or with HTTP Basic in their reading app, with the same account as the sync. `OPDS_AUTH=true` makes the whole catalog private.
 - **« À lire ensuite » Recommendations**: once signed in, a tile and feed (`/opds/recommendations`) suggest unread books of the library from your reading sync history, computed locally.
+- **Personal shelves**: once signed in, the root catalog starts with « En cours » (books being read) and « Suite de vos séries » (next volume of your series), and every book list can hide the books you finished (« Masquer les livres lus »).
 - **Docker Deployment**: Prebuilt multi-arch image (`ghcr.io/c4software/pyopds-server`) published on each release, a versioned `docker-compose.yml` and a git-ignored override for your own settings.
 - **Web Interface**: The OPDS feed rendered as a web page in browsers (XSLT transformation), with light/dark theme, search, sign-in / account creation and an optional animated mosaic of covers on the navigation tiles (see [Web interface](#web-interface)).
 - **Reading Page**: `/reading` (chart icon in the web UI header) shows the books in progress per device with their last sync, finished and abandoned books, reading time, pages, a reading calendar, recent activity, devices and the latest highlights, with links to the matching books of the catalog; a synced book the server could not match can be associated by hand with a book of the library.
@@ -245,6 +246,17 @@ Once signed in, the root catalog shows an **« À lire ensuite »** tile linking
 - each entry's summary explains why it is suggested.
 
 Results are cached for 5 minutes per user and refreshed as soon as a new sync arrives. With an empty history, the feed is empty with an explanatory subtitle. Browsers without an account see the « Se connecter » button instead of the tile; OPDS clients always see the tile, and opening it asks for their credentials (HTTP Basic).
+
+### Personal shelves and « Masquer les livres lus »
+
+For a signed-in reader, the root catalog starts with the reader's tiles, in this order: **« En cours »**, **« Suite de vos séries »**, then « À lire ensuite ». They come from the reading sync, matched to the library EPUBs (`controllers/reading_state.py`, shared with the recommendations):
+
+- `/opds/reading` (« En cours »): library books being read (neither finished, paused nor abandoned), most recently synced first; each summary starts with the progress (« Lu à 42 % »).
+- `/opds/series-next` (« Suite de vos séries »): for each series with a volume read, in progress or paused, the next library volume you never opened (whole-numbered volumes first, like `/documents/{document}/next`).
+
+Both feeds always require an account; like « À lire ensuite », OPDS clients without credentials see the tiles and opening them asks for the account.
+
+Every book list (all books, recent, folders, years, authors, genres, series, search) carries, for a signed-in reader, the OPDS facets `Tous les livres` / `Masquer les livres lus` (`rel="http://opds-spec.org/facet"`, `opds:facetGroup="Livres lus"`, `opds:activeFacet` on the current one). They reopen the list with `?read=show|hide`; the choice is remembered for the reader (all lists, every client) until changed. Readers listing facets after the entries (CrossPoint) show them as rows; the web UI shows them above the list.
 
 ## Sync API (KoReader, CrossPoint)
 
