@@ -1,5 +1,5 @@
 <!-- Header of the static pages, included server-side by an "#include header" comment with a title
-     (include_partials, controllers/webui.py). Uses the page component's ready, account, load() and logout(). -->
+     (include_partials, controllers/webui.py). Uses the page component's ready and load(); the menu is the shared nav partial. -->
     <div class="bg-white/80 backdrop-blur-sm sticky top-0 z-10 shadow-sm px-4 py-2.5 flex items-center gap-3 dark:bg-slate-800/80 dark:shadow-slate-700">
         <a href="/opds" class="flex items-center text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 gap-1.5 flex-shrink-0" style="text-decoration: none;">
             <i data-lucide="arrow-left" class="w-4 h-4"></i>
@@ -7,20 +7,11 @@
         </a>
         <h1 class="text-lg font-light text-slate-800 truncate dark:text-slate-200">{{title}}</h1>
         <div class="flex-grow"></div>
-        <div class="flex items-center gap-3 flex-shrink-0">
-            <span id="account-name" class="hidden sm:inline text-sm text-slate-500 dark:text-slate-400" x-text="account && account.user"></span>
+        <div class="flex items-center gap-2.5 sm:gap-3 flex-shrink-0">
             <button type="button" x-show="ready" x-cloak @click="load()" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Actualiser">
                 <i data-lucide="refresh-cw" class="w-4 h-4"></i>
             </button>
-            <button type="button" x-show="ready" x-cloak @click="logout()" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Se déconnecter">
-                <i data-lucide="log-out" class="w-4 h-4"></i>
-            </button>
-            <a href="/opds" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center" title="Accueil">
-                <i data-lucide="home" class="w-4 h-4"></i>
-            </a>
-            <button id="theme-toggle" type="button" x-data="themeToggle" @click="toggle()" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Changer de thème">
-                <span x-show="!dark" x-cloak><i class="w-4 h-4" data-lucide="moon"></i></span>
-                <span x-show="dark" x-cloak><i class="w-4 h-4" data-lucide="sun"></i></span>
-            </button>
+            <!--#include nav -->
         </div>
+    </div>
     </div>

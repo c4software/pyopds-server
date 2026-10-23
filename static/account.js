@@ -54,20 +54,15 @@
         window.location.replace('/logout?next=' + encodeURIComponent(next));
     }
 
-    function logout() {
-        window.location.href = '/logout';
-    }
-
     /**
-     * Session part of a page component (spread into its Alpine.data): `account` for the header, `signIn()` /
-     * `logout()`, and `startSession()`, true when signed in (else it goes to the sign-in page, back to `next`).
+     * Session part of a page component (spread into its Alpine.data): `account`, `signIn()` and
+     * `startSession()`, true when signed in (else it goes to the sign-in page, back to `next`).
      */
     function pageSession(next) {
         return {
             account: { user: sessionUser() },
             ready: false,
             signIn() { signIn(next); },
-            logout: logout,
             startSession() {
                 if (!this.account.user) {
                     signIn(next);
@@ -79,5 +74,5 @@
         };
     }
 
-    window.SyncAccount = { md5: md5, sessionUser: sessionUser, signIn: signIn, logout: logout, pageSession: pageSession };
+    window.SyncAccount = { md5: md5, sessionUser: sessionUser, signIn: signIn, pageSession: pageSession };
 })();

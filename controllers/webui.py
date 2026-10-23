@@ -63,7 +63,8 @@ def include_partials(text: str) -> str:
             partial = f.read()
         for key, value in PARTIAL_ARG_RE.findall(match.group(2)):
             partial = partial.replace('{{' + key + '}}', value)
-        return partial
+        # A partial may include others (the page header includes the menu)
+        return include_partials(partial)
 
     return PARTIAL_RE.sub(include, text)
 

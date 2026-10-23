@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="/static/reading.css"/>
     <!-- Component registered on alpine:init, so before Alpine (deferred scripts run in order) -->
     <script src="/static/account.js" defer></script>
+    <script src="/static/nav.js" defer></script>
     <script src="/static/login.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.17.4/dist/cdn.min.js" defer></script>
 </head>
@@ -22,10 +23,7 @@
         </a>
         <h1 class="text-lg font-light text-slate-800 truncate dark:text-slate-200">Mon compte</h1>
         <div class="flex-grow"></div>
-        <button id="theme-toggle" type="button" x-data="themeToggle" @click="toggle()" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Changer de thème">
-            <span x-show="!dark" x-cloak><i class="w-4 h-4" data-lucide="moon"></i></span>
-            <span x-show="dark" x-cloak><i class="w-4 h-4" data-lucide="sun"></i></span>
-        </button>
+        <!--#include nav -->
     </div>
 
     <!-- One sign-in for the catalog and the reading page; the account also syncs KoReader / CrossPoint -->

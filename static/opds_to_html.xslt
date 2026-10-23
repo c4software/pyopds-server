@@ -65,23 +65,6 @@
                         <button id="search-toggle" type="button" class="md:hidden text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Rechercher">
                             <i data-lucide="search" class="w-4 h-4"></i>
                         </button>
-                        <a href="/opds" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center" title="Accueil">
-                            <i data-lucide="home" class="w-4 h-4"></i>
-                        </a>
-                        <a href="/reading" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center" title="Lecture et statistiques">
-                            <i data-lucide="bar-chart-3" class="w-4 h-4"></i>
-                        </a>
-                        <a href="/clippings" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center" title="Surlignages">
-                            <i data-lucide="highlighter" class="w-4 h-4"></i>
-                        </a>
-                        <!-- Account: sign-in button (enables « À lire ensuite »), or logout once signed in -->
-                        <a id="login-link" href="/login" class="hidden text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 items-center gap-1" title="Se connecter pour obtenir des suggestions de lecture">
-                            <i data-lucide="log-in" class="w-4 h-4"></i>
-                            <span class="hidden sm:inline">Se connecter</span>
-                        </a>
-                        <a id="logout-link" href="/logout" class="hidden text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 items-center" title="Se déconnecter">
-                            <i data-lucide="log-out" class="w-4 h-4"></i>
-                        </a>
                         <a href="/opds/refresh" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center" title="Rafraîchir le cache">
                             <i data-lucide="refresh-cw" class="w-4 h-4"></i>
                         </a>
@@ -89,10 +72,8 @@
                             <i id="mosaic-toggle-on-icon" class="hidden w-4 h-4" data-lucide="image"></i>
                             <i id="mosaic-toggle-off-icon" class="w-4 h-4" data-lucide="image-off"></i>
                         </button>
-                        <button id="theme-toggle" type="button" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200">
-                            <i id="theme-toggle-dark-icon" class="hidden w-4 h-4" data-lucide="moon"></i>
-                            <i id="theme-toggle-light-icon" class="hidden w-4 h-4" data-lucide="sun"></i>
-                        </button>
+                        <!-- Same menu on every screen (static/partials/nav.html, included by serve_xslt) -->
+                        <!--#include nav -->
                     </div>
                 </div>
                 <!-- Mobile search overlay -->
@@ -297,16 +278,15 @@
 
                 <!-- Page scripts (static/catalog/, versioned on the fly by serve_xslt): plain scripts run in order,
                      natively and with the XSLT polyfill; main.js starts everything -->
-                <!-- Shared with the static pages: session user (account.js), dates and JSON calls (page-kit.js) -->
+                <!-- Shared with the static pages: session user (account.js), dates and JSON calls (page-kit.js), menu (nav.js) -->
                 <script src="/static/account.js"></script>
                 <script src="/static/page-kit.js"></script>
+                <script src="/static/nav.js"></script>
                 <script src="/static/catalog/cover-cache.js"></script>
                 <script src="/static/catalog/covers.js"></script>
                 <script src="/static/catalog/mosaic.js"></script>
-                <script src="/static/catalog/theme.js"></script>
                 <script src="/static/catalog/back-button.js"></script>
                 <script src="/static/catalog/search.js"></script>
-                <script src="/static/catalog/account-button.js"></script>
                 <script src="/static/catalog/pagination.js"></script>
                 <script src="/static/catalog/book-sheet.js"></script>
                 <script src="/static/catalog/read-status.js"></script>

@@ -30,8 +30,6 @@
     // Header and book sheet: their elements come before the scripts in the page
     PyOPDS.backButton.init();
     PyOPDS.search.init();
-    PyOPDS.theme.init();
-    PyOPDS.accountButton.init();
     PyOPDS.mosaic.initToggle();
     PyOPDS.readStatus.init();
     PyOPDS.bookClippings.init();

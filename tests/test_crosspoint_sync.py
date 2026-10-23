@@ -411,6 +411,13 @@ class TestCrossPointSync(unittest.TestCase):
         # Alpine.js templates, pinned version (components registered before Alpine starts)
         self.assertIn(b'https://cdn.jsdelivr.net/npm/alpinejs@3.17.4/dist/cdn.min.js', body)
         self.assertIn(b'x-data="reading"', body)
+        # Same menu on every screen: the shared partial, included server-side (pages, sign-in page and catalog XSLT)
+        for path, headers in (('/reading', self.basic('readingpage')), ('/login', None), ('/opds_to_html.xslt', None)):
+            status, _, page = self.raw_get(path, headers)
+            self.assertEqual(status, 200, path)
+            self.assertIn(b'id="site-nav"', page, path)
+            self.assertNotIn(b'<!--#include', page, path)
+            self.assertIn(b'/static/nav.js', page, path)
         self.assertLess(body.index(b'/static/reading.js'), body.index(b'alpinejs@'))
         status, content_type, _ = self.raw_get('/static/reading.js?v=1')
         self.assertEqual((status, content_type), (200, 'text/javascript; charset=utf-8'))

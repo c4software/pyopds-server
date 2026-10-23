@@ -214,10 +214,9 @@ A click on a book opens its **book sheet** (a dialog closed with Escape, a click
 | `static/opds_to_html.xslt` | Feed → HTML: header, tiles, pagination, book sheet markup (plus a tiny inline script setting the dark theme before the first paint) |
 | `static/catalog/catalog.css` | Styles Tailwind utilities cannot express: tile colors, cover fade-in, mosaic, book sheet dialog, rating stars (served as is, after `tailwind.css`) |
 | `static/catalog/main.js` | Entry point: starts every feature below (loaded last) |
-| `static/catalog/theme.js` | Light/dark theme button |
+| `static/partials/nav.html`, `static/nav.js` | Menu shared by every screen (catalog, reading, clippings, sign-in): catalog, statistics, clippings, sign-in / logout, light/dark theme |
 | `static/catalog/back-button.js` | « Retour » link to the parent feed |
 | `static/catalog/search.js` | Search query pre-fill, full-width search bar on phones |
-| `static/catalog/account-button.js` | « Se connecter » / logout button |
 | `static/catalog/covers.js` | Lazy loading of the book covers |
 | `static/catalog/mosaic.js` | Cover mosaic of the navigation tiles and its button |
 | `static/catalog/cover-cache.js` | Browser cache of the mosaic (IndexedDB thumbnails, covers last shown) |
@@ -314,7 +313,7 @@ The clippings synced by the readers (CrossPoint « Sync Clippings », KoReader's
 
 A synced book that matches no EPUB of the library (shown by its document hash, e.g. a file changed since it was downloaded, or sent to the reader another way) has an **« Associer à un livre »** button: search the catalog and pick the book; its title, cover, pages and links then come from that EPUB (« Dissocier » removes the association).
 
-The reading and sign-in pages are written with [Alpine.js](https://alpinejs.dev) (3.17.4, pinned, loaded from jsDelivr, no build step): the templates are in the HTML (`x-for`, `x-text`…), the scripts only call the API and compute the view data (`Alpine.data('reading')`, `Alpine.data('login')`); `static/theme.js` holds the shared light/dark toggle.
+The reading and sign-in pages are written with [Alpine.js](https://alpinejs.dev) (3.17.4, pinned, loaded from jsDelivr, no build step): the templates are in the HTML (`x-for`, `x-text`…), the scripts only call the API and compute the view data (`Alpine.data('reading')`, `Alpine.data('login')`); `static/theme.js` sets the light/dark class before the first paint; the menu (`static/partials/nav.html`, `static/nav.js`) is the same as the catalog's.
 
 The page assets are served with a version (`/static/reading.js?v=<modification time>`), so that a reverse proxy caching static files never serves an outdated script after an update.
 
