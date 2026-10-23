@@ -857,7 +857,8 @@ class CrossPointSyncController(SyncControllerBase):
         tz = int(tz) if float(tz).is_integer() else tz
         log_rows, documents, book_stats, aliases = self.sync_storage.activity_inputs(user)
         # Print pages estimated from the library EPUB when the reader did not set them
-        for document in {row['document'] for row in log_rows}:
+        marked_finished = {d for d, info in documents.items() if info.get('status') == 'finished'}
+        for document in {row['document'] for row in log_rows} | marked_finished:
             info = documents.setdefault(document, {})
             if not info.get('page_count'):
                 library_book = self._library_book([document, *aliases.get(document, [])], info.get('filename'), info.get('library_path'))

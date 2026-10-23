@@ -457,6 +457,30 @@ class TestCrossPointSync(unittest.TestCase):
         self.request('PUT', f'/api/v1/documents/{document}/info', {'page_count': 300}, user=user)
         self.assertEqual(self.books(user)[document]['page_count'], 300)
 
+    def test_activity_includes_books_marked_read_without_progress(self):
+        user = self.create_user('markedread')
+        document = self.library_index.koreader_partial_md5(self.novel_path)
+        status, body = self.request('PUT', f'/api/v1/documents/{document}/status', {'status': 'finished'}, user=user)
+        self.assertEqual(status, 200)
+
+        status, activity = self.request('GET', '/api/v1/stats/activity?tz=0', user=user)
+        book = activity['books'][0]
+        self.assertEqual((book['document'], book['finished_at'], book['percentage']), (document, body['status_at'], 1.0))
+        self.assertEqual((book['page_count'], book['pages_read'], activity['pages_total']), (10, 10, 10))
+        self.assertEqual(activity['days'], [])
+
+        # A finish date set by hand replaces the day the status was set, and marks that day
+        self.request('PUT', f'/api/v1/documents/{document}/dates', {'start_date': '2020-01-01', 'finished_date': '2020-01-10'}, user=user)
+        status, activity = self.request('GET', '/api/v1/stats/activity?tz=0', user=user)
+        book = activity['books'][0]
+        self.assertEqual(time.strftime('%Y-%m-%d', time.gmtime(book['finished_at'])), '2020-01-10')
+        self.assertEqual((book['days_to_finish'], book['finish_manual'], book['start_manual']), (10, True, True))
+        self.assertEqual(activity['reading_days'], ['2020-01-01', '2020-01-10'])
+
+        # Back to reading: no longer finished
+        self.request('PUT', f'/api/v1/documents/{document}/status', {'status': 'reading'}, user=user)
+        self.assertEqual(self.request('GET', '/api/v1/stats/activity?tz=0', user=user)[1]['books'], [])
+
     def test_print_pages_without_spine(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, 'nospine.epub')

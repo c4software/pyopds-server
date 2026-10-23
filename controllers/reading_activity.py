@@ -243,6 +243,47 @@ def compute_activity(
             'finish_manual': manual_finish is not None and finished == manual_finish,
         })
 
+    # Books marked as read without any progress (web UI): finished on the date set by hand,
+    # else the device's, else when the status was set; the whole book counts as read
+    for document, info in documents.items():
+        if document in by_document or info.get('status') != 'finished':
+            continue
+        manual_finish = local_noon(info.get('finished_date'))
+        dated_finish = manual_finish if manual_finish is not None else local_noon(finished_dates.get(document))
+        finished = dated_finish if dated_finish is not None else info.get('status_at')
+        if not finished:
+            continue
+        if dated_finish is not None:
+            key = day_key(dated_finish)
+            day_entry(key)['books'].setdefault(document, {'document': document, 'pages': 0.0, 'syncs': 0, 'from': 0, 'to': 0})
+            reading_days.add(key)
+        manual_start = local_noon(info.get('start_date'))
+        dated_start = manual_start if manual_start is not None else local_noon(start_dates.get(document))
+        if dated_start is not None:
+            key = day_key(dated_start)
+            book = day_entry(key)['books'].setdefault(document, {'document': document, 'pages': 0.0, 'syncs': 0, 'from': 0, 'to': 0})
+            book['started'] = True
+            reading_days.add(key)
+        days_to_finish = None
+        if dated_finish is not None and dated_start is not None:
+            span = (datetime.date.fromisoformat(day_key(dated_finish)) - datetime.date.fromisoformat(day_key(dated_start))).days + 1
+            if span >= 1:
+                days_to_finish = span
+        page_count = info.get('page_count') or None
+        pages_total += page_count or 0
+        books.append({
+            'document': document,
+            'started_at': dated_start if dated_start is not None else finished,
+            'last_at': finished,
+            'percentage': 1.0,
+            'finished_at': finished,
+            'page_count': page_count,
+            'pages_read': page_count,
+            'days_to_finish': days_to_finish,
+            'start_manual': manual_start is not None,
+            'finish_manual': manual_finish is not None,
+        })
+
     books.sort(key=lambda b: b['last_at'], reverse=True)
     return {
         'pages_total': pages_total,
