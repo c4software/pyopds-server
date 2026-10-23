@@ -12,6 +12,7 @@ import os
 import re
 
 from controllers.crosspoint_sync import CLIPPING_CHAPTER_MAX, CLIPPING_TEXT_MAX_BYTES
+from controllers.http_io import read_body
 from controllers.koreader_sync import MAX_BODY_BYTES, SyncControllerBase, utf8_length
 from controllers.sync_storage import md5_hex
 
@@ -117,12 +118,7 @@ class NextcloudNotesController(SyncControllerBase):
 
     def _discard_body(self) -> None:
         """Read the body KOReader sends even with GET (`null`), so that closing the socket does not reset it."""
-        try:
-            length = int(self.request.headers.get('Content-Length') or 0)
-        except ValueError:
-            return
-        if 0 < length <= MAX_BODY_BYTES:
-            self.request.rfile.read(length)
+        read_body(self.request, MAX_BODY_BYTES)
 
     def _note_body(self) -> dict | None:
         """Validated {title, category, content} of a POST / PUT, or answer 400 (returns None)."""

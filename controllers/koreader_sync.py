@@ -5,6 +5,7 @@ import os
 import re
 from urllib.parse import parse_qs, unquote, urlparse
 
+from controllers.http_io import read_json, send_body
 from controllers.sync_storage import KOREADER_SYNC_DB_PATH, SyncStorage, md5_hex
 
 REGISTRATION_DISABLED = os.environ.get('REGISTRATION_DISABLED', '').lower() in ('1', 'true', 'yes')
@@ -169,17 +170,7 @@ class SyncControllerBase:
 
     def _read_json(self) -> tuple[bool, object]:
         """Read the JSON body; returns (False, None) when it is missing or invalid."""
-        try:
-            length = int(self.request.headers.get('Content-Length') or 0)
-        except ValueError:
-            return False, None
-        if not 0 < length <= MAX_BODY_BYTES:
-            return False, None
-        try:
-            return True, json.loads(self.request.rfile.read(length).decode('utf-8'))
-        except (ValueError, RecursionError):
-            # ValueError covers invalid UTF-8, invalid JSON and over-long integer literals
-            return False, None
+        return read_json(self.request, MAX_BODY_BYTES)
 
     def _parse_json_body(self) -> dict | None:
         """Read a JSON object body or answer 403 Invalid request (returns None)."""
@@ -192,12 +183,7 @@ class SyncControllerBase:
     def _send_json_response(self, data, status: int = 200) -> None:
         """Send a JSON response."""
         payload = json.dumps(data, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
-        self.request.send_response(status)
-        self.request.send_header('Content-Type', 'application/json')
-        self.request.send_header('Content-Length', str(len(payload)))
-        self.request.send_header('Cache-Control', 'no-store')
-        self.request.end_headers()
-        self.request.wfile.write(payload)
+        send_body(self.request, payload, 'application/json', status, {'Cache-Control': 'no-store'})
 
     def _send_json_error(self, code: int, message: str, status: int | None = None) -> None:
         """Send a KOSync error body {code, message} with the reference server's HTTP status."""

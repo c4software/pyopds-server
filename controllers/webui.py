@@ -7,6 +7,8 @@ import os
 import re
 from urllib.parse import parse_qs, urlparse
 
+from controllers.http_io import read_json, send_body
+
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static')
 
 # Served from static/: a plain file name, or one level of sub-folder (static/catalog/main.js), each part
@@ -166,17 +168,7 @@ class WebUIController:
 
     def _read_json(self) -> dict | None:
         """JSON object body of the request; answers 400 (and returns None) when missing or invalid."""
-        try:
-            length = int(self.request.headers.get('Content-Length') or 0)
-        except ValueError:
-            length = -1
-        if length <= 0 or length > JSON_BODY_MAX:
-            self._send_json({'message': 'Corps de requête invalide'}, 400)
-            return None
-        try:
-            body = json.loads(self.request.rfile.read(length).decode('utf-8'))
-        except (UnicodeDecodeError, ValueError):
-            body = None
+        _, body = read_json(self.request, JSON_BODY_MAX)
         if not isinstance(body, dict):
             self._send_json({'message': 'Corps de requête invalide'}, 400)
             return None
@@ -186,14 +178,8 @@ class WebUIController:
         self._send_body(json.dumps(data).encode('utf-8'), 'application/json; charset=utf-8', status, {'Cache-Control': 'no-store'})
 
     def _send_body(self, body: bytes, content_type: str, status: int = 200, headers: dict[str, str] | None = None) -> None:
-        """Send a complete response: status, Content-Type, Content-Length, extra headers, body."""
-        self.request.send_response(status)
-        self.request.send_header('Content-Type', content_type)
-        self.request.send_header('Content-Length', str(len(body)))
-        for name, value in (headers or {}).items():
-            self.request.send_header(name, value)
-        self.request.end_headers()
-        self.request.wfile.write(body)
+        """Send a complete response (controllers.http_io.send_body)."""
+        send_body(self.request, body, content_type, status, headers or {})
 
     def _query(self, name: str) -> str:
         """First value of a query string parameter ('' when absent)."""
@@ -215,10 +201,8 @@ class WebUIController:
             last_modified = email.utils.formatdate(mtime, usegmt=True)
             # Unchanged since the browser's copy: no body (the XSLT polyfill weighs 1.5 MB)
             if match.group(1) != 'html' and self._not_modified_since(mtime):
-                self.request.send_response(304)
-                self.request.send_header('Last-Modified', last_modified)
-                self.request.send_header('Cache-Control', self._cache_control())
-                self.request.end_headers()
+                send_body(self.request, status=304,
+                          headers={'Last-Modified': last_modified, 'Cache-Control': self._cache_control()})
                 return
             with open(path, 'rb') as f:
                 data = f.read()

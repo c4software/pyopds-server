@@ -30,6 +30,7 @@ Le projet suit une architecture de type MVC (Modèle-Vue-Contrôleur) simplifié
 * `server.py` : Point d'entrée. Configure le `TCPServer` et le `UnifiedHandler`. Ne contient pas de logique métier.
 * `routes.py` : Système de routage inspiré de Laravel. C'est ici que **toutes** les nouvelles routes URL doivent être déclarées.
 * `controllers/` : Contient la logique métier.
+    * `http_io.py` : Plomberie HTTP commune aux contrôleurs : lecture du corps (`read_body`, `read_json`, taille bornée) et envoi des réponses (`send_body`, `redirect`). Aucun contrôleur n'écrit ses en-têtes à la main (seul le téléchargement d'EPUB est envoyé en flux).
     * `opds.py` : Gestion du catalogue OPDS, scan des fichiers EPUB, génération XML (entrées de livres enrichies : résumé, genres, année, série via `LibraryIndex.book_meta`).
     * `koreader_sync.py` : API KOSync (KoReader, liseuses CrossPoint) et classe de base commune des contrôleurs de synchronisation.
     * `crosspoint_sync.py` : Extensions CrossPoint Sync (`/api/v1`) utilisées par les liseuses CrossPoint et l'app CrossPoint Sync.

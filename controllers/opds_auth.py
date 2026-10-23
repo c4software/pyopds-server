@@ -21,6 +21,7 @@ import time
 from urllib.parse import parse_qs, quote
 
 # Module attribute access: tests reload controllers.koreader_sync
+from controllers.http_io import content_length, read_body, redirect, send_body
 from controllers import koreader_sync
 from controllers.sync_storage import md5_hex
 
@@ -152,13 +153,7 @@ def wants_html(request_handler) -> bool:
 
 
 def _redirect(request_handler, location: str, cookies: list[str] = ()) -> None:
-    request_handler.send_response(303)
-    request_handler.send_header('Location', location)
-    for cookie in cookies:
-        request_handler.send_header('Set-Cookie', cookie)
-    request_handler.send_header('Content-Length', '0')
-    request_handler.send_header('Cache-Control', 'no-store')
-    request_handler.end_headers()
+    redirect(request_handler, location, 303, [*(('Set-Cookie', cookie) for cookie in cookies), ('Cache-Control', 'no-store')])
 
 
 def safe_next(target: str | None) -> str:
@@ -170,14 +165,8 @@ def safe_next(target: str | None) -> str:
 
 def send_challenge(request_handler) -> None:
     """Answer 401 with the Basic challenge."""
-    body = b'Authentication required'
-    request_handler.send_response(401)
-    request_handler.send_header('WWW-Authenticate', CHALLENGE)
-    request_handler.send_header('Content-Type', 'text/plain; charset=utf-8')
-    request_handler.send_header('Content-Length', str(len(body)))
-    request_handler.send_header('Cache-Control', 'no-store')
-    request_handler.end_headers()
-    request_handler.wfile.write(body)
+    send_body(request_handler, b'Authentication required', 'text/plain; charset=utf-8', 401,
+              {'WWW-Authenticate': CHALLENGE, 'Cache-Control': 'no-store'})
 
 
 def guard(request_handler, auth: str | None) -> bool:
@@ -221,14 +210,10 @@ class AuthController:
         JSON body {username, password} (sign-in page) answers 204 or 401; a plain form post
         (username, password, next) is redirected to `next` or back to the sign-in page.
         """
-        try:
-            length = int(self.request.headers.get('Content-Length') or 0)
-        except ValueError:
-            length = -1
-        if length < 0 or length > MAX_LOGIN_BODY:
-            self._status(413 if length > 0 else 400)
+        raw = read_body(self.request, MAX_LOGIN_BODY)
+        if raw is None:
+            self._status(413 if content_length(self.request) > 0 else 400)
             return
-        raw = self.request.rfile.read(length) if length else b''
         is_json = 'application/json' in (self.request.headers.get('Content-Type') or '')
         try:
             if is_json:
@@ -260,11 +245,8 @@ class AuthController:
             _cookie_header(self.request, USER_COOKIE, quote(user, safe=''), SESSION_SECONDS, False),
         ]
         if is_json:
-            self.request.send_response(204)
-            for cookie in cookies:
-                self.request.send_header('Set-Cookie', cookie)
-            self.request.send_header('Cache-Control', 'no-store')
-            self.request.end_headers()
+            send_body(self.request, status=204, headers=[*(('Set-Cookie', cookie) for cookie in cookies),
+                                                         ('Cache-Control', 'no-store')])
         else:
             _redirect(self.request, target, cookies)
 
@@ -277,10 +259,7 @@ class AuthController:
         ])
 
     def _status(self, code: int) -> None:
-        self.request.send_response(code)
-        self.request.send_header('Content-Length', '0')
-        self.request.send_header('Cache-Control', 'no-store')
-        self.request.end_headers()
+        send_body(self.request, status=code, headers={'Cache-Control': 'no-store'})
 
 
 __all__ = [

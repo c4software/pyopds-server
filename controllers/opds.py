@@ -12,6 +12,7 @@ from collections.abc import Collection
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from controllers.genres import genre_key, get_genre_config, normalize_genres
+from controllers.http_io import redirect, send_body
 from controllers.metadata_rules import author_key, normalize_author_name, normalize_series_name
 
 LIBRARY_DIR = os.environ.get('LIBRARY_DIR', 'books')
@@ -30,6 +31,7 @@ XHTML_NS = 'http://www.w3.org/1999/xhtml'
 # XSLT engine in WebAssembly for browsers that dropped native XSLT (github.com/mfreed7/xslt_polyfill, BSD-3)
 XSLT_POLYFILL = 'xslt-polyfill.min.js'
 ACQUISITION_FEED = 'application/atom+xml;profile=opds-catalog;kind=acquisition'
+XML_TYPE = 'application/xml; charset=utf-8'
 NAVIGATION_FEED = 'application/atom+xml;profile=opds-catalog;kind=navigation'
 # Link of every feed back to the root catalog
 START_LINK = ('start', '/opds', NAVIGATION_FEED)
@@ -1104,9 +1106,7 @@ class OPDSController:
 
     def redirect_to_opds(self):
         """Redirect root to OPDS catalog."""
-        self.request.send_response(302)
-        self.request.send_header('Location', '/opds')
-        self.request.end_headers()
+        redirect(self.request, '/opds')
 
     def serve_xslt(self):
         """Serve XSLT stylesheet for OPDS catalog."""
@@ -1149,12 +1149,7 @@ class OPDSController:
 
     def health_check(self):
         """Simple health check endpoint for monitoring."""
-        self.request.send_response(200)
-        self.request.send_header('Content-Type', 'application/json')
-        body = b'{"status":"ok"}'
-        self.request.send_header('Content-Length', str(len(body)))
-        self.request.end_headers()
-        self.request.wfile.write(body)
+        send_body(self.request, b'{"status":"ok"}', 'application/json')
 
     def show_by_year_catalog(self):
         """Display catalog of years with book counts."""
@@ -1195,9 +1190,7 @@ class OPDSController:
     def refresh_cache(self):
         """Invalidate all caches and redirect to root catalog."""
         self.book_scanner.invalidate_caches()
-        self.request.send_response(302)
-        self.request.send_header('Location', '/opds')
-        self.request.end_headers()
+        redirect(self.request, '/opds')
 
     def _handle_root_catalog(self):
         links = [
@@ -1855,11 +1848,7 @@ class OPDSController:
             return
 
         # Serve the cover image
-        self.request.send_response(200)
-        self.request.send_header('Content-Type', mime_type)
-        self.request.send_header('Cache-Control', 'public, max-age=86400')
-        self.request.end_headers()
-        self.request.wfile.write(cover_data)
+        send_body(self.request, cover_data, mime_type, headers={'Cache-Control': 'public, max-age=86400'})
 
     def _handle_opensearch_description(self):
         """Generate and serve OpenSearch description document."""
@@ -1877,12 +1866,7 @@ class OPDSController:
        template="{base_url}/opds/search?q={{searchTerms}}&amp;page={{startPage?}}"/>
 </OpenSearchDescription>'''
         
-        body = opensearch_xml.encode('utf-8')
-        self.request.send_response(200)
-        self.request.send_header('Content-Type', 'application/opensearchdescription+xml; charset=utf-8')
-        self.request.send_header('Content-Length', str(len(body)))
-        self.request.end_headers()
-        self.request.wfile.write(body)
+        send_body(self.request, opensearch_xml.encode('utf-8'), 'application/opensearchdescription+xml; charset=utf-8')
 
     def _handle_search_results(self):
         """Handle search requests and display results."""
@@ -1929,35 +1913,19 @@ class OPDSController:
                 return
             with open(xslt_path, 'r', encoding='utf-8') as f:
                 data = version_asset_refs(f.read()).encode('utf-8')
-            self.request.send_response(200)
-            self.request.send_header('Content-Type', 'application/xml; charset=utf-8')
-            self.request.send_header('Content-Length', str(len(data)))
-            self.request.send_header('Cache-Control', 'no-cache')
-            self.request.end_headers()
-            self.request.wfile.write(data)
+            send_body(self.request, data, XML_TYPE, headers={'Cache-Control': 'no-cache'})
         except Exception as exc:
             self._send_error(500, f"Error serving XSLT file: {exc}")
 
     def _send_xml_response(self, xml, catalog_kind):
-        body = xml.encode('utf-8')
-        self.request.send_response(200)
-        self.request.send_header('Content-Type', 'application/xml; charset=utf-8')
-        self.request.send_header('Content-Length', str(len(body)))
-        self.request.end_headers()
-        self.request.wfile.write(body)
+        send_body(self.request, xml.encode('utf-8'), XML_TYPE)
 
     def _send_error(self, code, message):
-        self.request.send_response(code)
-        self.request.send_header('Content-Type', 'application/xml; charset=utf-8')
-        safe_message = xml_escape(str(message))
         error_xml = (
             '<?xml version="1.0" encoding="UTF-8"?><error><code>'
-            f'{code}</code><message>{safe_message}</message></error>'
+            f'{code}</code><message>{xml_escape(str(message))}</message></error>'
         )
-        body = error_xml.encode('utf-8')
-        self.request.send_header('Content-Length', str(len(body)))
-        self.request.end_headers()
-        self.request.wfile.write(body)
+        send_body(self.request, error_xml.encode('utf-8'), XML_TYPE, code)
 
 
 __all__ = [
