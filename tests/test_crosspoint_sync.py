@@ -526,7 +526,7 @@ class TestCrossPointSync(unittest.TestCase):
         self.assertEqual(self.request('GET', api + '?category=KOReader', headers=auth)[1][0]['id'], created['id'])
         self.assertEqual(self.request('GET', api + '?category=Autre', headers=auth)[1], [])
 
-        # Exported again: a note added in the app is kept, a highlight removed on the reader is deleted
+        # Exported again: a note set by another client is kept, a highlight removed on the reader is deleted
         first_id = items['Première phrase']['id']
         self.request('PUT', f'/api/v1/clippings/{document}', {'items': [{**items['Première phrase'], 'spine': 0, 'note': 'Depuis l’app'}]}, user=user)
         status, updated = self.request('PUT', f"{api}/{created['id']}", note((12, '*Première phrase*', None, 'Chapitre 1'),
