@@ -33,6 +33,7 @@ Le projet suit une architecture de type MVC (Modèle-Vue-Contrôleur) simplifié
     * `opds.py` : Gestion du catalogue OPDS, scan des fichiers EPUB, génération XML (entrées de livres enrichies : résumé, genres, année, série via `LibraryIndex.book_meta`).
     * `koreader_sync.py` : API KOSync (KoReader, liseuses CrossPoint) et classe de base commune des contrôleurs de synchronisation.
     * `crosspoint_sync.py` : Extensions CrossPoint Sync (`/api/v1`) utilisées par les liseuses CrossPoint et l'app CrossPoint Sync.
+    * `nextcloud_notes.py` : Émulation de l'API Nextcloud Notes (`/index.php/apps/notes/api/v1/notes`, HTTP Basic du compte de synchro) : les surlignages exportés par KoReader (export « Nextcloud Notes », Markdown par livre) deviennent des clippings du livre retrouvé par son titre.
     * `sync_storage.py` : Stockage SQLite de la synchronisation (progression par appareil, documents, alias, stats, clippings).
     * `reading_activity.py` : Calculs purs des statistiques et de l'activité de lecture.
     * `genres.py` : Normalisation des sujets EPUB (`dc:subject`) en genres pour la navigation « By Genre », selon les règles de `genres.toml`.

@@ -7,6 +7,7 @@ import re
 
 from controllers.crosspoint_sync import CrossPointSyncController
 from controllers.koreader_sync import KoReaderSyncController
+from controllers.nextcloud_notes import NextcloudNotesController
 from controllers.opds import OPDSController
 from controllers.opds_auth import AuthController
 from controllers.webui import WebUIController
@@ -107,6 +108,12 @@ def register_routes(router):
     # Reading status of a catalog book for the signed-in reader (book sheet: "Marquer comme lu")
     router.get('/webui/book-status', (WebUIController, 'book_status'), name='webui.book-status', auth='user')
     router.put('/webui/book-status', (WebUIController, 'book_status_update'), name='webui.book-status.update', auth='user')
+    # KOReader highlights (Export highlights → Nextcloud Notes, this server as host, sync account)
+    notes = '/index.php/apps/notes/api/v1/notes'
+    router.get(notes, (NextcloudNotesController, 'notes_list'), name='nextcloud.notes', auth='user')
+    router.post(notes, (NextcloudNotesController, 'note_create'), name='nextcloud.notes.create', auth='user')
+    router.get(rf'{notes}/(?P<id>\d{{1,18}})', (NextcloudNotesController, 'note_show'), name='nextcloud.notes.show', auth='user')
+    router.put(rf'{notes}/(?P<id>\d{{1,18}})', (NextcloudNotesController, 'note_update'), name='nextcloud.notes.update', auth='user')
     # Page assets only (no library data): public, the sign-in page needs them. One level of
     # sub-folder (static/catalog/: scripts and styles of the catalog XSLT), names checked by the controller
     router.get(r'/static/(?P<name>[^/]+(?:/[^/]+)?)', (WebUIController, 'static_file'), name='webui.static')

@@ -82,7 +82,7 @@ class WebUIController:
 
     def book_status(self) -> None:
         """GET /webui/book-status?path=<EPUB relative to LIBRARY_DIR>: reading status of a catalog book
-        for the signed-in reader ({read, status, percentage}; status None when never synced)."""
+        for the signed-in reader ({read, status, percentage, finished_date}; status None when never synced)."""
         path = (parse_qs(urlparse(self.request.path).query).get('path') or [''])[0]
         book = self._library_book(path)
         if not book:
@@ -92,8 +92,11 @@ class WebUIController:
         self._send_json(self._status_body(state))
 
     def book_status_update(self) -> None:
-        """PUT /webui/book-status {path, read}: mark a catalog book as read (manual "finished" status)
-        or not read for the signed-in reader."""
+        """PUT /webui/book-status {path, read, finished_date?}: mark a catalog book as read (manual "finished"
+        status) or not read for the signed-in reader; finished_date ('YYYY-MM-DD' or null, left unchanged
+        when absent) is the day it was read, used by the reading statistics instead of the day it was marked."""
+        from controllers.sync_storage import date_to_seconds, now_seconds
+
         body = self._read_json()
         if body is None:
             return
@@ -101,6 +104,14 @@ class WebUIController:
         if not isinstance(read, bool) or not isinstance(body.get('path'), str):
             self._send_json({'message': 'Champs invalides'}, 400)
             return
+        dates = {}
+        if 'finished_date' in body:
+            value = body['finished_date']
+            seconds = date_to_seconds(value) if isinstance(value, str) else None
+            if value is not None and (seconds is None or seconds > now_seconds() + 86400):
+                self._send_json({'message': 'Date invalide'}, 400)
+                return
+            dates['finished_date'] = seconds
         book = self._library_book(body['path'])
         if not book:
             return
@@ -115,11 +126,16 @@ class WebUIController:
             pass
         # Not synced yet: KOReader's binary id of the file, so that a later reading on a device continues it
         document = document or koreader_partial_md5(epub) or filename_md5(epub)
-        self._send_json(self._status_body(storage.mark_library_book(self.request.opds_user, document, read, info)))
+        self._send_json(self._status_body(storage.mark_library_book(self.request.opds_user, document, read, info, dates)))
 
     @staticmethod
     def _status_body(state: dict) -> dict:
-        return {'read': state.get('status') == 'finished', 'status': state.get('status'), 'percentage': state.get('percentage')}
+        return {
+            'read': state.get('status') == 'finished',
+            'status': state.get('status'),
+            'percentage': state.get('percentage'),
+            'finished_date': state.get('finished_date'),
+        }
 
     def _library_book(self, relative: str) -> tuple | None:
         """(sync storage, user's document or None, EPUB path, relative path) of a library EPUB; answers 404 otherwise."""

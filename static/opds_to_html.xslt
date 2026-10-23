@@ -238,6 +238,12 @@
                                         <span id="book-dialog-read-label">Marquer comme lu</span>
                                     </button>
                                 </div>
+                                <!-- Day the book was read, once marked as read (static/catalog/read-status.js) -->
+                                <label id="book-dialog-read-date-block" class="mt-3 flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300" hidden="hidden">
+                                    <span>Lu le</span>
+                                    <input type="date" id="book-dialog-read-date" class="px-2 py-1 rounded-md border border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:[color-scheme:dark]"/>
+                                    <span id="book-dialog-read-date-hint" class="text-xs text-slate-400">facultatif, pour les statistiques</span>
+                                </label>
                                 <div id="book-dialog-description-block" class="mt-6" hidden="hidden">
                                     <p id="book-dialog-description" class="book-description text-sm leading-relaxed text-slate-700 dark:text-slate-300"></p>
                                     <button type="button" id="book-dialog-more" class="mt-2 text-sm font-medium text-indigo-700 hover:underline dark:text-indigo-300" hidden="hidden">Lire la suite</button>

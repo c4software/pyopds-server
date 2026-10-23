@@ -157,14 +157,24 @@ CREATE TABLE IF NOT EXISTS bookmarks (
     PRIMARY KEY (user, document, id)
 );
 CREATE INDEX IF NOT EXISTS idx_bookmarks_since ON bookmarks (user, document, updated_at, id);
+CREATE TABLE IF NOT EXISTS notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user TEXT NOT NULL,
+    document TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL DEFAULT '',
+    content TEXT NOT NULL DEFAULT '',
+    modified INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notes_user ON notes (user, category);
 """
 
 # Tables holding per-document data, cleared when a book is removed
-DOCUMENT_TABLES = ('stats_device_book', 'clippings', 'bookmarks', 'progress_log', 'progress', 'documents')
+DOCUMENT_TABLES = ('stats_device_book', 'clippings', 'bookmarks', 'notes', 'progress_log', 'progress', 'documents')
 # Tables holding per-user data, cleared when the account data is deleted
 USER_TABLES = (
     'stats_device_global', 'stats_device_book', 'stats_device_day', 'clippings', 'bookmarks',
-    'document_aliases', 'documents', 'progress', 'progress_log',
+    'document_aliases', 'documents', 'progress', 'progress_log', 'notes',
 )
 
 
@@ -515,12 +525,16 @@ class SyncStorage:
                 LEFT JOIN documents d ON d.user = p.user AND d.document = p.document
                 WHERE p.user = ? AND p.device_id = {NEWEST_DEVICE_SQL}
                 UNION ALL
-                -- Books marked as read without any progress (web UI): finished, at 100 %
-                SELECT d.document, '' AS device_id, '' AS device, 1.0 AS percentage, '' AS progress, NULL AS position,
-                       d.status_at AS updated_at, d.title, d.author, d.filename, d.cover_url, d.page_count, d.library_path,
-                       d.status_at, d.pause_reason, d.series, d.series_index, d.isbn, d.status
+                -- Books without any progress: marked as read (web UI, finished at 100 %) or with clippings
+                -- (KOReader's Nextcloud Notes export)
+                SELECT d.document, '' AS device_id, '' AS device,
+                       CASE WHEN d.status = 'finished' THEN 1.0 ELSE 0.0 END AS percentage, '' AS progress, NULL AS position,
+                       COALESCE(d.status_at, d.updated_at) AS updated_at, d.title, d.author, d.filename, d.cover_url,
+                       d.page_count, d.library_path, d.status_at, d.pause_reason, d.series, d.series_index, d.isbn, d.status
                 FROM documents d
-                WHERE d.user = ? AND d.status = 'finished'
+                WHERE d.user = ?
+                  AND (d.status = 'finished'
+                       OR EXISTS (SELECT 1 FROM clippings c WHERE c.user = d.user AND c.document = d.document AND c.deleted = 0))
                   AND NOT EXISTS (SELECT 1 FROM progress p3 WHERE p3.user = d.user AND p3.document = d.document)
                 ORDER BY updated_at DESC
                 LIMIT ?
@@ -688,30 +702,9 @@ class SyncStorage:
             ).fetchone()
             return self._resolve(conn, user, row['document']) if row else None
 
-    def reading_state(self, user: str, document: str) -> dict:
-        """Effective reading status (manual status, else finished from the progress or the device
-        statistics, else reading; None when never synced) and newest percentage of a document."""
-        with self._get_connection() as conn:
-            canonical = self._resolve(conn, user, document)
-            stored = conn.execute('SELECT status FROM documents WHERE user = ? AND document = ?', (user, canonical)).fetchone()
-            newest = self._newest_row(conn, user, canonical)
-            completed = conn.execute(f'SELECT {completed_sql("?", "?")}', (user, canonical, user, canonical)).fetchone()[0]
-        percentage = newest['percentage'] if newest else None
-        status = stored['status'] if stored else None
-        if status is None and (completed or (percentage or 0) >= FINISHED_PERCENTAGE):
-            status = 'finished'
-        elif status is None and newest:
-            status = 'reading'
-        return {'document': canonical, 'status': status, 'percentage': percentage}
-
-    def mark_library_book(self, user: str, document: str, finished: bool, info: dict) -> dict:
-        """Mark a library EPUB as read (manual 'finished' status) or not read, from the web UI.
-
-        A new document stores the EPUB's details (title, author, file name, library_path) so that
-        the reading page shows it. Unmarking clears the manual status, or sets 'reading' when the
-        progress itself says finished.
-        """
-        now = now_seconds()
+    def remember_document(self, user: str, document: str, info: dict) -> str:
+        """Create the document with the given details (title, author, filename, library_path) or fill
+        its empty title, author and file name; returns the canonical document."""
         with self._get_connection() as conn:
             canonical = self._resolve(conn, user, document)
             conn.execute(
@@ -723,11 +716,59 @@ class SyncStorage:
                     author = COALESCE(documents.author, excluded.author),
                     filename = COALESCE(documents.filename, excluded.filename)
                 """,
-                (user, canonical, info.get('title'), info.get('author'), info.get('filename'), info.get('library_path'), now),
+                (user, canonical, info.get('title'), info.get('author'), info.get('filename'), info.get('library_path'), now_seconds()),
             )
+        return canonical
+
+    def find_document_by_title(self, user: str, title: str) -> str | None:
+        """Canonical document of the user's book titled `title` (case ignored), newest first; None otherwise."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                'SELECT document FROM documents WHERE user = ? AND title = ? COLLATE NOCASE ORDER BY updated_at DESC LIMIT 1',
+                (user, title),
+            ).fetchone()
+            return self._resolve(conn, user, row['document']) if row else None
+
+    def reading_state(self, user: str, document: str) -> dict:
+        """Effective reading status (manual status, else finished from the progress or the device
+        statistics, else reading; None when never synced), newest percentage and finish date set by hand
+        ('YYYY-MM-DD' or None) of a document."""
+        with self._get_connection() as conn:
+            canonical = self._resolve(conn, user, document)
+            stored = conn.execute(
+                'SELECT status, finished_date FROM documents WHERE user = ? AND document = ?', (user, canonical)
+            ).fetchone()
+            newest = self._newest_row(conn, user, canonical)
+            completed = conn.execute(f'SELECT {completed_sql("?", "?")}', (user, canonical, user, canonical)).fetchone()[0]
+        percentage = newest['percentage'] if newest else None
+        status = stored['status'] if stored else None
+        if status is None and (completed or (percentage or 0) >= FINISHED_PERCENTAGE):
+            status = 'finished'
+        elif status is None and newest:
+            status = 'reading'
+        finished_date = stored['finished_date'] if stored else None
+        return {
+            'document': canonical,
+            'status': status,
+            'percentage': percentage,
+            'finished_date': datetime.datetime.fromtimestamp(finished_date, datetime.UTC).date().isoformat() if finished_date else None,
+        }
+
+    def mark_library_book(self, user: str, document: str, finished: bool, info: dict, dates: dict | None = None) -> dict:
+        """Mark a library EPUB as read (manual 'finished' status) or not read, from the web UI.
+
+        A new document stores the EPUB's details (title, author, file name, library_path) so that
+        the reading page shows it. Unmarking clears the manual status, or sets 'reading' when the
+        progress itself says finished. `dates` ({'finished_date': seconds or None}) sets the finish
+        date by hand; unmarking always clears it.
+        """
+        canonical = self.remember_document(user, document, info)
         if finished:
             self.set_status(user, canonical, 'finished')
+            if dates:
+                self.set_dates(user, canonical, dates)
         else:
+            self.set_dates(user, canonical, {'finished_date': None})
             self.set_status(user, canonical, None)
             if self.reading_state(user, canonical)['status'] == 'finished':
                 self.set_status(user, canonical, 'reading')
@@ -980,6 +1021,38 @@ class SyncStorage:
                 book_stats.setdefault(alias_map.get(r['document'], r['document']), []).append(json.loads(r['payload']))
             aliases = self._aliases_by_document(conn, user)
         return log_rows, documents, book_stats, aliases
+
+    # ------------------------------------------------------------------- notes
+
+    def list_notes(self, user: str, category: str | None = None) -> list[dict]:
+        """Notes received from KOReader's Nextcloud Notes export, optionally of one category."""
+        query, params = 'SELECT * FROM notes WHERE user = ?', [user]
+        if category is not None:
+            query, params = query + ' AND category = ?', [user, category]
+        with self._get_connection() as conn:
+            return [dict(row) for row in conn.execute(query + ' ORDER BY id', params)]
+
+    def get_note(self, user: str, note_id: int) -> dict | None:
+        """One note of the user, None when missing."""
+        with self._get_connection() as conn:
+            row = conn.execute('SELECT * FROM notes WHERE user = ? AND id = ?', (user, note_id)).fetchone()
+        return dict(row) if row else None
+
+    def save_note(self, user: str, note_id: int | None, document: str, title: str, category: str, content: str) -> dict:
+        """Create (note_id None) or replace a note; returns the stored note."""
+        now = now_seconds()
+        with self._get_connection() as conn:
+            if note_id is None:
+                note_id = conn.execute(
+                    'INSERT INTO notes (user, document, title, category, content, modified) VALUES (?, ?, ?, ?, ?, ?)',
+                    (user, document, title, category, content, now),
+                ).lastrowid
+            else:
+                conn.execute(
+                    'UPDATE notes SET document = ?, title = ?, category = ?, content = ?, modified = ? WHERE user = ? AND id = ?',
+                    (document, title, category, content, now, user, note_id),
+                )
+            return dict(conn.execute('SELECT * FROM notes WHERE id = ?', (note_id,)).fetchone())
 
     # --------------------------------------------------------------- clippings
 

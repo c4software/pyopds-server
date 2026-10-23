@@ -185,9 +185,11 @@ class LibraryIndex:
         # {path: (mtime, book_meta)}: light OPF metadata of the books shown in the feeds
         self._meta_cache: dict[str, tuple[float, dict]] = {}
         self._built_at = 0.0
-        # {path: (mtime, series, series index)} and {series key: [(series index or None, path)]}
-        self._series_cache: dict[str, tuple[float, str | None, int | float | None]] = {}
+        # {path: (mtime, series, series index, title, author)}, {series key: [(series index or None, path)]}
+        # and {title key: [path]}
+        self._series_cache: dict[str, tuple[float, str | None, int | float | None, str | None, str | None]] = {}
         self._series_index: dict[str, list[tuple[int | float | None, str]]] = {}
+        self._title_index: dict[str, list[str]] = {}
         self._series_built_at = 0.0
 
     def _refresh(self) -> None:
@@ -258,7 +260,7 @@ class LibraryIndex:
         if len(self._meta_cache) >= META_CACHE_MAX:
             del self._meta_cache[next(iter(self._meta_cache))]
         self._meta_cache[path] = (mtime, meta)
-        self._series_cache[path] = (mtime, meta['series'], meta['series_index'])
+        self._series_cache[path] = (mtime, meta['series'], meta['series_index'], meta['title'], meta['author'])
         return meta
 
     def details(self, path: str) -> dict:
@@ -279,11 +281,13 @@ class LibraryIndex:
         return details
 
     def _refresh_series(self) -> None:
-        """Rebuild the {series key: books} index every few minutes, reading only new or changed OPFs."""
+        """Rebuild the {series key: books} and {title key: books} indexes every few minutes, reading only
+        new or changed OPFs."""
         if time.time() - self._series_built_at < INDEX_TTL:
             return
-        series_cache: dict[str, tuple[float, str | None, int | float | None]] = {}
+        series_cache: dict[str, tuple[float, str | None, int | float | None, str | None, str | None]] = {}
         index: dict[str, list[tuple[int | float | None, str]]] = {}
+        titles: dict[str, list[str]] = {}
         for path in BookScanner.get_instance().collect_all_epub_paths():
             try:
                 mtime = os.path.getmtime(path)
@@ -293,13 +297,16 @@ class LibraryIndex:
             cached = self._series_cache.get(path)
             if not cached or cached[0] != mtime:
                 info = BookMetadata.extract_epub_info(path) or {}
-                cached = (mtime, info.get('series'), info.get('series_index'))
+                cached = (mtime, info.get('series'), info.get('series_index'), info.get('title'), info.get('author'))
             series_cache[path] = cached
-            _, series, position = cached
+            _, series, position, title, _ = cached
             if series_key(series):
                 index.setdefault(series_key(series), []).append((position, path))
+            if series_key(title):
+                titles.setdefault(series_key(title), []).append(path)
         self._series_cache = series_cache
         self._series_index = index
+        self._title_index = titles
         self._series_built_at = time.time()
 
     def invalidate(self) -> None:
@@ -321,6 +328,23 @@ class LibraryIndex:
         self._refresh_series()
         books = [book for book in self._series_index.get(key, []) if os.path.exists(book[1])]
         return sorted(books, key=self._series_order)
+
+    def find_by_title(self, title: str, author: str | None = None) -> str | None:
+        """Library EPUB whose title matches `title` (accents, case and punctuation ignored); among several,
+        the one sharing the most author name words with `author`. None when no title matches."""
+        key = series_key(title)
+        if not key:
+            return None
+        self._refresh_series()
+        paths = [path for path in self._title_index.get(key, []) if os.path.exists(path)]
+        if len(paths) <= 1:
+            return paths[0] if paths else None
+        wanted = set(series_key(author).split())
+
+        def shared(path: str) -> int:
+            return len(wanted & set(series_key(self._series_cache[path][4]).split()))
+
+        return max(paths, key=shared)
 
     def next_in_series(self, series: str, position: int | float, exclude: str | None = None) -> tuple[int | float, str] | None:
         """(position, path) of the library book coming after `position` in `series` (names compared

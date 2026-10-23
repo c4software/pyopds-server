@@ -1016,16 +1016,27 @@ class TestOPDSAuthAndRecommendations(unittest.TestCase):
         # An account is always required
         self.assertEqual(self._request('GET', '/webui/book-status?path=cuisine.epub')[0], 401)
         # Never synced book: marked as read, listed as finished by the reading page, then unmarked
-        self.assertEqual(book_status('cuisine.epub'), {'read': False, 'status': None, 'percentage': None})
+        self.assertEqual(book_status('cuisine.epub'), {'read': False, 'status': None, 'percentage': None, 'finished_date': None})
         self.assertEqual(mark('cuisine.epub', True)['status'], 'finished')
         self.assertTrue(book_status('cuisine.epub')['read'])
         item = progress_items()['cuisine.epub']
         self.assertEqual((item['status'], item['title'], item['percentage']), ('finished', 'Cuisine facile', 1.0))
+        # Day it was read: replaces the day it was marked in the statistics, cleared when unmarked
+        status, _, body = self._request('PUT', '/webui/book-status', {'path': 'cuisine.epub', 'read': True, 'finished_date': '2019-05-04'}, auth)
+        self.assertEqual((status, json.loads(body)['finished_date']), (200, '2019-05-04'))
+        self.assertEqual(book_status('cuisine.epub')['finished_date'], '2019-05-04')
+        _, _, body = self._request('GET', '/api/v1/stats/activity?tz=0', headers=self._sync_headers('marker'))
+        finished_at = [book['finished_at'] for book in json.loads(body)['books']]
+        self.assertEqual([time.strftime('%Y-%m-%d', time.gmtime(at)) for at in finished_at], ['2019-05-04'])
+        self.assertEqual(mark('cuisine.epub', True)['finished_date'], '2019-05-04')
+        for date in ('2019-13-01', '04/05/2019', 12, '2999-01-01'):
+            self.assertEqual(self._request('PUT', '/webui/book-status', {'path': 'cuisine.epub', 'read': True, 'finished_date': date}, auth)[0], 400)
         self.assertFalse(mark('cuisine.epub', False)['read'])
+        self.assertIsNone(book_status('cuisine.epub')['finished_date'])
         self.assertNotIn('cuisine.epub', progress_items())
         # Book synced by KOReader (file name hash), finished by its progress: unmarking keeps it in progress
         self._push_progress('marker', 'hyperion.epub', 1.0)
-        self.assertEqual(book_status('hyperion.epub'), {'read': True, 'status': 'finished', 'percentage': 1.0})
+        self.assertEqual(book_status('hyperion.epub'), {'read': True, 'status': 'finished', 'percentage': 1.0, 'finished_date': None})
         self.assertEqual(mark('hyperion.epub', False)['status'], 'reading')
         self.assertEqual(progress_items()['hyperion.epub']['status'], 'reading')
         self.assertTrue(mark('hyperion.epub', True)['read'])

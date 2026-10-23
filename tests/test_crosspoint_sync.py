@@ -1,4 +1,5 @@
 """Tests of the CrossPoint Sync API (/api/v1) as used by CrossPoint readers and the CrossPoint Sync app."""
+import base64
 import gzip
 import hashlib
 import http.client
@@ -105,7 +106,8 @@ class TestCrossPointSync(unittest.TestCase):
         create_series_epub(cls.series_paths[3], 'La Rose blanche', 'La Compagnie Noire', 3, rating=0)
 
         for module in ('controllers.opds', 'controllers.sync_storage', 'controllers.koreader_sync',
-                       'controllers.library_index', 'controllers.reading_activity', 'controllers.crosspoint_sync'):
+                       'controllers.library_index', 'controllers.reading_activity', 'controllers.crosspoint_sync',
+                       'controllers.nextcloud_notes'):
             importlib.reload(importlib.import_module(module))
         importlib.reload(importlib.import_module('routes'))
         server_mod = importlib.reload(importlib.import_module('server'))
@@ -480,6 +482,74 @@ class TestCrossPointSync(unittest.TestCase):
         # Back to reading: no longer finished
         self.request('PUT', f'/api/v1/documents/{document}/status', {'status': 'reading'}, user=user)
         self.assertEqual(self.request('GET', '/api/v1/stats/activity?tz=0', user=user)[1]['books'], [])
+
+    def test_koreader_highlights_through_nextcloud_notes(self):
+        user = self.create_user('notes')
+        auth = {'Authorization': 'Basic ' + base64.b64encode(b'notes:secret').decode()}
+        api = '/index.php/apps/notes/api/v1/notes'
+        document = self.library_index.koreader_partial_md5(self.novel_path)
+        self.put_progress(user, document, 0.4, device_id='koreader')
+
+        def note(*highlights):
+            # KOReader's template/md.lua layout
+            lines = ['# Roman', '##### Auteur\n']
+            chapter = None
+            for page, text, comment, chapter_title in highlights:
+                if chapter_title != chapter:
+                    chapter = chapter_title
+                    lines.append('## ' + chapter)
+                lines.append(f'### Page {page} @ 21 October 2026 09:15:42 PM')
+                lines.append(text)
+                if comment:
+                    lines.append('\n---\n' + comment)
+            return {'title': 'Auteur - Roman', 'content': '\n'.join(lines), 'category': 'KOReader'}
+
+        def clippings():
+            return {c['text']: c for c in self.request('GET', '/api/v1/clippings', user=user)[1]['items']}
+
+        # An account is required; KOReader sends a `null` body even with GET
+        self.assertEqual(self.raw_get(api + '?category=KOReader')[0], 401)
+        self.assertEqual(self.request('GET', api + '?category=KOReader', 'null-body', headers=auth)[0], 200)
+        status, notes = self.request('GET', api + '?category=KOReader', headers=auth)
+        self.assertEqual((status, notes), (200, []))
+
+        status, created = self.request('POST', api, note((12, '*Première phrase*', None, 'Chapitre 1'),
+                                                          (30, '*Avec note*', 'Mon avis\nsur deux lignes', 'Chapitre 2')), headers=auth)
+        self.assertEqual(status, 200, created)
+        self.assertEqual((created['title'], created['category']), ('Auteur - Roman', 'KOReader'))
+        items = clippings()
+        self.assertEqual(set(items), {'Première phrase', 'Avec note'})
+        self.assertEqual({c['document'] for c in items.values()}, {document})
+        self.assertEqual((items['Avec note']['chapter'], items['Avec note']['note']), ('Chapitre 2', 'Mon avis\nsur deux lignes'))
+        self.assertIsNone(items['Première phrase']['note'])
+        self.assertEqual(time.strftime('%Y-%m-%d %H:%M', time.gmtime(items['Avec note']['created_at'])), '2026-10-21 21:15')
+        self.assertEqual(self.request('GET', api + '?category=KOReader', headers=auth)[1][0]['id'], created['id'])
+        self.assertEqual(self.request('GET', api + '?category=Autre', headers=auth)[1], [])
+
+        # Exported again: a note added in the app is kept, a highlight removed on the reader is deleted
+        first_id = items['Première phrase']['id']
+        self.request('PUT', f'/api/v1/clippings/{document}', {'items': [{**items['Première phrase'], 'spine': 0, 'note': 'Depuis l’app'}]}, user=user)
+        status, updated = self.request('PUT', f"{api}/{created['id']}", note((12, '*Première phrase*', None, 'Chapitre 1'),
+                                                                            (50, '*Nouvelle*', None, 'Chapitre 3')), headers=auth)
+        self.assertEqual(status, 200, updated)
+        items = clippings()
+        self.assertEqual(set(items), {'Première phrase', 'Nouvelle'})
+        self.assertEqual((items['Première phrase']['id'], items['Première phrase']['note']), (first_id, 'Depuis l’app'))
+
+        # Unknown notes, other accounts and other content
+        self.assertEqual(self.request('PUT', f'{api}/999999', note(), headers=auth)[0], 404)
+        self.create_user('notes2')
+        other = {'Authorization': 'Basic ' + base64.b64encode(b'notes2:secret').decode()}
+        self.assertEqual(self.request('GET', f"{api}/{created['id']}", headers=other)[0], 404)
+        self.assertEqual(self.request('POST', api, {'title': 'x', 'content': 'pas une note KOReader'}, headers=auth)[0], 400)
+        self.assertEqual(self.request('POST', api, {'content': 12}, headers=auth)[0], 400)
+
+        # A book outside the library and never synced is listed with its clippings
+        status, _ = self.request('POST', api, {'title': 'Inconnu', 'category': 'KOReader', 'content':
+                                               '# Livre absent\n##### Quelqu’un\n\n## Début\n### Page 3 @ bad date\nTexte seul'}, headers=auth)
+        self.assertEqual(status, 200)
+        absent = next(c for c in clippings().values() if c['text'] == 'Texte seul')
+        self.assertEqual(self.books(user)[absent['document']]['title'], 'Livre absent')
 
     def test_print_pages_without_spine(self):
         with tempfile.TemporaryDirectory() as tmp:
