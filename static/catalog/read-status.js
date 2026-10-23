@@ -1,6 +1,6 @@
 // Catalog web UI: "Marquer comme lu" button of the book sheet (button#book-dialog-read), for signed-in
-// readers only (cookie pyopds_user). On each opened sheet, reads the book's status from
-// GET /webui/book-status?path=… (path of the /download/ link) and toggles it with PUT /webui/book-status
+// readers only (SyncAccount.sessionUser). On each opened sheet, reads the book's status from
+// GET /webui/book-status?path=… (path sent by book-sheet.js) and toggles it with PUT /webui/book-status
 // (manual "finished" status of the sync account, shown by the reading page and the recommendations).
 // Once read, an optional date field (input#book-dialog-read-date) sets the day it was read, used by the
 // reading statistics instead of the day it was marked.
@@ -16,39 +16,10 @@
     // Book shown by the sheet: answers for an earlier book are ignored
     let current = null;
 
-    function signedIn() {
-        return /(?:^|;\s*)pyopds_user=/.test(document.cookie);
-    }
-
-    /** EPUB path relative to the library, from the tile's download link (/download/<path>). */
-    function bookPath(link) {
-        const href = link.getAttribute('href') || '';
-        const prefix = '/download/';
-        if (href.indexOf(prefix) !== 0) return null;
-        try {
-            return decodeURIComponent(href.slice(prefix.length).split('?')[0]);
-        } catch (e) {
-            return null;
-        }
-    }
-
-    /** JSON answer of the endpoint; an expired session (redirected to /login) counts as a failure. */
-    async function call(method, path, body) {
-        const response = await fetch(
-            method === 'GET' ? '/webui/book-status?path=' + encodeURIComponent(path) : '/webui/book-status',
-            {
-                method: method,
-                headers: body ? { 'Accept': 'application/json', 'Content-Type': 'application/json' } : { 'Accept': 'application/json' },
-                body: body ? JSON.stringify(body) : undefined,
-                cache: 'no-store',
-                credentials: 'same-origin',
-            }
-        );
-        const type = response.headers.get('Content-Type') || '';
-        if (!response.ok || type.indexOf('application/json') !== 0) {
-            throw new Error('Erreur ' + response.status);
-        }
-        return response.json();
+    /** Status of a book (GET), or the new one after a change (PUT with a body). */
+    function call(method, path, body) {
+        const url = method === 'GET' ? '/webui/book-status?path=' + encodeURIComponent(path) : '/webui/book-status';
+        return window.PageKit.fetchJson(url, method, body);
     }
 
     function today() {
@@ -67,12 +38,11 @@
     }
 
     /** Show the button of the opened book once its status is known. */
-    async function show(link) {
+    async function show(path) {
         button.hidden = true;
         dateBlock.hidden = true;
-        current = signedIn() ? bookPath(link) : null;
+        current = window.SyncAccount.sessionUser() ? path : null;
         if (!current) return;
-        const path = current;
         try {
             const state = await call('GET', path);
             if (path !== current) return;
@@ -125,7 +95,7 @@
         button.addEventListener('click', toggle);
         dateInput.addEventListener('change', saveDate);
         dialog.addEventListener('book-sheet:open', function (event) {
-            show(event.detail.link);
+            show(event.detail.path);
         });
     }
 

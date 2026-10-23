@@ -9,7 +9,7 @@ from html.parser import HTMLParser
 from urllib.parse import unquote
 
 from controllers.genres import genre_key
-from controllers.opds import LIBRARY_DIR, BookMetadata, BookScanner, SecurityUtils
+from controllers.opds import LIBRARY_DIR, BookMetadata, BookScanner, SecurityUtils, library_relative_path
 
 CHUNK_SIZE = 1024
 INDEX_TTL = 300
@@ -285,7 +285,7 @@ class LibraryIndex:
             **self.book_meta(path),
             'has_cover': cover is not None,
             'page_count': estimate_print_pages(path),
-            'relative_path': os.path.relpath(path, LIBRARY_DIR).replace(os.sep, '/'),
+            'relative_path': library_relative_path(path),
         }
         self._details_cache[path] = (mtime, details)
         return details

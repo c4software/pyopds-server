@@ -71,6 +71,9 @@
                         <a href="/reading" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center" title="Lecture et statistiques">
                             <i data-lucide="bar-chart-3" class="w-4 h-4"></i>
                         </a>
+                        <a href="/clippings" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center" title="Surlignages">
+                            <i data-lucide="highlighter" class="w-4 h-4"></i>
+                        </a>
                         <!-- Account: sign-in button (enables « À lire ensuite »), or logout once signed in -->
                         <a id="login-link" href="/login" class="hidden text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 items-center gap-1" title="Se connecter pour obtenir des suggestions de lecture">
                             <i data-lucide="log-in" class="w-4 h-4"></i>
@@ -266,6 +269,27 @@
                                     <p id="book-dialog-description" class="book-description text-sm leading-relaxed text-slate-700 dark:text-slate-300"></p>
                                     <button type="button" id="book-dialog-more" class="mt-2 text-sm font-medium text-indigo-700 hover:underline dark:text-indigo-300" hidden="hidden">Lire la suite</button>
                                 </div>
+                                <!-- The signed-in reader's clippings of the book (static/catalog/book-clippings.js) -->
+                                <div id="book-dialog-clippings-block" class="mt-6" hidden="hidden">
+                                    <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                        <h3 class="flex items-center gap-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200">
+                                            <i data-lucide="highlighter" class="w-4 h-4"></i>
+                                            <span>Vos surlignages</span>
+                                            <span id="book-dialog-clippings-count" class="font-normal text-slate-500 dark:text-slate-400"></span>
+                                        </h3>
+                                        <div class="flex-grow"></div>
+                                        <a id="book-dialog-clippings-export" download="" class="text-sm text-indigo-700 hover:underline dark:text-indigo-300">Exporter (.md)</a>
+                                        <a href="/clippings" class="text-sm text-indigo-700 hover:underline dark:text-indigo-300">Tous mes surlignages</a>
+                                    </div>
+                                    <ul id="book-dialog-clippings" class="mt-3 flex flex-col gap-3"></ul>
+                                    <template id="book-dialog-clipping-template">
+                                        <li class="border-l-2 border-amber-300 pl-3 dark:border-amber-600">
+                                            <blockquote data-field="text" class="text-sm leading-relaxed text-slate-800 whitespace-pre-line dark:text-slate-200"></blockquote>
+                                            <p data-field="note" class="mt-1 text-xs italic text-slate-600 dark:text-slate-300"></p>
+                                            <p data-field="caption" class="mt-1 text-xs text-slate-500 dark:text-slate-400"></p>
+                                        </li>
+                                    </template>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -273,6 +297,9 @@
 
                 <!-- Page scripts (static/catalog/, versioned on the fly by serve_xslt): plain scripts run in order,
                      natively and with the XSLT polyfill; main.js starts everything -->
+                <!-- Shared with the static pages: session user (account.js), dates and JSON calls (page-kit.js) -->
+                <script src="/static/account.js"></script>
+                <script src="/static/page-kit.js"></script>
                 <script src="/static/catalog/cover-cache.js"></script>
                 <script src="/static/catalog/covers.js"></script>
                 <script src="/static/catalog/mosaic.js"></script>
@@ -283,6 +310,7 @@
                 <script src="/static/catalog/pagination.js"></script>
                 <script src="/static/catalog/book-sheet.js"></script>
                 <script src="/static/catalog/read-status.js"></script>
+                <script src="/static/catalog/book-clippings.js"></script>
                 <script src="/static/catalog/main.js"></script>
             </body>
         </html>

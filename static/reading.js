@@ -18,9 +18,7 @@
 
     // ----------------------------------------------------------------- helpers
 
-    function encodePath(path) {
-        return path.split('/').map(encodeURIComponent).join('/');
-    }
+    const { formatDate } = window.PageKit;
 
     function dayKey(date) {
         return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
@@ -37,14 +35,9 @@
         return today;
     }
 
-    const dateFormat = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
     const dayFormat = new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
     const monthFormat = new Intl.DateTimeFormat('fr-FR', { month: 'short' });
     const relativeFormat = new Intl.RelativeTimeFormat('fr', { numeric: 'auto' });
-
-    function formatDate(seconds) {
-        return seconds ? dateFormat.format(new Date(seconds * 1000)) : '';
-    }
 
     function relativeTime(seconds) {
         if (!seconds) return '';
@@ -256,19 +249,20 @@
 
     // Common part of the book cards: cover, title and the catalog / association links
     function bookView(item) {
+        const title = item.title || item.filename || item.document;
+        const links = item.library_path ? window.PageKit.libraryLinks(item.library_path, title) : null;
         const view = {
             key: item.document,
-            title: item.title || item.filename || item.document,
+            title: title,
             author: item.author || '',
-            cover: item.cover_url || (item.library_path ? '/cover/' + encodePath(item.library_path) : ''),
+            cover: item.cover_url || (links ? links.cover : ''),
             broken: false,
             linkable: !item.library_path,
             document: item.document,
         };
-        if (item.library_path) {
-            const folder = item.library_path.includes('/') ? item.library_path.slice(0, item.library_path.lastIndexOf('/')) : '';
-            view.catalog = folder ? '/opds/folder/' + encodePath(folder) : '/opds/search?q=' + encodeURIComponent(item.title || item.filename || '');
-            view.download = '/download/' + encodePath(item.library_path);
+        if (links) {
+            view.catalog = links.catalog;
+            view.download = links.download;
             view.unlink = Boolean(item.library_linked);
         }
         return view;
@@ -349,21 +343,16 @@
                     this.load();
                 },
 
-                // lucide replaces the <i data-lucide> placeholders by SVGs: run after each render that may add some
-                // (placeholders are never Alpine roots nor bound elements, so the replacement never breaks a binding)
                 icons() {
-                    this.$nextTick(function () { window.lucide.createIcons(); });
+                    window.PageKit.icons(this);
                 },
 
-                // Single sign-in page for the catalog and this page (/logout also closes the catalog session)
                 signIn() {
-                    window.SyncAccount.save(null);
-                    window.location.replace('/logout?next=' + encodeURIComponent('/reading'));
+                    window.SyncAccount.signIn('/reading');
                 },
 
                 logout() {
-                    window.SyncAccount.save(null);
-                    window.location.href = '/logout';
+                    window.SyncAccount.logout();
                 },
 
                 async load() {

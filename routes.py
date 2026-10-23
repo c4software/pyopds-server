@@ -5,6 +5,7 @@ Defines routes and router inspired by Laravel routing.
 
 import re
 
+from controllers.clippings import ClippingsController
 from controllers.crosspoint_sync import CrossPointSyncController
 from controllers.koreader_sync import KoReaderSyncController
 from controllers.nextcloud_notes import NextcloudNotesController
@@ -111,6 +112,10 @@ def register_routes(router):
     # Reading status of a catalog book for the signed-in reader (book sheet: "Marquer comme lu")
     router.get('/webui/book-status', (WebUIController, 'book_status'), name='webui.book-status', auth='user')
     router.put('/webui/book-status', (WebUIController, 'book_status_update'), name='webui.book-status.update', auth='user')
+    # Clippings of the signed-in reader: book sheet, /clippings page and Markdown export
+    router.get('/clippings', (ClippingsController, 'clippings_page'), name='webui.clippings', auth='user')
+    router.get('/webui/clippings', (ClippingsController, 'clippings_list'), name='webui.clippings.list', auth='user')
+    router.get('/webui/clippings/export', (ClippingsController, 'clippings_export'), name='webui.clippings.export', auth='user')
     # KOReader highlights (Export highlights → Nextcloud Notes, this server as host, sync account)
     notes = '/index.php/apps/notes/api/v1/notes'
     router.get(notes, (NextcloudNotesController, 'notes_list'), name='nextcloud.notes', auth='user')

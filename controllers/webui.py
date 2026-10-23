@@ -18,6 +18,9 @@ STATIC_NAME_RE = re.compile(rf'^(?:[A-Za-z0-9_-]+/)?{_PART}\.(html|js|css|svg)$'
 ASSET_REF_RE = re.compile(rf'(/static/((?:[A-Za-z0-9_-]+/)?{_PART}\.(?:js|css|svg)))"')
 # A versioned URL never changes content: cached for a year (the version changes with the file)
 IMMUTABLE = 'public, max-age=31536000, immutable'
+# Server-side includes of the pages (include_partials)
+PARTIAL_RE = re.compile(r'<!--#include ([a-z-]+)((?: [a-z]+="[^"]*")*) -->')
+PARTIAL_ARG_RE = re.compile(r' ([a-z]+)="([^"]*)"')
 # Largest JSON body accepted by the web UI endpoints
 JSON_BODY_MAX = 4096
 # Scripts and stylesheets sent gzip-compressed when the browser accepts it (polyfill: 1.5 MB -> 0.5 MB),
@@ -48,6 +51,19 @@ def version_asset_refs(text: str) -> str:
             return match.group(0)
         return f'{match.group(1)}?v={version}"'
     return ASSET_REF_RE.sub(versioned, text)
+
+
+def include_partials(text: str) -> str:
+    """Replace each `<!--#include name key="value"… -->` of a page by static/partials/<name>.html, whose
+    `{{key}}` placeholders take the given values (markup shared by the pages, e.g. their header)."""
+    def include(match: re.Match) -> str:
+        with open(os.path.join(STATIC_DIR, 'partials', f'{match.group(1)}.html'), encoding='utf-8') as f:
+            partial = f.read()
+        for key, value in PARTIAL_ARG_RE.findall(match.group(2)):
+            partial = partial.replace('{{' + key + '}}', value)
+        return partial
+
+    return PARTIAL_RE.sub(include, text)
 
 
 def asset_url(name: str) -> str:
@@ -83,8 +99,7 @@ class WebUIController:
     def book_status(self) -> None:
         """GET /webui/book-status?path=<EPUB relative to LIBRARY_DIR>: reading status of a catalog book
         for the signed-in reader ({read, status, percentage, finished_date}; status None when never synced)."""
-        path = (parse_qs(urlparse(self.request.path).query).get('path') or [''])[0]
-        book = self._library_book(path)
+        book = self._library_book(self._query('path'))
         if not book:
             return
         storage, document = book[0], book[1]
@@ -168,13 +183,21 @@ class WebUIController:
         return body
 
     def _send_json(self, data: dict, status: int = 200) -> None:
-        body = json.dumps(data).encode('utf-8')
+        self._send_body(json.dumps(data).encode('utf-8'), 'application/json; charset=utf-8', status, {'Cache-Control': 'no-store'})
+
+    def _send_body(self, body: bytes, content_type: str, status: int = 200, headers: dict[str, str] | None = None) -> None:
+        """Send a complete response: status, Content-Type, Content-Length, extra headers, body."""
         self.request.send_response(status)
-        self.request.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.request.send_header('Content-Type', content_type)
         self.request.send_header('Content-Length', str(len(body)))
-        self.request.send_header('Cache-Control', 'no-store')
+        for name, value in (headers or {}).items():
+            self.request.send_header(name, value)
         self.request.end_headers()
         self.request.wfile.write(body)
+
+    def _query(self, name: str) -> str:
+        """First value of a query string parameter ('' when absent)."""
+        return (parse_qs(urlparse(self.request.path).query).get(name) or [''])[0]
 
     def serve_page(self, name: str, replacements: dict[str, str] | None = None) -> None:
         """Serve a page of static/ (e.g. the sign-in page), with versioned asset URLs and text replacements."""
@@ -200,31 +223,24 @@ class WebUIController:
             with open(path, 'rb') as f:
                 data = f.read()
             if match.group(1) == 'html':
-                text = version_asset_refs(data.decode('utf-8'))
+                text = version_asset_refs(include_partials(data.decode('utf-8')))
                 for old, new in (replacements or {}).items():
                     text = text.replace(old, new)
                 data = text.encode('utf-8')
         except (OSError, UnicodeDecodeError):
             self._send_error(500, 'Unable to read file')
             return
-        encoding = None
-        if match.group(1) in GZIP_TYPES and 'gzip' in (self.request.headers.get('Accept-Encoding') or ''):
-            data = _gzipped(path, mtime, data)
-            encoding = 'gzip'
-        self.request.send_response(200)
-        self.request.send_header('Content-Type', CONTENT_TYPES[match.group(1)])
-        if encoding:
-            self.request.send_header('Content-Encoding', encoding)
+        headers: dict[str, str] = {}
         if match.group(1) in GZIP_TYPES:
-            self.request.send_header('Vary', 'Accept-Encoding')
-        self.request.send_header('Content-Length', str(len(data)))
+            headers['Vary'] = 'Accept-Encoding'
+            if 'gzip' in (self.request.headers.get('Accept-Encoding') or ''):
+                data = _gzipped(path, mtime, data)
+                headers['Content-Encoding'] = 'gzip'
         if match.group(1) == 'html':
-            self.request.send_header('Cache-Control', 'no-cache')
+            headers['Cache-Control'] = 'no-cache'
         else:
-            self.request.send_header('Last-Modified', last_modified)
-            self.request.send_header('Cache-Control', self._cache_control())
-        self.request.end_headers()
-        self.request.wfile.write(data)
+            headers.update({'Last-Modified': last_modified, 'Cache-Control': self._cache_control()})
+        self._send_body(data, CONTENT_TYPES[match.group(1)], 200, headers)
 
     def _cache_control(self) -> str:
         """Versioned asset URLs are immutable; plain ones are revalidated (Last-Modified)."""
@@ -241,12 +257,7 @@ class WebUIController:
         return mtime <= since
 
     def _send_error(self, code: int, message: str) -> None:
-        body = message.encode('utf-8')
-        self.request.send_response(code)
-        self.request.send_header('Content-Type', 'text/plain; charset=utf-8')
-        self.request.send_header('Content-Length', str(len(body)))
-        self.request.end_headers()
-        self.request.wfile.write(body)
+        self._send_body(message.encode('utf-8'), 'text/plain; charset=utf-8', code)
 
 
 __all__ = ['WebUIController', 'asset_url', 'version_asset_refs', 'STATIC_DIR']

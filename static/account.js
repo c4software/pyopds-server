@@ -63,5 +63,17 @@
         return match ? decodeURIComponent(match[1]) : null;
     }
 
-    window.SyncAccount = { md5: md5, load: load, save: save, sessionUser: sessionUser };
+    // Single sign-in page for the catalog and the pages (/logout also closes the catalog session),
+    // back to `next` once signed in
+    function signIn(next) {
+        save(null);
+        window.location.replace('/logout?next=' + encodeURIComponent(next));
+    }
+
+    function logout() {
+        save(null);
+        window.location.href = '/logout';
+    }
+
+    window.SyncAccount = { md5: md5, load: load, save: save, sessionUser: sessionUser, signIn: signIn, logout: logout };
 })();

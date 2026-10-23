@@ -122,14 +122,26 @@
         more.textContent = 'Lire la suite';
     }
 
+    /** EPUB path relative to the library, from the tile's download link (/download/<path>); null otherwise. */
+    function bookPath(link) {
+        const href = link.getAttribute('href') || '';
+        const prefix = '/download/';
+        if (href.indexOf(prefix) !== 0) return null;
+        try {
+            return decodeURIComponent(href.slice(prefix.length).split('?')[0]);
+        } catch (e) {
+            return null;
+        }
+    }
+
     /** Open the sheet of a book tile; false when the browser has no modal dialogs. */
     function open(link, fromHash) {
         if (!bookDialog || typeof bookDialog.showModal !== 'function') {
             return false;
         }
         fillBookDialog(link);
-        // Other features of the sheet (read-status.js) follow the opened book
-        bookDialog.dispatchEvent(new CustomEvent('book-sheet:open', { detail: { link: link } }));
+        // Other features of the sheet (read-status.js, book-clippings.js) follow the opened book
+        bookDialog.dispatchEvent(new CustomEvent('book-sheet:open', { detail: { link: link, path: bookPath(link) } }));
         bookDialog.showModal();
         document.documentElement.style.overflow = 'hidden';
         bookDialog.scrollTop = 0;

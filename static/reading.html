@@ -10,36 +10,14 @@
     <link rel="stylesheet" href="/static/reading.css"/>
     <!-- Components registered on alpine:init, so before Alpine (deferred scripts run in order) -->
     <script src="/static/account.js" defer></script>
+    <script src="/static/page-kit.js" defer></script>
     <script src="/static/reading.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.17.4/dist/cdn.min.js" defer></script>
 </head>
 <!-- Templates of the `reading` component (static/reading.js). Icons: <i data-lucide> placeholders, replaced by
      lucide.createIcons() after each render; never put an Alpine directive on them except a static :data-lucide. -->
 <body x-data="reading" class="bg-slate-50 font-sans dark:bg-slate-900 text-slate-800 dark:text-slate-200 min-h-screen">
-    <div class="bg-white/80 backdrop-blur-sm sticky top-0 z-10 shadow-sm px-4 py-2.5 flex items-center gap-3 dark:bg-slate-800/80 dark:shadow-slate-700">
-        <a href="/opds" class="flex items-center text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 gap-1.5 flex-shrink-0" style="text-decoration: none;">
-            <i data-lucide="arrow-left" class="w-4 h-4"></i>
-            <span class="text-sm">Catalogue</span>
-        </a>
-        <h1 class="text-lg font-light text-slate-800 truncate dark:text-slate-200">Lecture</h1>
-        <div class="flex-grow"></div>
-        <div class="flex items-center gap-3 flex-shrink-0">
-            <span id="account-name" class="hidden sm:inline text-sm text-slate-500 dark:text-slate-400" x-text="account && account.user"></span>
-            <button type="button" x-show="ready" x-cloak @click="load()" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Actualiser">
-                <i data-lucide="refresh-cw" class="w-4 h-4"></i>
-            </button>
-            <button type="button" x-show="ready" x-cloak @click="logout()" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Se déconnecter">
-                <i data-lucide="log-out" class="w-4 h-4"></i>
-            </button>
-            <a href="/opds" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center" title="Accueil">
-                <i data-lucide="home" class="w-4 h-4"></i>
-            </a>
-            <button id="theme-toggle" type="button" x-data="themeToggle" @click="toggle()" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Changer de thème">
-                <span x-show="!dark" x-cloak><i class="w-4 h-4" data-lucide="moon"></i></span>
-                <span x-show="dark" x-cloak><i class="w-4 h-4" data-lucide="sun"></i></span>
-            </button>
-        </div>
-    </div>
+    <!--#include header title="Lecture" -->
 
     <main x-show="ready" x-cloak class="flex p-4 sm:p-6 max-w-6xl mx-auto flex-col gap-8">
         <p x-show="loading" class="text-sm text-slate-500 dark:text-slate-400">Chargement…</p>
@@ -170,14 +148,11 @@
         </template>
 
         <section x-show="clippings.length">
-            <h2 class="section-title"><i data-lucide="highlighter" class="w-4 h-4"></i>Derniers surlignages <span class="count" x-text="clippingsCount"></span></h2>
+            <h2 class="section-title"><i data-lucide="highlighter" class="w-4 h-4"></i>Derniers surlignages <span class="count" x-text="clippingsCount"></span>
+                <a href="/clippings" class="ml-auto text-xs font-normal text-teal-700 hover:underline dark:text-teal-300">Tous les surlignages</a></h2>
             <div class="grid gap-3 md:grid-cols-2">
                 <template x-for="clip in clippings" :key="clip.key">
-                    <figure class="card p-3 text-sm">
-                        <blockquote class="clip-text" x-text="clip.text"></blockquote>
-                        <p x-show="clip.note" class="mt-2 text-xs italic text-slate-600 dark:text-slate-300" x-text="clip.note"></p>
-                        <figcaption class="mt-2 text-xs text-slate-500 dark:text-slate-400" x-text="clip.caption"></figcaption>
-                    </figure>
+                    <!--#include clipping -->
                 </template>
             </div>
         </section>

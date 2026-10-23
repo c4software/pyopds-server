@@ -34,6 +34,7 @@
     PyOPDS.accountButton.init();
     PyOPDS.mosaic.initToggle();
     PyOPDS.readStatus.init();
+    PyOPDS.bookClippings.init();
     PyOPDS.bookSheet.init();
 
     // Covers, mosaic and pagination once the whole document is there

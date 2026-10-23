@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Surlignages</title>
+    <script src="/static/theme.js"></script>
+    <link rel="stylesheet" href="/static/tailwind.css"/>
+    <script src="https://unpkg.com/lucide@1.61.0"></script>
+    <link rel="stylesheet" href="/static/reading.css"/>
+    <!-- Components registered on alpine:init, so before Alpine (deferred scripts run in order) -->
+    <script src="/static/account.js" defer></script>
+    <script src="/static/page-kit.js" defer></script>
+    <script src="/static/clippings.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.17.4/dist/cdn.min.js" defer></script>
+</head>
+<!-- Templates of the `clippings` component (static/clippings.js). Icons: <i data-lucide> placeholders, replaced by
+     lucide.createIcons() after each render; never put an Alpine directive on them except a static :data-lucide. -->
+<body x-data="clippings" class="bg-slate-50 font-sans dark:bg-slate-900 text-slate-800 dark:text-slate-200 min-h-screen">
+    <!--#include header title="Surlignages" -->
+
+    <main x-show="ready" x-cloak class="flex p-4 sm:p-6 max-w-4xl mx-auto flex-col gap-6">
+        <div class="flex flex-col sm:flex-row gap-2 sm:items-center">
+            <label class="relative flex-1">
+                <span class="sr-only">Rechercher</span>
+                <input type="search" x-model.debounce.200ms="query" placeholder="Rechercher un passage, une note, un livre…" autocomplete="off"
+                       class="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800"/>
+            </label>
+            <label class="sm:w-64">
+                <span class="sr-only">Livre</span>
+                <select x-model="book" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800">
+                    <option value="">Tous les livres</option>
+                    <template x-for="group in groups" :key="group.key">
+                        <option :value="group.key" x-text="group.title"></option>
+                    </template>
+                </select>
+            </label>
+            <a :href="exportUrl" download class="inline-flex items-center justify-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700">
+                <i data-lucide="file-down" class="w-4 h-4"></i><span>Exporter (.md)</span>
+            </a>
+        </div>
+
+        <p x-show="loading" class="text-sm text-slate-500 dark:text-slate-400">Chargement…</p>
+        <p x-show="error" x-text="error" class="text-sm text-red-600 dark:text-red-400"></p>
+        <p x-show="!loading && !error && groups.length" class="text-sm text-slate-500 dark:text-slate-400" x-text="summary"></p>
+        <p x-show="!loading && !error && !groups.length" class="text-sm text-slate-500 dark:text-slate-400">
+            Aucun surlignage synchronisé pour l'instant : activez la synchronisation des clippings sur la liseuse.
+        </p>
+        <p x-show="groups.length && !shown.length" class="text-sm text-slate-500 dark:text-slate-400">Aucun surlignage ne correspond à la recherche.</p>
+
+        <template x-for="group in shown" :key="group.key">
+            <section class="flex flex-col gap-3">
+                <div class="flex items-center gap-3">
+                    <template x-if="group.links && !group.broken">
+                        <img class="book-thumb" alt="" loading="lazy" :src="group.links.cover" @error="coverError(group.key)"/>
+                    </template>
+                    <template x-if="!group.links || group.broken">
+                        <div class="book-thumb flex items-center justify-center text-slate-400 dark:text-slate-500"><i data-lucide="book" class="w-5 h-5"></i></div>
+                    </template>
+                    <div class="min-w-0 flex-1">
+                        <h2 class="font-medium leading-snug" x-text="group.title"></h2>
+                        <div x-show="group.author" class="text-xs text-slate-500 dark:text-slate-400 truncate" x-text="group.author"></div>
+                        <div class="flex flex-wrap gap-3 mt-1 text-xs">
+                            <span class="text-slate-500 dark:text-slate-400" x-text="group.clips.length + (group.clips.length > 1 ? ' surlignages' : ' surlignage')"></span>
+                            <template x-if="group.links">
+                                <a :href="group.links.catalog" class="text-teal-700 hover:underline dark:text-teal-300">Catalogue</a>
+                            </template>
+                            <template x-if="group.exportUrl">
+                                <a :href="group.exportUrl" download class="text-teal-700 hover:underline dark:text-teal-300">Exporter (.md)</a>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+                <div class="grid gap-3">
+                    <template x-for="clip in group.clips" :key="clip.key">
+                        <!--#include clipping -->
+                    </template>
+                </div>
+            </section>
+        </template>
+    </main>
+</body>
+</html>

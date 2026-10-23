@@ -31,7 +31,7 @@ from xml.sax.saxutils import escape
 from controllers.genres import genre_key, get_genre_config, normalize_genres
 from controllers.library_index import description_text, release_year
 from controllers.metadata_rules import author_key
-from controllers.opds import LIBRARY_DIR, BookMetadata, BookScanner
+from controllers.opds import LIBRARY_DIR, BookMetadata, BookScanner, library_relative_path
 
 CSV_COLUMNS = ['chemin', 'probleme', 'titre', 'auteur', 'serie', 'tome', 'annee', 'description',
                'suggestion', 'genres', 'titre_corrige', 'auteur_corrige']
@@ -72,7 +72,7 @@ class Book:
     @property
     def relative(self) -> str:
         """Path relative to LIBRARY_DIR, the key of the CSV rows."""
-        return os.path.relpath(self.path, LIBRARY_DIR).replace(os.sep, '/')
+        return library_relative_path(self.path, LIBRARY_DIR)
 
 
 @dataclass

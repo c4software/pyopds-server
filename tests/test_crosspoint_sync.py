@@ -389,13 +389,17 @@ class TestCrossPointSync(unittest.TestCase):
 
     # ------------------------------------------------------------------ web UI
 
-    def raw_get(self, path):
+    def raw_get(self, path, headers=None):
         conn = http.client.HTTPConnection('localhost', self.port, timeout=5)
-        conn.request('GET', path)
+        conn.request('GET', path, headers=headers or {})
         response = conn.getresponse()
         body = response.read()
         conn.close()
         return response.status, response.getheader('Content-Type'), body
+
+    @staticmethod
+    def basic(user, password='secret'):
+        return {'Authorization': 'Basic ' + base64.b64encode(f'{user}:{password}'.encode()).decode()}
 
     def test_reading_page_and_assets(self):
         status, content_type, body = self.raw_get('/reading')
@@ -485,7 +489,7 @@ class TestCrossPointSync(unittest.TestCase):
 
     def test_koreader_highlights_through_nextcloud_notes(self):
         user = self.create_user('notes')
-        auth = {'Authorization': 'Basic ' + base64.b64encode(b'notes:secret').decode()}
+        auth = self.basic('notes')
         api = '/index.php/apps/notes/api/v1/notes'
         document = self.library_index.koreader_partial_md5(self.novel_path)
         self.put_progress(user, document, 0.4, device_id='koreader')
@@ -539,7 +543,7 @@ class TestCrossPointSync(unittest.TestCase):
         # Unknown notes, other accounts and other content
         self.assertEqual(self.request('PUT', f'{api}/999999', note(), headers=auth)[0], 404)
         self.create_user('notes2')
-        other = {'Authorization': 'Basic ' + base64.b64encode(b'notes2:secret').decode()}
+        other = self.basic('notes2')
         self.assertEqual(self.request('GET', f"{api}/{created['id']}", headers=other)[0], 404)
         self.assertEqual(self.request('POST', api, {'title': 'x', 'content': 'pas une note KOReader'}, headers=auth)[0], 400)
         self.assertEqual(self.request('POST', api, {'content': 12}, headers=auth)[0], 400)
@@ -550,6 +554,53 @@ class TestCrossPointSync(unittest.TestCase):
         self.assertEqual(status, 200)
         absent = next(c for c in clippings().values() if c['text'] == 'Texte seul')
         self.assertEqual(self.books(user)[absent['document']]['title'], 'Livre absent')
+
+    def test_clippings_in_the_web_ui(self):
+        user = self.create_user('webclips')
+        auth = self.basic('webclips')
+        document = self.library_index.koreader_partial_md5(self.novel_path)
+        self.put_progress(user, document, 0.3)
+        clips = [
+            {'id': 'c' * 32, 'spine': 3, 'start_page': 40, 'chapter': 'Chapitre 3', 'text': 'Plus loin', 'created_at': 1790000500},
+            {'id': 'd' * 32, 'spine': 1, 'start_page': 5, 'chapter': 'Chapitre 1', 'text': 'Au début\nsur deux lignes',
+             'note': 'Ma note', 'created_at': 1790000900},
+        ]
+        self.assertEqual(self.request('PUT', f'/api/v1/clippings/{document}', {'items': clips}, user=user)[0], 200)
+        self.request('PUT', f"/api/v1/clippings/{'e' * 32}", {'items': [{'id': 'f' * 32, 'spine': 0, 'text': 'Ailleurs',
+                                                                         'created_at': 1790000100}]}, user=user)
+
+        # An account is always required
+        self.assertEqual(self.raw_get('/webui/clippings')[0], 401)
+        # Every book, newest clipping first; clippings in reading order
+        status, data = self.request('GET', '/webui/clippings', headers=auth)
+        self.assertEqual(status, 200, data)
+        roman = data['groups'][0]
+        self.assertEqual((roman['book']['title'], roman['book']['path']), ('Roman', 'Roman.epub'))
+        self.assertEqual([c['text'] for c in roman['clippings']], ['Au début\nsur deux lignes', 'Plus loin'])
+        self.assertEqual((roman['clippings'][0]['note'], roman['clippings'][0]['page']), ('Ma note', 5))
+        self.assertEqual(data['groups'][1]['book']['path'], None)
+        # One library book (book sheet), unknown books and other readers
+        status, data = self.request('GET', '/webui/clippings?path=Roman.epub', headers=auth)
+        self.assertEqual([g['book']['document'] for g in data['groups']], [document])
+        self.assertEqual(self.request('GET', '/webui/clippings?path=Le%20Rouge%20et%20le%20Noir.epub', headers=auth)[1], {'groups': []})
+        self.assertEqual(self.request('GET', '/webui/clippings?path=../x.epub', headers=auth)[0], 404)
+        self.create_user('webclips2')
+        self.assertEqual(self.request('GET', '/webui/clippings', headers=self.basic('webclips2'))[1], {'groups': []})
+
+        # Markdown export of a book
+        status, content_type, body = self.raw_get('/webui/clippings/export?path=Roman.epub', auth)
+        self.assertEqual((status, content_type), (200, 'text/markdown; charset=utf-8'))
+        self.assertEqual(body.decode(), '## Roman — Auteur\n\n> Au début\n> sur deux lignes\n\nMa note\n\n*Chapitre 1 · p. 5*'
+                                        '\n\n> Plus loin\n\n*Chapitre 3 · p. 40*\n')
+        status, _, body = self.raw_get('/webui/clippings/export', auth)
+        self.assertIn(b'\n\n---\n\n', body)
+
+        # The page: shared header and clipping partials included server-side
+        status, content_type, body = self.raw_get('/clippings', auth)
+        self.assertEqual((status, content_type), (200, 'text/html; charset=utf-8'))
+        self.assertNotIn(b'<!--#include', body)
+        self.assertIn(b'>Surlignages</h1>', body)
+        self.assertIn(b'clip-text', body)
 
     def test_print_pages_without_spine(self):
         with tempfile.TemporaryDirectory() as tmp:

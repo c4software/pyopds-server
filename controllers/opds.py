@@ -42,6 +42,12 @@ def format_series_index(index: int | float | None) -> str | None:
     return str(int(index)) if float(index).is_integer() else f'{index:g}'
 
 
+def library_relative_path(path: str, base: str | None = None) -> str:
+    """Path of a library file relative to `base` (LIBRARY_DIR by default), with '/' separators (URLs,
+    sync library_path, CSV rows)."""
+    return os.path.relpath(path, base or LIBRARY_DIR).replace(os.sep, '/')
+
+
 def without(paths: list[str], exclude: Collection[str]) -> list[str]:
     """`paths` minus the `exclude` ones, order kept (the same list when nothing is excluded)."""
     return [path for path in paths if path not in exclude] if exclude else paths
@@ -64,7 +70,7 @@ def mosaic_links(paths: list[str]) -> list[tuple[str, str, str]]:
     """
     sample = random.sample(paths, min(MOSAIC_SIZE, len(paths)))
     return [
-        (MOSAIC_REL, f'/cover/{quote(os.path.relpath(path, LIBRARY_DIR).replace(os.sep, "/"))}', 'image/jpeg')
+        (MOSAIC_REL, f'/cover/{quote(library_relative_path(path))}', 'image/jpeg')
         for path in sample
     ]
 

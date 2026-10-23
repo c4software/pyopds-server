@@ -329,6 +329,11 @@ class SyncStorage:
         with self._get_connection() as conn:
             return self._resolve(conn, user, document)
 
+    def document_aliases(self, user: str) -> dict[str, list[str]]:
+        """Aliases of each canonical document of the user (merged copies, other hashes of a book)."""
+        with self._get_connection() as conn:
+            return self._aliases_by_document(conn, user)
+
     @staticmethod
     def _aliases_by_document(conn: sqlite3.Connection, user: str) -> dict[str, list[str]]:
         aliases: dict[str, list[str]] = {}
@@ -1156,7 +1161,8 @@ class SyncStorage:
         """Every live clipping of the user across books, newest first."""
         with self._get_connection() as conn:
             rows = conn.execute(
-                'SELECT document, id, spine_index, paragraph_index, start_offset, chapter_title, text, note, created_at '
+                'SELECT document, id, spine_index, paragraph_index, start_offset, start_page, chapter_title, text, note, '
+                'created_at '
                 'FROM clippings WHERE user = ? AND deleted = 0 ORDER BY created_at DESC, id LIMIT ?',
                 (user, CLIPPINGS_ALL_LIMIT),
             ).fetchall()

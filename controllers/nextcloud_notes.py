@@ -142,11 +142,11 @@ class NextcloudNotesController(SyncControllerBase):
         """Document of the book of a note: the library EPUB with this title (as synced by the user, else
         KOReader's id of the file), else the user's book with this title, else an id of its own."""
         from controllers.library_index import LibraryIndex
-        from controllers.opds import LIBRARY_DIR
+        from controllers.opds import library_relative_path
 
         epub = LibraryIndex.get_instance().find_by_title(title, author)
         if epub:
-            relative = os.path.relpath(epub, LIBRARY_DIR).replace(os.sep, '/')
+            relative = library_relative_path(epub)
             document = self.sync_storage.epub_document(user, epub, relative)
             info = {'title': title, 'author': author, 'filename': os.path.basename(epub), 'library_path': relative}
             return self.sync_storage.remember_document(user, document, info)

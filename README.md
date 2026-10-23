@@ -300,6 +300,14 @@ When `ONLINE_METADATA` / `HARDCOVER_API_KEY` are set (see Configuration), online
 
 The connectors of crosspoint-sync (Hardcover, Spotify, Readwise... progress sync) are not provided: `GET /api/v1/connectors` returns an empty list and the app hides those features.
 
+### Clippings page and book sheet (web UI)
+
+The clippings synced by the readers (CrossPoint « Sync Clippings », KoReader's Nextcloud Notes export) are shown to the signed-in reader (catalog session; the routes always require an account):
+
+- in the catalog **book sheet**, « Vos surlignages »: the clippings of the book in reading order (text, note, chapter, page, date), with its Markdown export;
+- on the **`/clippings` page** (highlighter icon of the catalog header, « Tous les surlignages » on the reading page): every clipping grouped by book, newest book first, with a search field (passage, note, chapter, title, author), a book filter and the Markdown export;
+- `GET /webui/clippings[?path=<EPUB relative to LIBRARY_DIR>]` returns `{groups: [{book: {document, title, author, path}, clippings: [{id, text, note, chapter, page, created_at}]}]}`; `GET /webui/clippings/export[?path=…]` the same as a Markdown file (`## Title — Author`, each clipping quoted, then its note and `*chapter · p. N*`).
+
 ### Reading page (web UI)
 
 `/reading` is a static page (`static/reading.html`, `reading.js`, `reading.css`) that calls the sync API from the browser with the `x-auth-user` / `x-auth-key` headers: progress (`/api/v1/progress`, and `/api/v1/progress/{document}` for the per-device positions), `/api/v1/stats/summary`, `/api/v1/stats/activity` and `/api/v1/clippings`. It uses the common sign-in page: the sign-in opens the catalog session and keeps the user name and the MD5 of the password in the browser's `localStorage` until you sign out. Reading time, time of day and weekday charts need readers that upload statistics (CrossPoint); with KoReader alone, pages and reading days come from the progress history.
