@@ -81,8 +81,9 @@
             <button type="button" @click="togglePanel('settings')" class="reader-icon" :aria-pressed="panel === 'settings'" title="Affichage" aria-label="Affichage">
                 <i data-lucide="type" class="w-5 h-5"></i>
             </button>
-            <button type="button" x-show="fullscreenAvailable" @click="toggleFullscreen()" class="reader-icon" title="Plein écran" aria-label="Plein écran">
-                <i data-lucide="maximize" class="w-5 h-5"></i>
+            <button type="button" x-show="fullscreenAvailable" @click="toggleFullscreen()" class="reader-icon" :title="fullscreen ? 'Quitter le plein écran' : 'Plein écran'" :aria-label="fullscreen ? 'Quitter le plein écran' : 'Plein écran'">
+                <span x-show="!fullscreen"><i data-lucide="maximize" class="w-5 h-5"></i></span>
+                <span x-show="fullscreen" x-cloak><i data-lucide="minimize" class="w-5 h-5"></i></span>
             </button>
         </div>
     </footer>
@@ -110,7 +111,7 @@
     </div>
 
     <!-- Side panel (full screen on a phone): table of contents, clippings, display settings -->
-    <div x-show="panel" x-cloak class="reader-scrim" @click="panel = null"></div>
+    <div x-show="panel" x-cloak class="reader-scrim" @click="closeFromScrim()"></div>
     <aside x-show="panel" x-cloak x-transition.opacity class="reader-panel" :aria-label="panel === 'toc' ? 'Sommaire' : panel === 'clips' ? 'Surlignages' : 'Affichage'">
         <div class="flex items-center gap-2 px-4 py-3 border-b reader-border">
             <h2 class="flex-1 font-medium" x-text="panel === 'toc' ? 'Sommaire' : panel === 'clips' ? 'Surlignages' : 'Affichage'"></h2>
@@ -207,7 +208,7 @@
     </aside>
 
     <!-- A clipping: note, color, deletion -->
-    <div x-show="editor" x-cloak class="reader-scrim z-40" @click="editor = null"></div>
+    <div x-show="editor" x-cloak class="reader-scrim z-40" @click="closeFromScrim()"></div>
     <template x-if="editor">
         <div class="reader-editor" role="dialog" aria-label="Surlignage">
             <blockquote class="text-sm leading-relaxed max-h-40 overflow-y-auto border-l-4 pl-3" :style="'border-color:' + colorOf(editor.color)" x-text="editor.text"></blockquote>

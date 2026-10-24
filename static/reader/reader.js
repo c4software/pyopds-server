@@ -16,6 +16,10 @@
     const WHEEL_GAP_MS = 350;
     // Side areas of a tap that turn the page (fraction of the width); the middle shows the bars
     const TAP_SIDE = 0.3;
+    // A touch counts as a tap below this move (px) and duration (ms); the click that may follow is then ignored
+    const TAP_MOVE = 12;
+    const TAP_MS = 600;
+    const CLICK_AFTER_TAP_MS = 800;
 
     const percentFormat = new Intl.NumberFormat('fr-FR', { style: 'percent', maximumFractionDigits: 0 });
     const relativeFormat = new Intl.RelativeTimeFormat('fr', { numeric: 'auto' });
@@ -27,6 +31,26 @@
             if (Math.abs(diff) >= size) return relativeFormat.format(Math.round(diff / size), unit);
         }
         return "à l'instant";
+    }
+
+    /**
+     * Taps on a touch screen, seen from touchstart / touchend: foliate's paginator cancels every touchmove
+     * (page swipes), so a real finger, which always moves a little, never gets a click.
+     */
+    function onTouchTap(target, handler) {
+        let start = null;
+        target.addEventListener('touchstart', function (event) {
+            const touch = event.touches.length === 1 ? event.touches[0] : null;
+            start = touch ? { x: touch.clientX, y: touch.clientY, at: Date.now() } : null;
+        }, { passive: true });
+        target.addEventListener('touchend', function (event) {
+            const touch = event.changedTouches[0];
+            const from = start;
+            start = null;
+            if (!from || !touch || Date.now() - from.at > TAP_MS) return;
+            if (Math.hypot(touch.clientX - from.x, touch.clientY - from.y) > TAP_MOVE) return;
+            handler(event, touch);
+        }, { passive: true });
     }
 
     function editable(target) {
@@ -50,6 +74,8 @@
             let lastScroll = null;
             let lastWheel = 0;
             let fullscreenAsked = false;
+            let lastTouchTap = 0;
+            let syntheticClick = false;
             // Until the opening position is laid out, foliate may report transient places (even the end of the book)
             let opened = false;
 
@@ -77,6 +103,7 @@
                 // Phones and tablets only: on a computer the book keeps a reading width (reader.css)
                 fullscreenAvailable: Boolean(document.fullscreenEnabled && document.documentElement.requestFullscreen)
                     && window.matchMedia('(pointer: coarse)').matches,
+                fullscreen: false,
 
                 async init() {
                     window.PageKit.icons(this);
@@ -96,6 +123,7 @@
                     const info = reader.info;
                     this.title = info.title;
                     this.author = info.author;
+                    this.catalogUrl = window.PageKit.libraryLinks(this.path, info.title).catalog;
                     document.title = info.title;
                     this.toc = PyReader.book.tableOfContents(reader.book);
                     PyReader.settings.apply(reader.view, this.settings);
@@ -129,6 +157,13 @@
                     document.addEventListener('keydown', (event) => this.key(event));
                     this.$refs.book.addEventListener('wheel', (event) => this.wheel(event), { passive: true });
                     this.$refs.book.addEventListener('click', (event) => this.tapOutside(event));
+                    onTouchTap(this.$refs.book, (event, touch) => {
+                        // Inside a chapter: handled by its own listeners (chapterLoaded)
+                        if (event.target === this.$refs.book || this.$refs.book.contains(event.target)) {
+                            lastTouchTap = Date.now();
+                            this.tapAt(touch.clientX);
+                        }
+                    });
                     let resizeTimer = null;
                     window.addEventListener('resize', () => {
                         clearTimeout(resizeTimer);
@@ -142,13 +177,22 @@
                         else this.checkOtherDevices();
                     });
                     window.addEventListener('pagehide', () => this.pushNow(true));
+                    document.addEventListener('fullscreenchange', () => { this.fullscreen = Boolean(document.fullscreenElement); });
                 },
 
                 /** Each chapter shown: keys, taps, wheel and text selection inside it. */
                 chapterLoaded(doc, index) {
                     doc.addEventListener('keydown', (event) => this.key(event));
                     doc.addEventListener('wheel', (event) => this.wheel(event), { passive: true });
+                    // The click following a touch tap is ignored (foliate's link and highlight handlers included)
+                    doc.addEventListener('click', (event) => {
+                        if (!syntheticClick && Date.now() - lastTouchTap < CLICK_AFTER_TAP_MS) {
+                            event.stopImmediatePropagation();
+                            event.preventDefault();
+                        }
+                    }, true);
                     doc.addEventListener('click', (event) => this.tap(event, doc));
+                    onTouchTap(doc, (event, touch) => this.touchTap(event, touch, doc));
                     let timer = null;
                     doc.addEventListener('selectionchange', () => {
                         clearTimeout(timer);
@@ -328,8 +372,31 @@
                     this.tapAt((frame ? frame.getBoundingClientRect().left : 0) + event.clientX);
                 },
 
+                /** Touch tap in a chapter: a link is followed, a highlight opened, else like a tap (tapAt). */
+                touchTap(event, touch, doc) {
+                    const selected = doc.getSelection();
+                    if (selected && !selected.isCollapsed) return;
+                    lastTouchTap = Date.now();
+                    const link = event.target.closest ? event.target.closest('a[href]') : null;
+                    if (link) {
+                        syntheticClick = true;
+                        try { link.click(); } finally { syntheticClick = false; }
+                        return;
+                    }
+                    const content = reader.view.renderer.getContents().find(function (c) { return c.doc === doc; });
+                    const hit = content && content.overlayer ? content.overlayer.hitTest({ x: touch.clientX, y: touch.clientY }) : [];
+                    const clip = hit[0] && highlights ? highlights.atCfi(hit[0]) : null;
+                    if (clip) {
+                        this.edit(clip.id);
+                        return;
+                    }
+                    const frame = doc.defaultView.frameElement;
+                    this.tapAt((frame ? frame.getBoundingClientRect().left : 0) + touch.clientX);
+                },
+
                 /** Tap in the margins of the book, outside the chapter's frame. */
                 tapOutside(event) {
+                    if (Date.now() - lastTouchTap < CLICK_AFTER_TAP_MS) return;
                     if (event.target === this.$refs.book || this.$refs.book.contains(event.target)) this.tapAt(event.clientX);
                 },
 
@@ -373,6 +440,13 @@
                     window.PageKit.icons(this);
                 },
 
+                /** Tap on the dimmed background: closes the editor or the panel (not the click that follows the tap which opened them). */
+                closeFromScrim() {
+                    if (Date.now() - lastTouchTap < CLICK_AFTER_TAP_MS) return;
+                    if (this.editor) this.editor = null;
+                    else this.panel = null;
+                },
+
                 closeAll() {
                     if (this.editor) this.editor = null;
                     else if (this.panel) this.panel = null;
@@ -391,7 +465,8 @@
                     }
                 },
 
-                back() {
+                async back() {
+                    if (document.fullscreenElement) await document.exitFullscreen().catch(function () {});
                     // Back to the page the book was opened from (catalog, reading page…), else the catalog
                     if (document.referrer && new URL(document.referrer).origin === location.origin && history.length > 1) history.back();
                     else location.href = this.catalogUrl;
