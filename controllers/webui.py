@@ -14,10 +14,10 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 # Served from static/: a plain file name, or one level of sub-folder (static/catalog/main.js), each part
 # without leading dot nor "..", with a known web extension
 _PART = r'[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*'
-STATIC_NAME_RE = re.compile(rf'^(?:[A-Za-z0-9_-]+/)?{_PART}\.(html|js|css|svg)$')
+STATIC_NAME_RE = re.compile(rf'^(?:[A-Za-z0-9_-]+/)?{_PART}\.(html|js|css|svg|png|webmanifest)$')
 # Asset references in the served pages and in the catalog XSLT, versioned so that a proxy caching
 # static files serves the new ones
-ASSET_REF_RE = re.compile(rf'(/static/((?:[A-Za-z0-9_-]+/)?{_PART}\.(?:js|css|svg)))"')
+ASSET_REF_RE = re.compile(rf'(/static/((?:[A-Za-z0-9_-]+/)?{_PART}\.(?:js|css|svg|png|webmanifest)))"')
 # A versioned URL never changes content: cached for a year (the version changes with the file)
 IMMUTABLE = 'public, max-age=31536000, immutable'
 # Server-side includes of the pages (include_partials)
@@ -27,7 +27,7 @@ PARTIAL_ARG_RE = re.compile(r' ([a-z]+)="([^"]*)"')
 JSON_BODY_MAX = 4096
 # Scripts and stylesheets sent gzip-compressed when the browser accepts it (polyfill: 1.5 MB -> 0.5 MB),
 # compressed once per file version
-GZIP_TYPES = ('js', 'css', 'svg')
+GZIP_TYPES = ('js', 'css', 'svg', 'webmanifest')
 _gzip_cache: dict[str, tuple[int, bytes]] = {}
 
 
@@ -81,6 +81,8 @@ CONTENT_TYPES = {
     'js': 'text/javascript; charset=utf-8',
     'css': 'text/css; charset=utf-8',
     'svg': 'image/svg+xml',
+    'png': 'image/png',
+    'webmanifest': 'application/manifest+json',
 }
 
 

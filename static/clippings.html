@@ -4,6 +4,7 @@
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>Surlignages</title>
+    <!--#include app -->
     <script src="/static/theme.js"></script>
     <link rel="stylesheet" href="/static/tailwind.css"/>
     <script src="https://unpkg.com/lucide@1.61.0"></script>
@@ -63,6 +64,9 @@
                         <div x-show="group.author" class="text-xs text-slate-500 dark:text-slate-400 truncate" x-text="group.author"></div>
                         <div class="flex flex-wrap gap-3 mt-1 text-xs">
                             <span class="text-slate-500 dark:text-slate-400" x-text="group.clips.length + (group.clips.length > 1 ? ' surlignages' : ' surlignage')"></span>
+                            <template x-if="group.links">
+                                <a :href="group.links.read" class="text-teal-700 hover:underline dark:text-teal-300">Lire</a>
+                            </template>
                             <template x-if="group.links">
                                 <a :href="group.links.catalog" class="text-teal-700 hover:underline dark:text-teal-300">Catalogue</a>
                             </template>

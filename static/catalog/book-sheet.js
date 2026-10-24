@@ -1,5 +1,6 @@
 // Catalog web UI: book sheet (dialog#book-dialog), filled from the data-* attributes of the
-// clicked book tile (a.book-link: title, author, cover, series, year, rating, genres, summary).
+// clicked book tile (a.book-link: title, author, cover, series, year, rating, genres, summary),
+// with the web reader button (/read?path=…) of the library EPUBs.
 // A plain click opens it; modified clicks (ctrl, cmd, shift, alt, middle) keep the download link.
 // The opened sheet is shareable (#book=<id>), and such a link opens it on load.
 (function () {
@@ -110,6 +111,11 @@
         }
 
         document.getElementById('book-dialog-download').href = link.getAttribute('href');
+        // Web reader of a library EPUB
+        const path = bookPath(link);
+        const read = document.getElementById('book-dialog-open');
+        read.hidden = !path;
+        if (path) read.href = window.PageKit.libraryLinks(path, title).read;
 
         const summary = bookField(link, 'summary');
         const block = document.getElementById('book-dialog-description-block');

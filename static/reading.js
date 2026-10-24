@@ -249,6 +249,7 @@
         if (links) {
             view.catalog = links.catalog;
             view.download = links.download;
+            view.read = links.read;
             view.unlink = Boolean(item.library_linked);
         }
         return view;

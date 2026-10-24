@@ -16,13 +16,14 @@
         return path.split('/').map(encodeURIComponent).join('/');
     }
 
-    /** Cover, catalog (its folder, else a title search) and download URLs of a library EPUB (path relative to LIBRARY_DIR). */
+    /** Cover, catalog (its folder, else a title search), download and web reader URLs of a library EPUB (path relative to LIBRARY_DIR). */
     function libraryLinks(path, title) {
         const folder = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
         return {
             cover: '/cover/' + encodePath(path),
             catalog: folder ? '/opds/folder/' + encodePath(folder) : '/opds/search?q=' + encodeURIComponent(title || ''),
             download: '/download/' + encodePath(path),
+            read: '/read?path=' + encodeURIComponent(path),
         };
     }
 

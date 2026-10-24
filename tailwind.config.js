@@ -2,6 +2,6 @@
 module.exports = {
   darkMode: 'class',
   // Every Tailwind class used by the XSLT, the pages and their scripts, including the catalog
-  // scripts of static/catalog/ (never the vendored polyfill)
-  content: ['./static/*.xslt', './static/*.html', './static/partials/*.html', './static/*.js', './static/catalog/*.js', '!./static/xslt-polyfill.min.js'],
+  // scripts of static/catalog/ and the reader's of static/reader/ (never the vendored polyfill nor foliate-js)
+  content: ['./static/*.xslt', './static/*.html', './static/partials/*.html', './static/*.js', './static/catalog/*.js', './static/reader/*.js', '!./static/xslt-polyfill.min.js'],
 };

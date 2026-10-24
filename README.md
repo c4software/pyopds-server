@@ -29,6 +29,8 @@ If you browse your OPDS feed in a web browser, it will display a simple HTML rep
 - **Personal shelves**: once signed in, the root catalog starts with « En cours » (books being read) and « Suite de vos séries » (next volume of your series), and every book list can hide the books you finished (« Masquer les livres lus »).
 - **Docker Deployment**: Prebuilt multi-arch image (`ghcr.io/c4software/pyopds-server`) published on each release, a versioned `docker-compose.yml` and a git-ignored override for your own settings.
 - **Web Interface**: The OPDS feed rendered as a web page in browsers (XSLT transformation), with light/dark theme, search, sign-in / account creation and an optional animated mosaic of covers on the navigation tiles (see [Web interface](#web-interface)).
+- **Web Reader**: « Lire » in the book sheet opens the EPUB in the browser (`/read`, [foliate-js](https://github.com/johnfactotum/foliate-js)), on phones (full screen, taps and swipes), tablets (two pages side by side in landscape) and computers (centered reading page). Once signed in, the position, the clippings and the reading time are those of your sync account: continue on KoReader or a CrossPoint reader where the browser stopped, and the other way round (see [Web reader](#web-reader)).
+- **Installable**: the web UI is a web app (manifest, icons): « Add to Home Screen » / « Install » opens it like an app (HTTPS required by the browsers).
 - **Reading Page**: `/reading` (chart icon in the web UI header) shows the books in progress per device with their last sync, finished and abandoned books, reading time, pages, a reading calendar, recent activity, devices and the latest highlights, with links to the matching books of the catalog; a synced book the server could not match can be associated by hand with a book of the library.
 
 ## Prerequisites
@@ -205,7 +207,7 @@ The header holds the search field and these buttons:
 - **Cover mosaic** (image icon): fills the navigation tiles (collections, authors, years, genres, folders) with an animated mosaic of the covers of their books, under a veil that keeps the text readable. It is off by default and remembered per browser. Covers are only requested while it is on; small thumbnails, books without a cover and the covers last shown on each tile are cached in the browser (IndexedDB, 7 days), so tiles fill at once on the next visits.
 - **Theme**: light or dark, remembered per browser.
 
-A click on a book opens its **book sheet** (a dialog closed with Escape, a click outside or the close button) instead of downloading it: large cover, title, author (link, with a person icon, to all the books of the author), « Tome N · Série » (link to the series feed), year, rating (stars), genres (tag chips linking to the genre feeds), description (« Lire la suite » when long) and a **Télécharger** button. A middle click or Ctrl/⌘-click still downloads the book, as does a click without JavaScript; the address of an opened sheet (`#book=…`) can be shared. Series books show their volume (« T2 ») on their tile.
+A click on a book opens its **book sheet** (a dialog closed with Escape, a click outside or the close button) instead of downloading it: large cover, title, author (link, with a person icon, to all the books of the author), « Tome N · Série » (link to the series feed), year, rating (stars), genres (tag chips linking to the genre feeds), description (« Lire la suite » when long), a **Lire** button (the [web reader](#web-reader)) and a **Télécharger** button. A middle click or Ctrl/⌘-click still downloads the book, as does a click without JavaScript; the address of an opened sheet (`#book=…`) can be shared. Series books show their volume (« T2 ») on their tile.
 
 **Files.** The XSLT only holds the page structure; the page code lives next to it:
 
@@ -299,6 +301,20 @@ When `ONLINE_METADATA` / `HARDCOVER_API_KEY` are set (see Configuration), online
 
 The connectors of crosspoint-sync (Hardcover, Spotify, Readwise... progress sync) are not provided: `GET /api/v1/connectors` returns an empty list and the app hides those features.
 
+### Web reader
+
+`/read?path=<EPUB relative to LIBRARY_DIR>` (« Lire » in the book sheet, « Continuer la lecture » on the reading page, « Lire » on the clippings page) reads a library EPUB in the browser with [foliate-js](https://github.com/johnfactotum/foliate-js) (MIT, vendored in `static/foliate/`: `view.js`, `epub.js`, `paginator.js`… from commit `78914ae`, unchanged). Same access rule as `/download` (public unless `OPDS_AUTH=true`).
+
+- **Phones**: the book fills the screen (full screen on the first tap where the browser allows it); a tap on the left / right third turns the page (swipes too), a tap in the middle shows the bars (table of contents, position slider, clippings, display settings).
+- **Tablets and computers**: two pages side by side when the screen is wide and in landscape, one column in portrait; on a computer the reading page keeps a limited width, with arrows, keys (←/→, Space, Page Up/Down) and the mouse wheel.
+- **Display settings** (kept in the browser): text size, line spacing, font (the book's, serif, sans), margins, justification, theme (auto, light, sepia, dark), pages or scrolling.
+- **Not signed in**: reading only, the last position is kept in the browser.
+- **Signed in** (the sync account, see [Accounts and sign-in](#accounts-and-sign-in)):
+  - **Position**: sent like a reader does (`PUT /api/v1/progress`, a few seconds after each page and when the page is left), as a KoReader XPointer (`/body/DocFragment[3]/body/section[1]/p[10]/text()[1].20`, the position CrossPoint readers also use first) and a CrossPoint rich position (`pctQ`, spine, page, paragraph). The browser is a device of its own (« Navigateur (Android) »…). On opening, the newest position of all the devices is used, with a notice (« Reprise à 72 %, position de CrossPoint ») and a way back; back on the tab, a newer position of another device is offered.
+  - **Clippings**: select text to highlight it (4 colors) or add a note; a tap on a highlight edits or deletes it. They are CrossPoint clippings (`/api/v1/clippings/{document}`: spine index, visible offsets of the selection in its chapter, paragraph, chapter title), so the readers syncing clippings, the CrossPoint Sync app, the book sheet and `/clippings` show them; the clippings of the readers are drawn in the book (KoReader's Nextcloud Notes exports are found by their text).
+  - **Statistics**: the time the page is visible while you read (pauses of more than 3 minutes excluded) and the pages turned are added to a « Lecteur web » statistics device (`POST /webui/reader/session`, every minute and when the page is left): reading time, sessions, time of day, weekday, reading days, pace and finished books on the reading page.
+- `GET /webui/reader/book?path=…` lists the EPUB entries (`{path, title, author, filename, version, entries: {name: size}, document}`; `document` is the signed-in reader's sync document of the EPUB) and `GET /webui/reader/file?path=…&entry=…&v=<version>` serves one entry (chapters gzip-compressed, cached by the browser): the EPUB is never downloaded whole.
+
 ### Clippings page and book sheet (web UI)
 
 The clippings synced by the readers (CrossPoint « Sync Clippings », KoReader's Nextcloud Notes export) are shown to the signed-in reader (catalog session; the routes always require an account):
@@ -326,7 +342,7 @@ python tools/tailwind.py          # build static/tailwind.css (minified)
 python tools/tailwind.py --watch  # rebuild on every change of static/
 ```
 
-[`tools/tailwind.py`](tools/tailwind.py) downloads the pinned CLI version once (checked against its SHA-256) into `.cache/`, then runs it with [`tailwind.config.js`](tailwind.config.js) (dark mode by class, classes scanned in `static/*.xslt|html|js` and `static/catalog/*.js`) and [`styles/tailwind.css`](styles/tailwind.css). Extra arguments go to the Tailwind CLI. The Docker image builds the stylesheet itself (`css` stage of the Dockerfile), and the development compose file rebuilds it on every change.
+[`tools/tailwind.py`](tools/tailwind.py) downloads the pinned CLI version once (checked against its SHA-256) into `.cache/`, then runs it with [`tailwind.config.js`](tailwind.config.js) (dark mode by class, classes scanned in `static/*.xslt|html|js`, `static/catalog/*.js` and `static/reader/*.js`) and [`styles/tailwind.css`](styles/tailwind.css). Extra arguments go to the Tailwind CLI. The Docker image builds the stylesheet itself (`css` stage of the Dockerfile), and the development compose file rebuilds it on every change.
 
 ## Duplicate books
 

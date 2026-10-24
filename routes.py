@@ -12,6 +12,7 @@ from controllers.nextcloud_notes import NextcloudNotesController
 from controllers.opds import OPDSController
 from controllers.opds_auth import AuthController
 from controllers.reader_feeds import ReaderFeedsController
+from controllers.web_reader import WebReaderController
 from controllers.webui import WebUIController
 
 
@@ -116,6 +117,12 @@ def register_routes(router):
     router.get('/clippings', (ClippingsController, 'clippings_page'), name='webui.clippings', auth='user')
     router.get('/webui/clippings', (ClippingsController, 'clippings_list'), name='webui.clippings.list', auth='user')
     router.get('/webui/clippings/export', (ClippingsController, 'clippings_export'), name='webui.clippings.export', auth='user')
+    # Web reader of the library EPUBs (foliate-js): like /download, the catalog's access rule; the
+    # position and the clippings go through the sync API, the reading time through /webui/reader/session
+    router.get('/read', (WebReaderController, 'reader_page'), name='webui.reader', auth=opds)
+    router.get('/webui/reader/book', (WebReaderController, 'book_info'), name='webui.reader.book', auth=opds)
+    router.get('/webui/reader/file', (WebReaderController, 'book_file'), name='webui.reader.file', auth=opds)
+    router.post('/webui/reader/session', (WebReaderController, 'reading_session'), name='webui.reader.session', auth='user')
     # KOReader highlights (Export highlights → Nextcloud Notes, this server as host, sync account)
     notes = '/index.php/apps/notes/api/v1/notes'
     router.get(notes, (NextcloudNotesController, 'notes_list'), name='nextcloud.notes', auth='user')

@@ -16,6 +16,8 @@
         <html>
             <head>
                 <title><xsl:value-of select="atom:title"/></title>
+                <!-- Installable web app and icons (static/partials/app.html, included by serve_xslt) -->
+                <!--#include app -->
                 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
                 <!-- Built by tools/tailwind.py (automatically in the Docker image): works with the XSLT polyfill too -->
                 <link rel="stylesheet" href="/static/tailwind.css"/>
@@ -230,6 +232,11 @@
                                 <div id="book-dialog-facts" class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600 dark:text-slate-300"></div>
                                 <div id="book-dialog-genres" class="mt-3 flex flex-wrap gap-1.5"></div>
                                 <div class="mt-5 flex flex-col sm:flex-row gap-2">
+                                    <!-- Web reader (static/reader.html), href set by static/catalog/book-sheet.js -->
+                                    <a id="book-dialog-open" class="inline-flex items-center justify-center gap-2 w-full sm:w-auto px-5 py-2.5 rounded-lg bg-teal-700 text-white font-medium shadow hover:bg-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-400 dark:bg-teal-500 dark:text-slate-900 dark:hover:bg-teal-400" hidden="hidden">
+                                        <i data-lucide="book-open" class="w-4 h-4"></i>
+                                        <span>Lire</span>
+                                    </a>
                                     <a id="book-dialog-download" class="inline-flex items-center justify-center gap-2 w-full sm:w-auto px-5 py-2.5 rounded-lg bg-slate-800 text-white font-medium shadow hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white" download="">
                                         <i data-lucide="download" class="w-4 h-4"></i>
                                         <span>Télécharger</span>

@@ -1004,6 +1004,26 @@ class SyncStorage:
             ]
         return devices, daily
 
+    def device_stats(self, user: str, device_id: str, document: str, date: str) -> tuple[dict | None, dict | None, int]:
+        """One device's snapshots: global statistics, statistics of a book (None when never sent) and
+        reading seconds of a day ('YYYY-MM-DD', 0 when none)."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                'SELECT payload FROM stats_device_global WHERE user = ? AND device_id = ?', (user, device_id)
+            ).fetchone()
+            book = conn.execute(
+                'SELECT payload FROM stats_device_book WHERE user = ? AND device_id = ? AND document = ?',
+                (user, device_id, document),
+            ).fetchone()
+            day = conn.execute(
+                'SELECT seconds FROM stats_device_day WHERE user = ? AND device_id = ? AND date = ?', (user, device_id, date)
+            ).fetchone()
+        return (
+            json.loads(row['payload']) if row else None,
+            json.loads(book['payload']) if book else None,
+            day['seconds'] if day else 0,
+        )
+
     def book_stats(self, user: str, document: str) -> list[dict]:
         """Per-device statistics rows of a book and of its merged copies."""
         with self._get_connection() as conn:
