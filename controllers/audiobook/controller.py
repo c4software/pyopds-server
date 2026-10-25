@@ -9,6 +9,7 @@ generation. Off (404) while no server is configured.
 """
 import json
 
+from controllers.audiobook.book_text import speech_text
 from controllers.audiobook.config import get_audiobook_config
 from controllers.core.http_io import read_json
 from controllers.catalog.webui import WebUIController
@@ -29,12 +30,6 @@ def book_voice(stored: str | None) -> dict[str, str]:
     if not isinstance(data, dict):
         data = {}
     return {name: data[name] if isinstance(data.get(name), str) else '' for name in ('voice', 'instructions')}
-
-
-def speech_text(text: str) -> str:
-    """Text sent to the speech server: spaces collapsed in each line, the line breaks between paragraphs kept
-    (a pause for the voice), empty lines dropped."""
-    return '\n'.join(line for line in (' '.join(part.split()) for part in text.splitlines()) if line)
 
 
 def voice_fields(body: dict) -> dict[str, str] | None:
@@ -135,4 +130,4 @@ class AudiobookController(WebUIController):
                 'max_chars': config.max_chars}
 
 
-__all__ = ['AudiobookController', 'book_voice', 'speech_text', 'voice_fields']
+__all__ = ['AudiobookController', 'book_voice', 'voice_fields']

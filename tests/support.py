@@ -106,10 +106,15 @@ def http_request(port, method, path, body=None, headers=None):
     return result
 
 
-def create_chapter_epub(path, title, author, chapters=2):
-    """EPUB with a manifest, a spine and `chapters` XHTML chapters (OEBPS/ch<n>.xhtml)."""
+def create_chapter_epub(path, title, author, chapters=2, toc=None, bodies=None):
+    """EPUB with a manifest, a spine and `chapters` XHTML chapters (OEBPS/ch<n>.xhtml); `toc` ({href: label})
+    adds an EPUB 3 table of contents (OEBPS/nav.xhtml, first in the spine), `bodies` ({n: body HTML})
+    replaces the five paragraphs of chapters."""
     manifest = ''.join(f'<item id="c{n}" href="ch{n}.xhtml" media-type="application/xhtml+xml"/>' for n in range(1, chapters + 1))
     spine = ''.join(f'<itemref idref="c{n}"/>' for n in range(1, chapters + 1))
+    if toc:
+        manifest = '<item id="nav" href="nav.xhtml" properties="nav" media-type="application/xhtml+xml"/>' + manifest
+        spine = '<itemref idref="nav"/>' + spine
     with zipfile.ZipFile(path, 'w') as zf:
         zf.writestr('mimetype', 'application/epub+zip')
         zf.writestr('META-INF/container.xml', '<?xml version="1.0"?><container version="1.0" '
@@ -119,7 +124,11 @@ def create_chapter_epub(path, title, author, chapters=2):
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
 <dc:title>{title}</dc:title><dc:creator>{author}</dc:creator></metadata>
 <manifest>{manifest}</manifest><spine>{spine}</spine></package>""")
+        if toc:
+            links = ''.join(f'<li><a href="{href}">{label}</a></li>' for href, label in toc.items())
+            zf.writestr('OEBPS/nav.xhtml', '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">'
+                                           f'<body><nav epub:type="toc"><ol>{links}</ol></nav></body></html>')
         for n in range(1, chapters + 1):
-            body = ''.join(f'<p>Chapitre {n}, paragraphe {p}.</p>' for p in range(1, 6))
+            body = (bodies or {}).get(n) or ''.join(f'<p>Chapitre {n}, paragraphe {p}.</p>' for p in range(1, 6))
             zf.writestr(f'OEBPS/ch{n}.xhtml', f'<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml">'
                                               f'<head><title>{n}</title></head><body>{body}</body></html>', zipfile.ZIP_DEFLATED)

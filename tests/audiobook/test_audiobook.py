@@ -41,16 +41,18 @@ def tone_wav(seconds: float = 1.0, amplitude: int = 3000, rate: int = 16000, cha
 
 class FakeSpeechServer(http.server.BaseHTTPRequestHandler):
     """OpenAI-compatible text-to-speech server of the audiobook tests: records the requests, answers WAV bytes
-    (a real WAV file for the voice design model), an error when the text says "erreur", and a voice listing."""
+    (a real WAV file for the voice design model, or for every model with `wav_answers`), an error when the text
+    says "erreur", and a voice listing."""
 
     requests: list = []
+    wav_answers = False
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         FakeSpeechServer.requests.append({'path': self.path, 'body': body, 'auth': self.headers.get('Authorization')})
         if 'erreur' in body['input']:
             self._answer(500, b'{"error": {"message": "GPU indisponible"}}', 'application/json')
-        elif body['model'] == 'bigchuck/tts-design':
+        elif body['model'] == 'bigchuck/tts-design' or FakeSpeechServer.wav_answers:
             self._answer(200, tone_wav(), 'audio/wav')
         else:
             self._answer(200, b'RIFF-audio:' + body['input'].encode('utf-8'), 'audio/wav')
@@ -179,6 +181,12 @@ class TestAudiobook(unittest.TestCase):
 
     def setUp(self):
         FakeSpeechServer.requests = []
+        FakeSpeechServer.wav_answers = False
+        # The tools ask nothing, even when the tests run at a terminal
+        for module in ('controllers.tools.prompts', 'controllers.tools.audiobook_export'):
+            patcher = mock.patch.object(importlib.import_module(module), 'interactive', return_value=False)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def _request(self, method, path, body=None, headers=None):
         return http_request(self.port, method, path, body, headers)
@@ -287,6 +295,65 @@ class TestAudiobook(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             voice_design.main(['moi', 'Voix', '--recording', str(recording), '--text', 'x'])
 
+    def test_audiobook_export_writes_one_wav_per_chapter(self):
+        export = importlib.import_module('controllers.tools.audiobook_export')
+        FakeSpeechServer.wav_answers = True
+        folder = Path(self.db_dir.name, 'livres-audio', 'Le Conte')
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            code = export.main([self.epub, '--voice', 'ryan', '--tone', 'Voix de conteur', '--yes'])
+        self.assertEqual(code, 0)
+        self.assertIn('Estimation : génération ~', printed.getvalue())
+        self.assertEqual(sorted(p.name for p in folder.iterdir()), ['01 - Chapitre 1.wav', '02 - Chapitre 2.wav'])
+        # A short request loads the model, then each chapter is read in requests of max_chars (100) at most
+        bodies = [r['body'] for r in FakeSpeechServer.requests]
+        self.assertEqual(bodies[0]['input'], 'Bonjour.')
+        self.assertEqual({(b['model'], b['voice'], b['instructions'], b['response_format']) for b in bodies},
+                         {('bigchuck/tts', 'ryan', 'Voix de conteur', 'wav')})
+        self.assertEqual(bodies[1]['input'], 'Chapitre 1, paragraphe 1.\nChapitre 1, paragraphe 2.\nChapitre 1, paragraphe 3.')
+        self.assertEqual(len(bodies), 1 + 2 * 2)
+        with wave.open(str(folder / '01 - Chapitre 1.wav')) as chapter:
+            # Two answers of 1 s and the pause between them
+            self.assertAlmostEqual(chapter.getnframes() / chapter.getframerate(), 2 + export.PAUSE_SECONDS, delta=0.01)
+        # Run again: the chapters written are skipped
+        FakeSpeechServer.requests = []
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            self.assertEqual(export.main([self.epub, '--yes']), 0)
+        self.assertIn('Rien à générer', printed.getvalue())
+        self.assertEqual(FakeSpeechServer.requests, [])
+
+    def test_audiobook_export_asks_the_book_the_voice_and_the_tone(self):
+        export = importlib.import_module('controllers.tools.audiobook_export')
+        prompts = importlib.import_module('controllers.tools.prompts')
+        FakeSpeechServer.wav_answers = True
+        output = Path(self.db_dir.name, 'interactif')
+        # A search with no result, the book found by the catalog's search, the voice by its number
+        # (cloned voices first, then the server's), a tone, the go after the estimate
+        answers = iter(['absent', 'le conte', '1', '3', 'Voix de conteur', ''])
+        with mock.patch.object(prompts, 'interactive', return_value=True), mock.patch.object(export, 'interactive', return_value=True), \
+                mock.patch('builtins.input', lambda _: next(answers)), contextlib.redirect_stdout(io.StringIO()) as printed:
+            self.assertEqual(export.main(['--output', str(output), '--chapters', '2']), 0)
+        self.assertIn('Aucun livre trouvé', printed.getvalue())
+        self.assertIn('1. narrateur', printed.getvalue())
+        self.assertIn('vivian  (par défaut)', printed.getvalue())
+        self.assertEqual([p.name for p in output.iterdir()], ['02 - Chapitre 2.wav'])
+        body = FakeSpeechServer.requests[-1]['body']
+        self.assertEqual((body['voice'], body['instructions']), ('ryan', 'Voix de conteur'))
+
+    def test_audiobook_export_reports_errors(self):
+        export = importlib.import_module('controllers.tools.audiobook_export')
+        # The server's error stops the generation after the retries, nothing incomplete left
+        output = Path(self.db_dir.name, 'erreur')
+        with mock.patch.object(export, 'RETRY_DELAYS', ()), mock.patch.object(export, 'WARMUP_TEXT', 'Une erreur.'), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as errors:
+            self.assertEqual(export.main(['Contes/conte.epub', '--output', str(output), '--yes']), 1)
+        self.assertIn('GPU indisponible', errors.getvalue())
+        self.assertEqual(list(output.iterdir()), [])
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            export.main([self.epub, '--chapters', '3'])
+        # Without a terminal, the book is required
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            export.main([])
+
     def test_unconfigured_audiobook_answers_404(self):
         config = importlib.import_module('controllers.audiobook.config')
         with mock.patch.object(self.audiobook, 'get_audiobook_config', return_value=config.AudiobookConfig()):
@@ -299,6 +366,32 @@ class TestAudiobook(unittest.TestCase):
         self.assertIn('/static/reader/audiobook.js?v=', page)
         self.assertIn('class="reader-player"', page)
         self.assertEqual(self._request('GET', '/static/vendor/foliate/tts.js')[0], 200)
+
+
+class TestBookText(unittest.TestCase):
+    """Chapters of an EPUB and requests of the speech server."""
+
+    def setUp(self):
+        self.book_text = importlib.import_module('controllers.audiobook.book_text')
+
+    def test_paragraphs_are_grouped_and_long_ones_cut_at_sentences(self):
+        chunks = self.book_text.speech_chunks('Un.\nDeux  trois.\n\n' + 'Phrase longue. ' * 10, 40)
+        self.assertEqual(chunks[0], 'Un.\nDeux trois.')
+        self.assertTrue(all(len(c) <= 40 for c in chunks))
+        self.assertEqual(' '.join(chunks[1:]), ' '.join(['Phrase longue.'] * 10))
+        # A sentence longer than a request is cut between words
+        self.assertEqual(self.book_text.speech_chunks('mot ' * 30, 20), ['mot mot mot mot mot'] * 6)
+
+    def test_chapters_are_titled_by_the_table_of_contents(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, 'livre.epub')
+            create_chapter_epub(path, 'Livre', 'Auteur', chapters=3, toc={'ch1.xhtml': 'Le départ', 'ch2.xhtml#s1': 'Le  retour'},
+                                bodies={3: '<h2>Épilogue <em>final</em></h2><p>Fin.</p>'})
+            chapters = self.book_text.book_chapters(path)
+        # The table of contents is not read; a document missing from it is titled by its first heading
+        self.assertEqual([c.title for c in chapters], ['Le départ', 'Le retour', 'Épilogue final'])
+        self.assertEqual(chapters[2].text, 'Épilogue final\nFin.')
+        self.assertTrue(chapters[0].text.startswith('Chapitre 1, paragraphe 1.\nChapitre 1, paragraphe 2.'))
 
 
 class TestRecordingNormalization(unittest.TestCase):

@@ -28,7 +28,7 @@ import wave
 from dataclasses import replace
 from pathlib import Path
 
-from controllers.audiobook.config import ClonedVoice, get_audiobook_config
+from controllers.audiobook.config import ClonedVoice, get_audiobook_config, settings_folder
 from controllers.audiobook.recording import ADVISED_SECONDS, normalize
 from controllers.audiobook.speech_client import SpeechClient, SpeechError
 
@@ -45,9 +45,7 @@ PLAYERS = (['aplay', '-q'], ['paplay'], ['afplay'], ['ffplay', '-nodisp', '-auto
 
 def default_output(name: str) -> Path:
     """voix/<name>.wav next to the settings file of AUDIOBOOK_CONFIG_PATH (the working directory without one)."""
-    settings = os.environ.get('AUDIOBOOK_CONFIG_PATH')
-    folder = Path(settings).resolve().parent if settings else Path.cwd()
-    return folder / 'voix' / f'{name}.wav'
+    return settings_folder() / 'voix' / f'{name}.wav'
 
 
 def example_path(output: Path) -> Path:
@@ -57,10 +55,9 @@ def example_path(output: Path) -> Path:
 
 def clone_table(name: str, audio: Path, text: str) -> str:
     """`[clones.<name>]` table of the settings for a recording (its path relative to the settings folder when inside)."""
-    settings = os.environ.get('AUDIOBOOK_CONFIG_PATH')
     path = audio.resolve()
-    if settings and path.is_relative_to(Path(settings).resolve().parent):
-        path = path.relative_to(Path(settings).resolve().parent)
+    if os.environ.get('AUDIOBOOK_CONFIG_PATH') and path.is_relative_to(settings_folder()):
+        path = path.relative_to(settings_folder())
     return f"[clones.{name}]\naudio = {json.dumps(str(path))}\ntext = {json.dumps(text, ensure_ascii=False)}\n"
 
 

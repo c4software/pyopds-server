@@ -1,6 +1,6 @@
 # Audiobook
 
-« Écouter » in the web reader reads the book aloud with a text-to-speech server: a few paragraphs at a time, just before they are played, the sentence read underlined and the pages following it. The book is never generated whole and no audio is kept on the server. Each book can have its own voice and reading tone, and the voices can be cloned from a short recording, designed from a written description.
+« Écouter » in the web reader reads the book aloud with a text-to-speech server: a few paragraphs at a time, just before they are played, the sentence read underlined and the pages following it. The book is never generated whole and no audio is kept on the server; a command line tool can also [export a book](#exporting-a-book) as audio files, chapter by chapter. Each book can have its own voice and reading tone, and the voices can be cloned from a short recording, designed from a written description.
 
 Optional and off by default: it needs an OpenAI-compatible text-to-speech server (`POST /v1/audio/speech`), for instance an LLM proxy in front of a local model server running [Qwen3-TTS](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice). It is part of the full server (not in `MINIMAL_MODE`) and offered to signed-in readers only: every request costs the speech server a generation.
 
@@ -9,6 +9,7 @@ Optional and off by default: it needs an OpenAI-compatible text-to-speech server
 - [Settings](#settings)
 - [Voices](#voices)
 - [Making a voice](#making-a-voice)
+- [Exporting a book](#exporting-a-book)
 - [With curl](#with-curl)
 - [Endpoints](#endpoints)
 - [Troubleshooting](#troubleshooting)
@@ -143,6 +144,28 @@ docker exec cops python -m controllers.tools.voice_design narrateur "…"
 
 The design model invents the voice again on each call: run the tool again until the example pleases. Describe the gender, age, timbre, accent and reading style; the two voices of `voix/french/` came from the descriptions of [their README](../voix/french/README.md).
 
+## Exporting a book
+
+`python -m controllers.tools.audiobook_export` makes the audiobook of an EPUB: one WAV file per chapter, read by the speech server of the settings, with a voice (of the model or cloned) and a reading tone.
+
+```bash
+# Book, voice and tone asked at the terminal
+python -m controllers.tools.audiobook_export
+# Or given on the command line (what is left out is asked; Enter keeps the defaults of the settings)
+python -m controllers.tools.audiobook_export Auteur/livre.epub --voice ryan --tone "Voix posée de conteur" --chapters 3-5,8
+# In the Docker image (-it for the questions and the progress line): files in /config/livres-audio/<title>/
+docker exec -it cops python -m controllers.tools.audiobook_export
+```
+
+1. **Book**: a path, or a path relative to the library (`LIBRARY_DIR`). Without one, the tool asks for it with the catalog's search (title, author or series) and lists the books found (the first 20, refine the search for the others) to choose one by its number.
+2. **Voice and tone**: without `--voice`, the voices of the server are listed (the cloned ones first) to choose one by its number or its name, Enter keeping the default `voice`; without `--tone`, the reading tone is asked (Enter: `instructions` of the settings; never asked for a cloned voice, which reads like its recording). Without a terminal nothing is asked: the book is required and the defaults are used.
+3. **Chapters**: the content documents of the EPUB in reading order (its table of contents itself excepted), titled by the table of contents, else their first heading. Front and back matter (cover, title page…) are chapters too: `--chapters` picks the ones to read.
+4. **Estimate**: a short request first loads the model (a server that keeps one model at a time switches to it), then the first request of the book is timed: the generation time and the audio length of the selection are printed, and the tool asks before going on (`--yes` to skip, no question without a terminal).
+5. **Generation**: each chapter is read in requests of `max_chars` (whole paragraphs, a longer one cut at its sentences), one after the other, with a short pause between them; the progress line shows the chapter, the percentages done and the **time left** at the speed measured so far (one line per chapter without a terminal). A request that fails is tried again three times (after 5, 15 and 30 s).
+6. **Files**: `<n> - <title>.wav` in `livres-audio/<title>/` next to the settings file (`--output` for another folder), each written once complete. The chapters already there are skipped: after a stop (Ctrl+C, error), the same command resumes at the interrupted chapter.
+
+The audio is the speech server's WAV (about 2.9 MB per minute at 24 kHz): convert it to another format with any audio tool once done. With Qwen3-TTS 1.7B on a local GPU, a chapter is generated about twice faster than it plays (a novel of 8 hours in about 4 hours).
+
 ## With curl
 
 The same steps by hand, straight to the speech server (here an llm-proxy in front of Qwen3-TTS; the model names carry its backend prefix). The JSON bodies are built with `jq`: a reference recording in base64 weighs about a megabyte, too much for a command line.
@@ -242,5 +265,7 @@ The player shows « Lecture audio interrompue : … » with the speech server's 
 | Speech server client | `controllers/audiobook/speech_client.py` (`/v1/audio/speech`, `/v1/audio/voices`, recordings of the cloned voices, concurrency limit) |
 | Endpoints | `controllers/audiobook/controller.py` (routes in `routes.py`, full server only) |
 | Reference recordings | `controllers/audiobook/recording.py` (normalization), `controllers/tools/voice_design.py` (tool), `voix/french/` |
+| Text of a book | `controllers/audiobook/book_text.py` (chapters, table of contents, requests of `max_chars`) |
+| Export | `controllers/tools/audiobook_export.py` (estimate, progress, resume) |
 | Web reader | `static/reader/narration.js` (sentences, requests, playback, underlining), `static/reader/audiobook.js` (Alpine store `audiobook`), `static/partials/reader-audio.html` (player, « Voix et ton ») |
 | Tests | `tests/audiobook/test_audiobook.py` (a fake speech server) |

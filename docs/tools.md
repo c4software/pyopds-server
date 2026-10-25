@@ -19,9 +19,11 @@ docker exec cops python -m controllers.tools.duplicates --move-to /config/doublo
 
 In each group one file is kept: the one already read on a reader (known to the sync database, so its progress stays attached to a library book), then the one with a cover, a readable file name containing the title (not garbled by a wrong encoding), metadata, the largest file, the oldest. Folders left empty are removed. `--move-to` must be outside the library, otherwise the copies would still appear in the catalog.
 
-## Audiobook voices
+## Audiobook voices and export
 
 `python -m controllers.tools.voice_design` makes a cloned voice of the audiobook from a written description or a recording of your own voice: normalized reference, example read with it and played for validation, settings table to add. See [Making a voice](audiobook.md#making-a-voice).
+
+`python -m controllers.tools.audiobook_export` makes the audiobook of an EPUB, one WAV file per chapter, with a voice and a reading tone (book, voice and tone asked at the terminal, or `livre.epub --voice … --tone …`): the time it takes is estimated before starting, then the time left shown as it goes; an interrupted generation resumes where it stopped. See [Exporting a book](audiobook.md#exporting-a-book).
 
 ## Fixing metadata (genres, authors, titles)
 

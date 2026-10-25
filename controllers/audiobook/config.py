@@ -164,6 +164,13 @@ def load_audiobook_config(path: str | os.PathLike, base: AudiobookConfig | None 
         return AudiobookConfig.from_dict(tomllib.load(f), base, Path(path).resolve().parent)
 
 
+def settings_folder() -> Path:
+    """Folder of the settings file of AUDIOBOOK_CONFIG_PATH (the working directory without one): the files
+    made by the command line tools (voices, audiobooks) are written there."""
+    path = os.environ.get('AUDIOBOOK_CONFIG_PATH')
+    return Path(path).resolve().parent if path else Path.cwd()
+
+
 @functools.cache
 def get_audiobook_config() -> AudiobookConfig:
     """Settings of the server, loaded once: the default file completed by AUDIOBOOK_CONFIG_PATH.
@@ -186,4 +193,4 @@ def get_audiobook_config() -> AudiobookConfig:
         return config
 
 
-__all__ = ['AudiobookConfig', 'ClonedVoice', 'expand_env', 'get_audiobook_config', 'load_audiobook_config']
+__all__ = ['AudiobookConfig', 'ClonedVoice', 'expand_env', 'get_audiobook_config', 'load_audiobook_config', 'settings_folder']

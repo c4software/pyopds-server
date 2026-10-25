@@ -69,8 +69,9 @@ class _TextLengthParser(HTMLParser):
             self.length += len(' '.join(data.split()))
 
 
-class _PlainTextParser(HTMLParser):
-    """Plain text of an HTML fragment: paragraphs separated by a blank line, <br> kept as a line break."""
+class PlainTextParser(HTMLParser):
+    """Plain text of an HTML document or fragment: paragraphs separated by a blank line, <br> kept as a line
+    break, <head>, scripts and styles skipped."""
 
     def __init__(self):
         super().__init__()
@@ -78,7 +79,7 @@ class _PlainTextParser(HTMLParser):
         self._skip_depth = 0
 
     def handle_starttag(self, tag, attrs):
-        if tag in ('script', 'style'):
+        if tag in ('script', 'style', 'head'):
             self._skip_depth += 1
         elif tag == 'br':
             self.parts.append('\n')
@@ -92,7 +93,7 @@ class _PlainTextParser(HTMLParser):
             self.parts.append('\n')
 
     def handle_endtag(self, tag):
-        if tag in ('script', 'style'):
+        if tag in ('script', 'style', 'head'):
             self._skip_depth = max(0, self._skip_depth - 1)
         elif tag in BLOCK_TAGS:
             self.parts.append('\n\n')
@@ -102,19 +103,24 @@ class _PlainTextParser(HTMLParser):
             self.parts.append(re.sub(r'\s+', ' ', data))
 
 
+def plain_text(parts: list[str]) -> str:
+    """Text of the parts of a PlainTextParser (or of a plain string): spaces collapsed in each line, at most
+    one blank line between paragraphs."""
+    lines = [' '.join(line.split()) for line in ''.join(parts).split('\n')]
+    return re.sub(r'\n{3,}', '\n\n', '\n'.join(lines)).strip()
+
+
 def description_text(value: str | None, max_length: int = DESCRIPTION_MAX_LENGTH) -> str | None:
     """Plain text of an EPUB description (often HTML), line breaks kept, cut at `max_length` characters."""
     if not value or not value.strip():
         return None
     if '<' in value:
-        parser = _PlainTextParser()
+        parser = PlainTextParser()
         parser.feed(value)
         parser.close()
-        text = ''.join(parser.parts)
+        text = plain_text(parser.parts)
     else:
-        text = value
-    lines = [' '.join(line.split()) for line in text.split('\n')]
-    text = re.sub(r'\n{3,}', '\n\n', '\n'.join(lines)).strip()
+        text = plain_text([value])
     if len(text) > max_length:
         cut = text[:max_length]
         text = (cut[:cut.rfind(' ')] if ' ' in cut[max_length // 2:] else cut).rstrip() + '…'
@@ -134,7 +140,7 @@ def release_year(date: str | None) -> int | None:
     return int(year) if len(year) == 4 and year.isdigit() and int(year) not in (0, 101) else None
 
 
-def _content_documents(zf: zipfile.ZipFile) -> list[str]:
+def content_documents(zf: zipfile.ZipFile) -> list[str]:
     """Reading-order (spine) content documents of an EPUB, or every (X)HTML file without a spine."""
     names = set(zf.namelist())
     opf_root, opf_dir = BookMetadata._parse_opf_from_epub(zf)
@@ -158,7 +164,7 @@ def estimate_print_pages(path: str) -> int | None:
     try:
         with zipfile.ZipFile(path) as zf:
             length = 0
-            for name in _content_documents(zf):
+            for name in content_documents(zf):
                 parser = _TextLengthParser()
                 parser.feed(zf.read(name).decode('utf-8', errors='replace'))
                 parser.close()
@@ -286,11 +292,14 @@ class LibraryIndex:
 
 __all__ = [
     'LibraryIndex',
+    'PlainTextParser',
+    'content_documents',
     'description_text',
     'document_hashes',
     'estimate_print_pages',
     'filename_md5',
     'koreader_partial_md5',
+    'plain_text',
     'release_year',
     'series_key',
 ]
