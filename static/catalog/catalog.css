@@ -1,4 +1,4 @@
-/* Catalog web UI (static/opds_to_html.xslt): styles that Tailwind utilities cannot express
+/* Catalog web UI (static/catalog/opds_to_html.xslt): styles that Tailwind utilities cannot express
    (book tile colors, cover fade-in, cover mosaic, book sheet dialog, rating stars).
    Served as is (not compiled), linked after static/tailwind.css so that it wins over the utilities
    of equal specificity, as the former inline <style> did. Dark variants use the `.dark` class of <html>. */

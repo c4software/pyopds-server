@@ -5,12 +5,12 @@
 A command line tool finds the duplicate EPUBs of the library (`LIBRARY_DIR`), and can remove them:
 
 ```bash
-python -m controllers.duplicates                         # report only
-python -m controllers.duplicates --json                  # report as JSON
-python -m controllers.duplicates --move-to ../doublons   # move the extra copies out of the library
-python -m controllers.duplicates --delete                # delete the extra copies
+python -m controllers.tools.duplicates                         # report only
+python -m controllers.tools.duplicates --json                  # report as JSON
+python -m controllers.tools.duplicates --move-to ../doublons   # move the extra copies out of the library
+python -m controllers.tools.duplicates --delete                # delete the extra copies
 # In the Docker image
-docker exec cops python -m controllers.duplicates --move-to /config/doublons
+docker exec cops python -m controllers.tools.duplicates --move-to /config/doublons
 ```
 
 - **Identical files** (same SHA-256), wherever they are stored.
@@ -24,13 +24,13 @@ In each group one file is kept: the one already read on a reader (known to the s
 A command line tool lists the books whose metadata need fixing in a CSV file, then writes the completed file back into the EPUBs:
 
 ```bash
-python -m controllers.metadata_fix export livres.csv            # books to fix, with genre suggestions
-python -m controllers.metadata_fix export livres.csv --online   # suggestions from Open Library too
-python -m controllers.metadata_fix apply livres.csv             # check the completed file (dry run)
-python -m controllers.metadata_fix apply livres.csv --write     # write into the EPUBs
+python -m controllers.tools.metadata_fix export livres.csv            # books to fix, with genre suggestions
+python -m controllers.tools.metadata_fix export livres.csv --online   # suggestions from Open Library too
+python -m controllers.tools.metadata_fix apply livres.csv             # check the completed file (dry run)
+python -m controllers.tools.metadata_fix apply livres.csv --write     # write into the EPUBs
 # In the Docker image (the library volume must be writable)
-docker exec cops python -m controllers.metadata_fix export /config/livres.csv
-docker exec cops python -m controllers.metadata_fix apply /config/livres.csv --write && docker restart cops
+docker exec cops python -m controllers.tools.metadata_fix export /config/livres.csv
+docker exec cops python -m controllers.tools.metadata_fix apply /config/livres.csv --write && docker restart cops
 ```
 
 `export` lists the books with no genre shown in the catalog (none, or only subjects that are not genres of `genres.toml`), a missing author ("Unknown", "Inconnu"…) or a title to clean ("untitled", "(French Edition)", ".epub"…). The `suggestion` column holds the genres of the author's other books (the genres of at least 40 % of them, for authors with 3 books or more); with `--online`, Open Library is searched for the others (only the title and author are sent).

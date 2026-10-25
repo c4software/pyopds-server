@@ -1,4 +1,4 @@
-/* Web reader page (static/reader.html): full-screen book with floating bars, panels and the clipping editor.
+/* Web reader page (static/reader/reader.html): full-screen book with floating bars, panels and the clipping editor.
    Colors follow the book theme (html[data-reader-theme], set by static/reader/settings.js). */
 
 [x-cloak] { display: none !important; }

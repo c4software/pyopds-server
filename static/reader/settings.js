@@ -10,7 +10,7 @@
     const STORAGE_KEY = 'pyopds-reader-settings';
     const DEFAULTS = { fontSize: 100, lineHeight: 1.5, font: 'publisher', margins: 'normal', justify: true, theme: 'auto', flow: 'paginated' };
     const LIMITS = { fontSize: [70, 200], lineHeight: [1.1, 2.2] };
-    // Text and background of the themes ("auto": light or dark like the site, static/theme.js)
+    // Text and background of the themes ("auto": light or dark like the site, static/shared/theme.js)
     const THEMES = {
         light: { fg: '#1f2937', bg: '#ffffff', link: '#0f766e' },
         sepia: { fg: '#433422', bg: '#f4ecd8', link: '#8a4b0f' },

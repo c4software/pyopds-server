@@ -1,0 +1,1509 @@
+"""OPDS catalog HTTP handler and helpers."""
+import datetime
+import email.utils
+import gzip
+import hashlib
+import os
+import random
+import time
+import xml.etree.ElementTree as ET
+from xml.sax.saxutils import escape as xml_escape
+import zipfile
+from collections.abc import Collection
+from dataclasses import dataclass, field
+from urllib.parse import parse_qs, quote, unquote, urlparse
+
+from controllers.core.background import shared_instance
+from controllers.library.genres import genre_key, get_genre_config, normalize_genres
+from controllers.core.http_io import not_modified_since, redirect, send_body
+from controllers.library.metadata_rules import author_key, normalize_author_name, normalize_series_name
+
+LIBRARY_DIR = os.environ.get('LIBRARY_DIR', 'books')
+PAGE_SIZE = int(os.environ.get('PAGE_SIZE', 25))
+# Covers: a week in the browsers, then a cheap revalidation (Last-Modified of the EPUB) for a month more
+COVER_CACHE = 'public, max-age=604800, stale-while-revalidate=2592000'
+# Covers shown as an animated mosaic in the background of the web view navigation tiles
+# (always listed; the web view only loads them when the viewer enables the mosaic)
+MOSAIC_REL = 'urn:pyopds:mosaic-cover'
+MOSAIC_SIZE = 12
+ATOM_NS = 'http://www.w3.org/2005/Atom'
+DC_TERMS_NS = 'http://purl.org/dc/terms/'
+# Series, series index and rating of the book entries: OPDS 1.x (Atom) has no element for them and
+# no client convention exists (Calibre's own feed writes them as text in <content>), so they use a
+# namespace of this server, ignored by the other clients; the series is also a rel="related" link
+PYOPDS_NS = 'urn:pyopds:metadata'
+XHTML_NS = 'http://www.w3.org/1999/xhtml'
+# XSLT engine in WebAssembly for browsers that dropped native XSLT (github.com/mfreed7/xslt_polyfill, BSD-3)
+XSLT_POLYFILL = 'vendor/xslt-polyfill.min.js'
+ACQUISITION_FEED = 'application/atom+xml;profile=opds-catalog;kind=acquisition'
+XML_TYPE = 'application/xml; charset=utf-8'
+NAVIGATION_FEED = 'application/atom+xml;profile=opds-catalog;kind=navigation'
+# Link of every feed back to the root catalog
+START_LINK = ('start', '/opds', NAVIGATION_FEED)
+
+
+def format_series_index(index: int | float | None) -> str | None:
+    """Displayed series position ("2", "1.5"), None when unknown."""
+    if index is None:
+        return None
+    return str(int(index)) if float(index).is_integer() else f'{index:g}'
+
+
+def library_relative_path(path: str, base: str | None = None) -> str:
+    """Path of a library file relative to `base` (LIBRARY_DIR by default), with '/' separators (URLs,
+    sync library_path, CSV rows)."""
+    return os.path.relpath(path, base or LIBRARY_DIR).replace(os.sep, '/')
+
+
+def without(paths: list[str], exclude: Collection[str]) -> list[str]:
+    """`paths` minus the `exclude` ones, order kept (the same list when nothing is excluded)."""
+    return [path for path in paths if path not in exclude] if exclude else paths
+
+
+def navigation_tile(title: str, tile_id: str, href: str, feed_type: str, paths: list[str]) -> dict:
+    """Navigation entry leading to a feed (`href` of type `feed_type`), with the cover mosaic of `paths`."""
+    return {'title': title, 'id': tile_id, 'links': [('subsection', href, feed_type), *mosaic_links(paths)]}
+
+
+def prepend_summary(entry: dict, text: str | None) -> None:
+    """Put a line (why the book is listed, reading progress…) before the entry's description."""
+    entry['summary'] = '\n\n'.join(part for part in (text, entry.get('summary')) if part)
+
+
+def mosaic_links(paths: list[str]) -> list[tuple[str, str, str]]:
+    """Links to the covers of a random sample of books, for the background of a navigation tile.
+
+    Covers are not checked (that would open every EPUB): the web view skips those answering 404.
+    """
+    sample = random.sample(paths, min(MOSAIC_SIZE, len(paths)))
+    return [
+        (MOSAIC_REL, f'/cover/{quote(library_relative_path(path))}', 'image/jpeg')
+        for path in sample
+    ]
+
+
+class BookMetadata:
+    @staticmethod
+    def _parse_opf_from_epub(zf: zipfile.ZipFile) -> tuple[ET.Element | None, str | None]:
+        """Internal: parse container.xml and OPF, return (opf_root, opf_dir)."""
+        try:
+            container_xml = zf.read('META-INF/container.xml')
+            container_root = ET.fromstring(container_xml)
+            ns_container = {'ocf': 'urn:oasis:names:tc:opendocument:xmlns:container'}
+            rootfile = container_root.find(
+                ".//ocf:rootfile[@media-type='application/oebps-package+xml']",
+                ns_container,
+            )
+            if rootfile is None:
+                return None, None
+            opf_path = rootfile.get('full-path')
+            if not opf_path:
+                return None, None
+            opf_xml = zf.read(opf_path)
+            opf_root = ET.fromstring(opf_xml)
+            opf_dir = os.path.dirname(opf_path)
+            return opf_root, opf_dir
+        except Exception:
+            return None, None
+
+    @staticmethod
+    def extract_epub_metadata(epub_path: str) -> tuple[str | None, str | None, str | None]:
+        """Extract metadata from EPUB file.
+        
+        Returns:
+            tuple: (title, author, publication_date) or (None, None, None) if not found
+        """
+        title, author, publication_date, _ = BookMetadata.extract_epub_details(epub_path)
+        return title, author, publication_date
+
+    @staticmethod
+    def extract_epub_details(epub_path: str) -> tuple[str | None, str | None, str | None, list[str]]:
+        """Extract title, author, publication date and genres (normalized dc:subject) in a single read.
+
+        Returns:
+            tuple: (title, author, publication_date, genres), (None, None, None, []) if not found
+        """
+        info = BookMetadata.extract_epub_info(epub_path)
+        if info is None:
+            return None, None, None, []
+        return info['title'], info['author'], info['date'], info['genres']
+
+    @staticmethod
+    def extract_epub_info(epub_path: str) -> dict | None:
+        """Extract every OPF metadata used by the server in a single read (see `opf_metadata`).
+
+        Returns:
+            dict: the metadata, or None when the EPUB or its OPF cannot be read
+        """
+        try:
+            with zipfile.ZipFile(epub_path) as zf:
+                opf_root, _ = BookMetadata._parse_opf_from_epub(zf)
+                return BookMetadata.opf_metadata(opf_root) if opf_root is not None else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def opf_metadata(opf_root: ET.Element) -> dict:
+        """Metadata of a parsed OPF package.
+
+        Keys: title, author (normalized dc:creator, see `metadata_rules`), date (raw dc:date),
+        genres (normalized dc:subject), series and series_index (calibre:series / calibre:series_index,
+        else the EPUB 3 `belongs-to-collection` of collection-type "series" with its group-position;
+        normalized, None for an ignored series), description (raw dc:description,
+        often escaped HTML) and rating (calibre:rating, 0-10).
+        """
+        ns_dc = {'dc': 'http://purl.org/dc/elements/1.1/'}
+
+        def dc_text(name: str) -> str | None:
+            elem = opf_root.find(f'.//dc:{name}', ns_dc)
+            if elem is None:
+                return None
+            return ''.join(elem.itertext()) or None
+
+        calibre: dict[str, str] = {}
+        collections: dict[str, dict] = {}
+        for elem in opf_root.iter():
+            if not isinstance(elem.tag, str) or elem.tag.rpartition('}')[2] != 'meta':
+                continue
+            name = (elem.get('name') or '').lower()
+            if name.startswith('calibre:'):
+                calibre.setdefault(name, (elem.get('content') or '').strip())
+                continue
+            prop = (elem.get('property') or '').lower()
+            text = (elem.text or '').strip()
+            if prop == 'belongs-to-collection' and elem.get('id'):
+                collections.setdefault(elem.get('id'), {})['title'] = text
+            elif prop in ('collection-type', 'group-position') and elem.get('refines'):
+                collections.setdefault(elem.get('refines').lstrip('#'), {})[prop] = text
+
+        series = calibre.get('calibre:series') or None
+        series_index = BookMetadata._number(calibre.get('calibre:series_index')) if series else None
+        if not series:
+            for collection in collections.values():
+                if collection.get('title') and collection.get('collection-type', '').lower() == 'series':
+                    series = collection['title']
+                    series_index = BookMetadata._number(collection.get('group-position'))
+                    break
+
+        subjects = [e.text for e in opf_root.findall('.//dc:subject', ns_dc) if e.text]
+        genres = [name for _, name in normalize_genres(subjects, series)]
+        series = normalize_series_name(series)
+        return {
+            'title': dc_text('title'),
+            'author': normalize_author_name(dc_text('creator')),
+            'date': dc_text('date'),
+            'genres': genres,
+            'series': series,
+            'series_index': series_index if series else None,
+            'description': dc_text('description'),
+            'rating': BookMetadata._number(calibre.get('calibre:rating')),
+        }
+
+    @staticmethod
+    def _number(value: str | None) -> int | float | None:
+        """Finite number of a metadata value (an int when whole), None when missing or invalid."""
+        try:
+            number = float(value) if value else None
+        except ValueError:
+            return None
+        if number is None or number != number or number in (float('inf'), float('-inf')):
+            return None
+        return int(number) if number.is_integer() else number
+
+    @staticmethod
+    def extract_epub_cover(epub_path: str) -> tuple[bytes | None, str | None]:
+        """Extract cover image from EPUB file.
+        
+        Returns:
+            tuple: (cover_data, mime_type) or (None, None) if not found
+        """
+        try:
+            with zipfile.ZipFile(epub_path) as zf:
+                opf_root, opf_dir = BookMetadata._parse_opf_from_epub(zf)
+                if opf_root is None:
+                    return None, None
+
+                # Define namespaces
+                ns_opf = {'opf': 'http://www.idpf.org/2007/opf'}
+                
+                # Try to find cover using different methods
+                cover_id = None
+                cover_href = None
+                mime_type = None
+                
+                # Method 1: Look for meta name="cover"
+                cover_meta = opf_root.find(".//opf:meta[@name='cover']", ns_opf)
+                if cover_meta is not None:
+                    cover_id = cover_meta.get('content')
+                
+                # Method 2: Look for item with properties="cover-image" (EPUB 3)
+                if not cover_id:
+                    cover_item = opf_root.find(".//opf:item[@properties='cover-image']", ns_opf)
+                    if cover_item is not None:
+                        cover_href = cover_item.get('href')
+                        mime_type = cover_item.get('media-type')
+                
+                # If we found a cover ID, get the href from manifest
+                if cover_id and not cover_href:
+                    cover_item = opf_root.find(f".//opf:item[@id='{cover_id}']", ns_opf)
+                    if cover_item is not None:
+                        cover_href = cover_item.get('href')
+                        mime_type = cover_item.get('media-type', 'image/jpeg')
+                
+                # If we found a cover href, extract it
+                if cover_href:
+                    # Resolve relative path
+                    if opf_dir:
+                        cover_path = os.path.join(opf_dir, cover_href).replace('\\', '/')
+                    else:
+                        cover_path = cover_href
+                    
+                    # Read cover image
+                    cover_data = zf.read(cover_path)
+                    
+                    # Determine MIME type from file extension if not already set
+                    if mime_type is None:
+                        ext = os.path.splitext(cover_href)[1].lower()
+                        mime_types = {
+                            '.jpg': 'image/jpeg',
+                            '.jpeg': 'image/jpeg',
+                            '.png': 'image/png',
+                            '.gif': 'image/gif',
+                            '.webp': 'image/webp',
+                        }
+                        mime_type = mime_types.get(ext, 'image/jpeg')
+                    
+                    return cover_data, mime_type
+                
+                return None, None
+        except Exception:
+            return None, None
+
+
+class SecurityUtils:
+    @staticmethod
+    def is_within_library_dir(file_path: str) -> bool:
+        library_realpath = os.path.realpath(LIBRARY_DIR)
+        file_realpath = os.path.realpath(file_path)
+        return file_realpath.startswith(library_realpath + os.sep) or file_realpath == library_realpath
+
+    @staticmethod
+    def has_path_traversal(path: str) -> bool:
+        """Check if path contains dangerous traversal sequences."""
+        dangerous_patterns = ['..', '~']
+
+        for pattern in dangerous_patterns:
+            if pattern in path:
+                return True
+
+        path_components = path.replace('\\', '/').split('/')
+        for component in path_components:
+            if component in dangerous_patterns or component.startswith('.'):
+                return True
+
+        return False
+
+
+class OPDSFeedGenerator:
+    """Atom/OPDS feed writer."""
+
+    def __init__(self, include_mosaic: bool = True):
+        """`include_mosaic`: keep the mosaic cover links (MOSAIC_REL), only wanted by the web view.
+
+        OPDS clients must not get them: some (CrossPoint Sync app) list every link of a navigation
+        entry as a section of their own.
+        """
+        self.include_mosaic = include_mosaic
+
+    @staticmethod
+    def _link(parent: ET.Element, link: tuple) -> None:
+        """Append a (rel, href, type[, title[, extra attributes]]) link to an element."""
+        rel, href, type_, *rest = link
+        attrs = {'rel': rel, 'href': href, 'type': type_}
+        if rest and rest[0]:
+            attrs['title'] = rest[0]
+        if len(rest) > 1 and rest[1]:
+            # e.g. the facet attributes opds:facetGroup / opds:activeFacet
+            attrs.update(rest[1])
+        ET.SubElement(parent, 'link', attrs)
+
+    def generate_feed(self, title: str, feed_id: str, links: list[tuple], entries: list[dict],
+                      subtitle: str | None = None) -> str:
+        """Build an Atom/OPDS feed.
+
+        Links are (rel, href, type) tuples, with optional fourth and fifth items: the link title and a
+        dict of extra attributes. Entries may
+        carry optional book metadata: 'summary' (text), 'categories' ([(term, label)]), 'issued'
+        (year, dc:issued), 'series' ((name, index)) and 'rating' (0-5).
+        """
+        feed = ET.Element(
+            'feed',
+            {
+                'xmlns': ATOM_NS,
+                'xmlns:opds': 'http://opds-spec.org/2010/catalog',
+                'xmlns:dc': DC_TERMS_NS,
+                'xmlns:pyopds': PYOPDS_NS,
+            },
+        )
+
+        # Browsers without native XSLT (Chrome 158+) run the XSLT in WebAssembly from this script; with
+        # native XSLT the page is transformed first and the script never loads. OPDS clients ignore it.
+        from controllers.catalog.webui import asset_url
+        ET.SubElement(feed, 'script', {'xmlns': XHTML_NS, 'src': asset_url(XSLT_POLYFILL)})
+        ET.SubElement(feed, 'title').text = title
+        ET.SubElement(feed, 'id').text = feed_id
+        if subtitle:
+            ET.SubElement(feed, 'subtitle').text = subtitle
+        ET.SubElement(feed, 'updated').text = (
+            datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        )
+
+        for link in links:
+            self._link(feed, link)
+
+        for entry_data in entries:
+            entry = ET.SubElement(feed, 'entry')
+            ET.SubElement(entry, 'title').text = entry_data['title']
+            ET.SubElement(entry, 'id').text = entry_data['id']
+
+            if 'author' in entry_data:
+                author = ET.SubElement(entry, 'author')
+                ET.SubElement(author, 'name').text = entry_data['author']
+
+            if entry_data.get('issued'):
+                ET.SubElement(entry, 'dc:issued').text = str(entry_data['issued'])
+
+            for term, label in entry_data.get('categories', []):
+                ET.SubElement(entry, 'category', {'term': term, 'label': label})
+
+            if entry_data.get('series'):
+                name, index = entry_data['series']
+                series = ET.SubElement(entry, 'pyopds:series')
+                series.text = name
+                if index is not None:
+                    series.set('index', format_series_index(index))
+
+            if entry_data.get('rating'):
+                ET.SubElement(entry, 'pyopds:rating').text = f"{entry_data['rating']:g}"
+
+            if entry_data.get('summary'):
+                ET.SubElement(entry, 'summary', {'type': 'text'}).text = entry_data['summary']
+
+            for link in entry_data['links']:
+                if link[0] == MOSAIC_REL and not self.include_mosaic:
+                    continue
+                self._link(entry, link)
+
+        xml_string = ET.tostring(feed, encoding='unicode', method='xml')
+        xml_declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
+        # Versioned stylesheet URL: browsers keep it until it changes (controllers.catalog.webui.catalog_xslt)
+        from controllers.catalog.webui import catalog_xslt_url
+        processing_instruction = f'<?xml-stylesheet type="text/xsl" href="{catalog_xslt_url()}"?>\n'
+        return xml_declaration + processing_instruction + xml_string
+
+
+@dataclass
+class ReadFilter:
+    """Books left out of a list (`exclude`, EPUB paths) and the facet links that toggle the filter
+    (« Masquer les livres lus », controllers.reading.reader_feeds)."""
+    exclude: frozenset[str] = frozenset()
+    links: list[tuple] = field(default_factory=list)
+
+
+class BookScanner:
+    """Book lists and indexes of the catalog, read from the library snapshot (controllers.library.store: the
+    metadata are stored in library.db, kept up to date by its syncs; no EPUB is opened here)."""
+
+    _instance = None  # Singleton instance
+
+    @classmethod
+    def get_instance(cls) -> 'BookScanner':
+        """Get or create singleton instance."""
+        return shared_instance(cls)
+
+    def __init__(self):
+        self.metadata_extractor = BookMetadata()
+        self.security = SecurityUtils()
+
+    @staticmethod
+    def _snapshot():
+        from controllers.library.store import snapshot
+        return snapshot()
+
+    def _infos(self, paths: list[str]) -> list[dict]:
+        """Book dicts of snapshot paths."""
+        books = self._snapshot().books
+        return [books[path].info() for path in paths if path in books]
+
+    def _page(self, paths: list[str], page: int, size: int, exclude: Collection[str] = ()) -> tuple[list[dict], int]:
+        """Book dicts of one page of `paths` (the `exclude` paths left out) and the total count."""
+        paths = without(paths, exclude)
+        start = (page - 1) * size
+        return self._infos(paths[start:start + size]), len(paths)
+
+    def collect_all_epub_paths(self) -> list[str]:
+        """Every EPUB file of the library, listed from the disk (command-line tools; the catalog uses the snapshot)."""
+        from controllers.library.store import epub_paths
+        return epub_paths(LIBRARY_DIR)
+
+    def get_all_books_paginated(self, page: int, size: int, exclude: Collection[str] = ()) -> tuple[list[dict], int]:
+        """Page of every library book; `exclude`: EPUB paths left out (e.g. the books the reader finished)."""
+        return self._page(self._snapshot().paths, page, size, exclude)
+
+    def get_folder_content_paginated(self, folder_full_path: str, parent_folder_path: str, page: int, size: int,
+                                     exclude: Collection[str] = ()) -> tuple[list[dict], int]:
+        """Page of a folder: its subfolders, then its books (by title) except the `exclude` paths."""
+        subfolders = sorted(
+            item for item in os.listdir(folder_full_path)
+            if os.path.isdir(os.path.join(folder_full_path, item)) and not item.startswith('.')
+        )
+        subfolder_entries = []
+        for subfolder in subfolders:
+            subfolder_relative = os.path.join(parent_folder_path, subfolder)
+            subfolder_id = f'urn:folder:{hashlib.md5(subfolder_relative.encode()).hexdigest()}'
+            encoded_subfolder = quote(subfolder_relative.replace(os.sep, '/'))
+            subfolder_entries.append({
+                **navigation_tile(subfolder, subfolder_id, f'/opds/folder/{encoded_subfolder}?page=1', ACQUISITION_FEED,
+                                  self.get_folder_paths(subfolder_relative)),
+                'type': 'folder',
+            })
+
+        folder = os.path.normpath(folder_full_path)
+        books = self._snapshot().books
+        paths = [path for path in books if os.path.dirname(os.path.normpath(path)) == folder and path not in exclude]
+        book_entries = []
+        for info in sorted(self._infos(paths), key=lambda x: x['title'].lower()):
+            book_id = f'urn:book:{hashlib.md5(info["relative_path"].encode()).hexdigest()}'
+            encoded_path = quote(info['relative_path'].replace(os.sep, '/'))
+            book_entries.append({
+                'title': info['title'],
+                'id': book_id,
+                'type': 'book',
+                'author': info['author'],
+                'file_info': info,
+                'links': [('http://opds-spec.org/acquisition/open-access', f'/download/{encoded_path}', 'application/epub+zip')],
+            })
+
+        all_entries = subfolder_entries + book_entries
+        start = (page - 1) * size
+        return all_entries[start:start + size], len(all_entries)
+
+    def recent_books(self, limit: int = 25, exclude: Collection[str] = ()) -> list[dict]:
+        """The `limit` most recently modified EPUBs; `exclude` paths are skipped."""
+        return self._infos(without(self._snapshot().recent, exclude)[:limit])
+
+    @staticmethod
+    def _extract_year(publication_date: str | None) -> str:
+        """Extract year from publication date string.
+        
+        Handles formats like '2023-01-15', '2023', etc.
+        Returns 'Unknown' if year cannot be extracted.
+        """
+        if not publication_date:
+            return 'Unknown'
+        # Try to extract first 4 digits as year
+        year_str = publication_date[:4]
+        if year_str.isdigit() and len(year_str) == 4:
+            return year_str
+        return 'Unknown'
+
+    def _indexes(self):
+        return self._snapshot().catalog
+
+    def _author_display(self, author: str) -> str:
+        """Displayed name of the author index entry matching `author` (any spelling variant)."""
+        return self._indexes().author_names.get(author_key(author) or author, author)
+
+    def get_path_metadata_index(self) -> dict[str, tuple[str, list[str]]]:
+        """Author and genres of every library EPUB {path: (author, [genres])}."""
+        return self._indexes().paths
+
+    def book_info(self, path: str) -> dict:
+        """Title, author, relative path… of one EPUB (from the snapshot, else read from the file)."""
+        from controllers.library.store import Library
+        book = Library.get_instance().book(path)
+        if book is not None:
+            return book.info()
+        title, author, pub_date = self.metadata_extractor.extract_epub_metadata(path)
+        return {
+            'path': path, 'relative_path': os.path.relpath(path, LIBRARY_DIR), 'title': title or os.path.basename(path),
+            'author': author or 'Unknown', 'publication_date': pub_date, 'year': self._extract_year(pub_date),
+            'mtime': os.path.getmtime(path) if os.path.exists(path) else 0,
+        }
+
+    def get_folder_paths(self, folder_relative: str) -> list[str]:
+        """Get the paths of all EPUB files under a library folder, subfolders included."""
+        prefix = os.path.normpath(os.path.join(LIBRARY_DIR, folder_relative)) + os.sep
+        return [path for path in self._snapshot().paths if os.path.normpath(path).startswith(prefix)]
+
+    def get_indexed_paths(self, kind: str, key: str) -> list[str]:
+        """Get the paths of the books of a year, an author or a genre key (kind: 'year', 'author' or 'genre')."""
+        indexes = self._indexes()
+        if kind == 'genre':
+            entry = indexes.genres.get(key)
+            return entry['paths'] if entry else []
+        if kind == 'author':
+            return indexes.authors.get(self._author_display(key), [])
+        return indexes.years.get(key, [])
+
+    def get_years_with_counts(self) -> list[tuple[str, int]]:
+        """(year, count) of every publication year: known years descending, 'Unknown' last."""
+        year_counts = [(year, len(paths)) for year, paths in self._indexes().years.items()]
+        return sorted(year_counts, key=lambda x: (x[0] == 'Unknown', -int(x[0]) if x[0] != 'Unknown' else 0))
+
+    def get_authors_with_counts(self) -> list[tuple[str, int]]:
+        """(author, count) of every author, alphabetically, 'Unknown' last."""
+        author_counts = [(author, len(paths)) for author, paths in self._indexes().authors.items()]
+        return sorted(author_counts, key=lambda x: (x[0] == 'Unknown', x[0].lower()))
+
+    def get_genres_with_counts(self, min_books: int | None = None) -> list[tuple[str, str, int]]:
+        """Get genres having at least `min_books` books (default: `min_books` of the genre configuration).
+
+        Returns list of (genre key, displayed genre, count) tuples sorted alphabetically.
+        """
+        if min_books is None:
+            min_books = get_genre_config().min_books
+        genres = [
+            (key, genre['name'], len(genre['paths']))
+            for key, genre in self._indexes().genres.items()
+            if len(genre['paths']) >= min_books
+        ]
+        return sorted(genres, key=lambda g: g[0])
+
+    def get_books_for_genre(self, genre: str, page: int, size: int,
+                            exclude: Collection[str] = ()) -> tuple[str | None, list[dict], int]:
+        """Get paginated books of a genre, matched like the subjects ("sf" finds Science-fiction).
+
+        Returns:
+            tuple: (displayed genre or None when unknown, list of book dicts, total count)
+        """
+        normalized = normalize_genres([genre])
+        entry = self._indexes().genres.get(normalized[0][0] if normalized else genre_key(genre))
+        if entry is None:
+            return None, [], 0
+        books, total = self._page(entry['paths'], page, size, exclude)
+        return entry['name'], books, total
+
+    def get_letters_with_author_counts(self) -> list[str]:
+        """Letters of the author navigation: A-Z, then '#' for the other names."""
+        return [*(chr(i) for i in range(ord('A'), ord('Z') + 1)), '#']
+
+    def get_authors_by_letter(self, letter: str, page: int, size: int) -> tuple[list[tuple[str, int]], int]:
+        """Page of the (author, count) starting with `letter` (A-Z, or '#' for the others and 'Unknown')."""
+        def matches_letter(author_name, target_letter):
+            if target_letter == '#':
+                return not author_name or author_name == 'Unknown' or not author_name[0].upper().isalpha()
+            return bool(author_name) and author_name != 'Unknown' and author_name[0].upper() == target_letter.upper()
+
+        filtered_authors = [(author, count) for author, count in self.get_authors_with_counts() if matches_letter(author, letter)]
+        start = (page - 1) * size
+        return filtered_authors[start:start + size], len(filtered_authors)
+
+    def get_books_for_year(self, year: str, page: int, size: int, exclude: Collection[str] = ()) -> tuple[list[dict], int]:
+        """Page of the books of a publication year and the total count."""
+        return self._page(self._indexes().years.get(year, []), page, size, exclude)
+
+    def get_books_for_author(self, author: str, page: int, size: int, exclude: Collection[str] = ()) -> tuple[list[dict], int]:
+        """Page of the books of an author (any spelling variant) and the total count."""
+        return self._page(self._indexes().authors.get(self._author_display(author), []), page, size, exclude)
+
+    def search_books(self, query: str, page: int, size: int, exclude: Collection[str] = ()) -> tuple[list[dict], int]:
+        """Page of the books whose title, author or series contains `query` (case-insensitive), and the total."""
+        query_lower = query.lower().strip()
+        if not query_lower:
+            return self.get_all_books_paginated(page, size, exclude)
+        snapshot = self._snapshot()
+
+        def matches(path: str) -> bool:
+            book = snapshot.books[path]
+            fields = (book.title, book.author, book.meta.get('series') or '')
+            return any(query_lower in value.lower() for value in fields)
+
+        return self._page([path for path in snapshot.paths if matches(path)], page, size, exclude)
+
+
+class OPDSController:
+    """Controller for OPDS catalog operations."""
+
+    def __init__(self, request_handler):
+        self.request = request_handler
+        self.feed_generator = OPDSFeedGenerator(include_mosaic=self._is_browser(request_handler))
+        self.book_scanner = BookScanner.get_instance()  # Use singleton
+        self.security = SecurityUtils()
+
+    @staticmethod
+    def _is_browser(request_handler) -> bool:
+        """Whether the request comes from a browser (web view through XSLT) rather than an OPDS client."""
+        from controllers.accounts.opds_auth import wants_html
+        try:
+            return wants_html(request_handler)
+        except AttributeError:
+            return False
+
+    def _parse_url_params(self):
+        """Parse URL parameters for pagination."""
+        parsed_url = urlparse(self.request.path)
+        query_params = parse_qs(parsed_url.query)
+
+        try:
+            page = int(query_params.get('page', ['1'])[0])
+            page = max(1, min(page, 10000))  # Limit to reasonable range
+        except ValueError:
+            page = 1
+
+        size = PAGE_SIZE
+
+        return page, size, parsed_url
+
+    def redirect_to_opds(self):
+        """Redirect root to OPDS catalog."""
+        redirect(self.request, '/opds')
+
+    def serve_xslt(self):
+        """Serve XSLT stylesheet for OPDS catalog."""
+        self._serve_xslt()
+
+    def show_root_catalog(self):
+        """Display root OPDS catalog."""
+        self._handle_root_catalog()
+
+    def show_all_books(self):
+        """Display all books with pagination."""
+        self._handle_all_books()
+
+    def show_recent_books(self):
+        """Display recently added books."""
+        self._handle_recent_books()
+
+    def show_series_books(self):
+        """Display the library books of a series (?name=), sorted by position."""
+        self._handle_series_books()
+
+    def show_recommendations(self):
+        """Display the "read next" recommendations of the authenticated sync user.
+
+        Requires an account (route auth='user'): browsers are sent to the sign-in page, OPDS clients get HTTP Basic.
+        """
+        self._handle_recommendations()
+
+    def show_folder_catalog(self):
+        """Display folder contents."""
+        self._handle_folder_catalog()
+
+    def download_book(self):
+        """Handle book download."""
+        self._handle_download()
+
+    def download_cover(self):
+        """Handle cover image download."""
+        self._handle_cover_download()
+
+    def health_check(self):
+        """Simple health check endpoint for monitoring."""
+        send_body(self.request, b'{"status":"ok"}', 'application/json')
+
+    def show_by_year_catalog(self):
+        """Display catalog of years with book counts."""
+        self._handle_by_year_catalog()
+
+    def show_year_books(self):
+        """Display books for a specific year."""
+        self._handle_year_books()
+
+    def show_by_genre_catalog(self):
+        """Display catalog of genres with book counts."""
+        self._handle_by_genre_catalog()
+
+    def show_genre_books(self):
+        """Display books of a specific genre."""
+        self._handle_genre_books()
+
+    def show_by_author_catalog(self):
+        """Display catalog of letters for author navigation."""
+        self._handle_by_author_catalog()
+
+    def show_author_letter_catalog(self):
+        """Display catalog of authors for a specific letter."""
+        self._handle_author_letter_catalog()
+
+    def show_author_books(self):
+        """Display books for a specific author."""
+        self._handle_author_books()
+
+    def serve_opensearch_description(self):
+        """Serve OpenSearch description document."""
+        self._handle_opensearch_description()
+
+    def show_search_results(self):
+        """Display search results."""
+        self._handle_search_results()
+
+    def _handle_root_catalog(self):
+        links = [
+            (
+                'self',
+                '/opds',
+                NAVIGATION_FEED,
+            ),
+            START_LINK,
+            (
+                'search',
+                '/opds/opensearch.xml',
+                'application/opensearchdescription+xml',
+            ),
+        ]
+
+        entries = self._get_root_entries()
+        xml = self.feed_generator.generate_feed('My Library', 'urn:library-root', links, entries)
+
+        self._send_xml_response(xml, 'navigation')
+
+    def _get_root_entries(self):
+        all_paths = self.book_scanner.get_folder_paths('')
+        recent_paths = [book['path'] for book in self.book_scanner.recent_books(25)]
+        entries = [
+            *self._personal_root_entries(),
+            navigation_tile('All Books', 'urn:all-books', '/opds/books?page=1', ACQUISITION_FEED, all_paths),
+            navigation_tile('Recent Books', 'urn:recent-books', '/opds/recent', ACQUISITION_FEED, recent_paths),
+            navigation_tile('By Year', 'urn:by-year', '/opds/by-year', NAVIGATION_FEED, all_paths),
+            navigation_tile('By Author', 'urn:by-author', '/opds/by-author', NAVIGATION_FEED, all_paths),
+            navigation_tile('By Genre', 'urn:by-genre', '/opds/by-genre', NAVIGATION_FEED, all_paths),
+        ]
+        for folder in sorted(os.listdir(LIBRARY_DIR)):
+            if os.path.isdir(os.path.join(LIBRARY_DIR, folder)):
+                entries.append(navigation_tile(
+                    folder, f'urn:folder:{hashlib.md5(folder.encode()).hexdigest()}',
+                    f'/opds/folder/{quote(folder)}?page=1', ACQUISITION_FEED, self.book_scanner.get_folder_paths(folder),
+                ))
+        return entries
+
+    def _handle_all_books(self):
+        page, size, parsed_url = self._parse_url_params()
+        path_base = parsed_url.path
+
+        read = self._read_filter()
+        paginated_books, total_count = self.book_scanner.get_all_books_paginated(page, size, read.exclude)
+
+        links = self._get_pagination_links(path_base, page, size, total_count)
+        links.append(START_LINK)
+        links.extend(read.links)
+
+        entries = self._create_book_entries(paginated_books)
+
+        total_pages = self._get_total_pages(total_count, size)
+        title = f'All Books (Page {page} of {total_pages})'
+        xml = self.feed_generator.generate_feed(title, 'urn:all-books', links, entries)
+
+        self._send_xml_response(xml, 'acquisition')
+
+    def _handle_recent_books(self):
+        links = [
+            (
+                'self',
+                '/opds/recent',
+                ACQUISITION_FEED,
+            ),
+            START_LINK,
+        ]
+
+        read = self._read_filter()
+        links.extend(read.links)
+        file_list = self.book_scanner.recent_books(25, read.exclude)
+        entries = self._create_book_entries(file_list)
+        xml = self.feed_generator.generate_feed('Recent Books', 'urn:recent-books', links, entries)
+
+        self._send_xml_response(xml, 'acquisition')
+
+    def _handle_series_books(self):
+        """Books of the series given by ?name=, sorted by position: 404 when no library book has it."""
+        page, size, parsed_url = self._parse_url_params()
+        name = (parse_qs(parsed_url.query).get('name', [''])[0]).strip()
+        from controllers.library.index import LibraryIndex
+        library = LibraryIndex.get_instance()
+        # Paths come from the library scan; the name is only a lookup key, never a path
+        books = [
+            (position, path) for position, path in library.series_books(name)
+            if self.security.is_within_library_dir(path)
+        ] if name else []
+        if not books:
+            self._send_error(404, 'Series not found')
+            return
+        read = self._read_filter()
+        books = [book for book in books if book[1] not in read.exclude]
+
+        total_count = len(books)
+        total_pages = self._get_total_pages(total_count, size)
+        page = min(page, total_pages)
+        links = [*self._get_pagination_links(f'/opds/series?name={quote(name)}', page, size, total_count), START_LINK]
+        links.extend(read.links)
+
+        file_list = []
+        display_name = name
+        for _, path in books[(page - 1) * size:page * size]:
+            try:
+                meta = library.book_meta(path)
+            except OSError:
+                continue
+            display_name = meta.get('series') or display_name
+            file_list.append({
+                'path': path,
+                'relative_path': os.path.relpath(path, LIBRARY_DIR),
+                'title': meta.get('title') or os.path.basename(path),
+                'author': meta.get('author') or 'Unknown',
+            })
+        entries = self._create_book_entries(file_list)
+
+        title = f'Série : {display_name}'
+        if total_pages > 1:
+            title = f'{title} (Page {page} of {total_pages})'
+        feed_id = f'urn:series:{hashlib.md5(name.casefold().encode()).hexdigest()}'
+        xml = self.feed_generator.generate_feed(title, feed_id, links, entries)
+        self._send_xml_response(xml, 'acquisition')
+
+    def _current_user_recommendations(self):
+        """Recommendations of the signed-in reader, None without one."""
+        user = getattr(self.request, 'opds_user', None)
+        if not user:
+            return None
+        from controllers.reading.recommendations import RecommendationService
+        return RecommendationService.get_instance().for_user(user)
+
+    def _personal_root_entries(self) -> list[dict]:
+        """Tiles of the reader first: « En cours », « Suite de vos séries » (controllers.reading.reader_feeds), then
+        « À lire ensuite »."""
+        from controllers.core.features import minimal_mode
+        if minimal_mode():
+            return []
+        from controllers.reading.reader_feeds import root_entries
+        recommendations_entry = self._recommendations_root_entry()
+        return [*root_entries(self.request), *([recommendations_entry] if recommendations_entry else [])]
+
+    def _recommendations_root_entry(self) -> dict | None:
+        """'Read next' tile of the root catalog.
+
+        Shown to signed-in readers. Browsers without an account get the header's sign-in button instead;
+        OPDS clients always see it, opening it asks for their credentials (HTTP Basic).
+        """
+        from controllers.accounts.opds_auth import wants_html
+        paths = []
+        if getattr(self.request, 'opds_user', None):
+            try:
+                paths = [book['path'] for book in self._current_user_recommendations().books]
+            except Exception:
+                # The tile is a bonus: never break the root catalog because of it
+                paths = []
+        elif wants_html(self.request):
+            return None
+        return navigation_tile('À lire ensuite', 'urn:recommendations', '/opds/recommendations', ACQUISITION_FEED, paths)
+
+    def _handle_recommendations(self):
+        try:
+            result = self._current_user_recommendations()
+        except Exception as exc:
+            self._send_error(500, f'Unable to compute recommendations: {exc}')
+            return
+        if result is None:
+            # Unreachable through the router (auth='user'), kept for direct calls
+            self._send_error(401, 'Recommendations require an account')
+            return
+        links = [
+            (
+                'self',
+                '/opds/recommendations',
+                ACQUISITION_FEED,
+            ),
+            START_LINK,
+        ]
+        entries = self._create_book_entries(result.books)
+        for entry, book in zip(entries, result.books):
+            # Why the book is suggested first (one line), then its description
+            prepend_summary(entry, ' · '.join(book['reasons']))
+        xml = self.feed_generator.generate_feed(
+            'À lire ensuite', 'urn:recommendations', links, entries, subtitle=result.message
+        )
+        self._send_xml_response(xml, 'acquisition')
+
+    def _handle_folder_catalog(self):
+        page, size, parsed_url = self._parse_url_params()
+
+        folder_path = unquote(parsed_url.path[len('/opds/folder/'):])
+        path_base = parsed_url.path
+        folder_full_path = os.path.join(LIBRARY_DIR, folder_path)
+
+        if not self._validate_folder_access(folder_full_path):
+            return
+
+        read = self._read_filter()
+        paginated_entries, total_count = self.book_scanner.get_folder_content_paginated(
+            folder_full_path,
+            folder_path,
+            page,
+            size,
+            exclude=read.exclude,
+        )
+
+        formatted_entries = []
+        for entry in paginated_entries:
+            if entry.get('type') == 'folder':
+                formatted_entries.append(
+                    {
+                        'title': entry['title'],
+                        'id': entry['id'],
+                        'links': entry['links'],
+                    }
+                )
+            else:
+                # Books get the same entry (cover, details, series) as the other feeds
+                formatted_entries.extend(self._create_book_entries([entry['file_info']]))
+
+        links = self._get_pagination_links(path_base, page, size, total_count)
+        links.append(START_LINK)
+
+        links.extend(read.links)
+        feed_id = f'urn:folder:{hashlib.md5(folder_path.encode()).hexdigest()}'
+        title = os.path.basename(folder_path) or 'Library'
+
+        total_pages = self._get_total_pages(total_count, size)
+        if total_pages > 1:
+            title = f'{title} (Page {page} of {total_pages})'
+
+        xml = self.feed_generator.generate_feed(title, feed_id, links, formatted_entries)
+
+        self._send_xml_response(xml, 'acquisition')
+
+    def _handle_by_year_catalog(self):
+        """Handle display of years catalog."""
+        links = [
+            (
+                'self',
+                '/opds/by-year',
+                NAVIGATION_FEED,
+            ),
+            START_LINK,
+        ]
+
+        years_with_counts = self.book_scanner.get_years_with_counts()
+        entries = []
+        for year, count in years_with_counts:
+            year_id = f'urn:year:{year}'
+            encoded_year = quote(year)
+            entries.append({
+                'title': f'{year} ({count} books)',
+                'id': year_id,
+                'links': [
+                    (
+                        'subsection',
+                        f'/opds/by-year/{encoded_year}?page=1',
+                        ACQUISITION_FEED,
+                    ),
+                    *mosaic_links(self.book_scanner.get_indexed_paths('year', year)),
+                ],
+            })
+
+        xml = self.feed_generator.generate_feed('By Year', 'urn:by-year', links, entries)
+        self._send_xml_response(xml, 'navigation')
+
+    def _handle_year_books(self):
+        """Handle display of books for a specific year."""
+        page, size, parsed_url = self._parse_url_params()
+        year = unquote(parsed_url.path[len('/opds/by-year/'):])
+        path_base = parsed_url.path
+
+        read = self._read_filter()
+        paginated_books, total_count = self.book_scanner.get_books_for_year(year, page, size, read.exclude)
+
+        links = self._get_pagination_links(path_base, page, size, total_count)
+        links.append(START_LINK)
+        links.append(
+            (
+                'up',
+                '/opds/by-year',
+                NAVIGATION_FEED,
+            )
+        )
+        links.extend(read.links)
+
+        entries = self._create_book_entries(paginated_books)
+
+        total_pages = self._get_total_pages(total_count, size)
+        title = f'Year {year}'
+        if total_pages > 1:
+            title = f'{title} (Page {page} of {total_pages})'
+
+        xml = self.feed_generator.generate_feed(title, f'urn:year:{year}', links, entries)
+        self._send_xml_response(xml, 'acquisition')
+
+    def _handle_by_genre_catalog(self):
+        """Handle display of genres catalog."""
+        links = [
+            (
+                'self',
+                '/opds/by-genre',
+                NAVIGATION_FEED,
+            ),
+            START_LINK,
+        ]
+
+        entries = []
+        for key, name, count in self.book_scanner.get_genres_with_counts():
+            entries.append({
+                'title': f'{name} ({count} books)',
+                'id': f'urn:genre:{quote(key)}',
+                'links': [
+                    (
+                        'subsection',
+                        f'/opds/by-genre/{quote(name)}?page=1',
+                        ACQUISITION_FEED,
+                    ),
+                    *mosaic_links(self.book_scanner.get_indexed_paths('genre', key)),
+                ],
+            })
+
+        xml = self.feed_generator.generate_feed('By Genre', 'urn:by-genre', links, entries)
+        self._send_xml_response(xml, 'navigation')
+
+    def _handle_genre_books(self):
+        """Handle display of books for a specific genre."""
+        page, size, parsed_url = self._parse_url_params()
+        genre = unquote(parsed_url.path[len('/opds/by-genre/'):])
+        path_base = parsed_url.path
+
+        read = self._read_filter()
+        name, paginated_books, total_count = self.book_scanner.get_books_for_genre(genre, page, size, read.exclude)
+        if name is None:
+            self._send_error(404, 'Genre not found')
+            return
+
+        links = self._get_pagination_links(path_base, page, size, total_count)
+        links.append(START_LINK)
+        links.append(
+            (
+                'up',
+                '/opds/by-genre',
+                NAVIGATION_FEED,
+            )
+        )
+        links.extend(read.links)
+
+        entries = self._create_book_entries(paginated_books)
+
+        total_pages = self._get_total_pages(total_count, size)
+        title = f'Genre {name}'
+        if total_pages > 1:
+            title = f'{title} (Page {page} of {total_pages})'
+
+        xml = self.feed_generator.generate_feed(title, f'urn:genre:{quote(genre_key(name))}', links, entries)
+        self._send_xml_response(xml, 'acquisition')
+
+    def _handle_by_author_catalog(self):
+        """Handle display of letters catalog for authors."""
+        links = [
+            (
+                'self',
+                '/opds/by-author',
+                NAVIGATION_FEED,
+            ),
+            START_LINK,
+        ]
+
+        letters = self.book_scanner.get_letters_with_author_counts()
+        entries = []
+        for letter in letters:
+            letter_id = f'urn:author-letter:{letter}'
+            encoded_letter = quote(letter)
+            display_letter = letter if letter != '#' else '# (Autres)'
+            entries.append({
+                'title': display_letter,
+                'id': letter_id,
+                'links': [
+                    (
+                        'subsection',
+                        f'/opds/by-author/letter/{encoded_letter}?page=1',
+                        NAVIGATION_FEED,
+                    )
+                ],
+            })
+
+        xml = self.feed_generator.generate_feed('By Author', 'urn:by-author', links, entries)
+        self._send_xml_response(xml, 'navigation')
+
+    def _handle_author_letter_catalog(self):
+        """Handle display of authors for a specific letter."""
+        page, size, parsed_url = self._parse_url_params()
+        letter = unquote(parsed_url.path[len('/opds/by-author/letter/'):])
+        path_base = parsed_url.path
+
+        paginated_authors, total_count = self.book_scanner.get_authors_by_letter(letter, page, size)
+
+        links = self._get_pagination_links(path_base, page, size, total_count)
+        links.append(START_LINK)
+        links.append(
+            (
+                'up',
+                '/opds/by-author',
+                NAVIGATION_FEED,
+            )
+        )
+
+        # Add letter navigation links
+        all_letters = self.book_scanner.get_letters_with_author_counts()
+        for nav_letter in all_letters:
+            encoded_nav_letter = quote(nav_letter)
+            links.append(
+                (
+                    f'http://opds-spec.org/facet#{nav_letter}',
+                    f'/opds/by-author/letter/{encoded_nav_letter}?page=1',
+                    NAVIGATION_FEED,
+                )
+            )
+
+        entries = []
+        for author, count in paginated_authors:
+            author_id = f'urn:author:{hashlib.md5(author.encode()).hexdigest()}'
+            encoded_author = quote(author)
+            entries.append({
+                'title': f'{author} ({count} livres)',
+                'id': author_id,
+                'links': [
+                    (
+                        'subsection',
+                        f'/opds/by-author/{encoded_author}?page=1',
+                        ACQUISITION_FEED,
+                    ),
+                    *mosaic_links(self.book_scanner.get_indexed_paths('author', author)),
+                ],
+            })
+
+        total_pages = self._get_total_pages(total_count, size)
+        display_letter = letter if letter != '#' else '# (Autres)'
+        title = f'Auteurs - {display_letter}'
+        if total_pages > 1:
+            title = f'{title} (Page {page} of {total_pages})'
+
+        xml = self.feed_generator.generate_feed(title, f'urn:author-letter:{letter}', links, entries)
+        self._send_xml_response(xml, 'navigation')
+
+    def _handle_author_books(self):
+        """Handle display of books for a specific author."""
+        page, size, parsed_url = self._parse_url_params()
+        author = unquote(parsed_url.path[len('/opds/by-author/'):])
+        path_base = parsed_url.path
+
+        read = self._read_filter()
+        paginated_books, total_count = self.book_scanner.get_books_for_author(author, page, size, read.exclude)
+
+        links = self._get_pagination_links(path_base, page, size, total_count)
+        links.append(START_LINK)
+        links.append(
+            (
+                'up',
+                '/opds/by-author',
+                NAVIGATION_FEED,
+            )
+        )
+        links.extend(read.links)
+
+        entries = self._create_book_entries(paginated_books)
+
+        total_pages = self._get_total_pages(total_count, size)
+        title = author
+        if total_pages > 1:
+            title = f'{title} (Page {page} of {total_pages})'
+
+        xml = self.feed_generator.generate_feed(title, f'urn:author:{hashlib.md5(author.encode()).hexdigest()}', links, entries)
+        self._send_xml_response(xml, 'acquisition')
+
+    def _read_filter(self):
+        """« Masquer les livres lus » filter of the signed-in reader (controllers.reading.reader_feeds), none in minimal mode."""
+        from controllers.core.features import minimal_mode
+        if minimal_mode():
+            return ReadFilter()
+        from controllers.reading.reader_feeds import read_filter
+        return read_filter(self.request)
+
+    def _get_total_pages(self, total_count, size=None):
+        if size is None:
+            size = PAGE_SIZE
+        return max(1, (total_count + size - 1) // size)
+
+    def _get_pagination_links(self, path_base, current_page, size, total_count):
+        """self / next / previous links of a paginated feed (`path_base` may already carry a query)."""
+        page_url = f"{path_base}{'&' if '?' in path_base else '?'}page="
+        links = [('self', f'{page_url}{current_page}', ACQUISITION_FEED)]
+        # No rel="first"/"last": some clients (CrossPoint Sync app) list them as navigation rows;
+        # the HTML view builds its first/last page buttons itself
+        if current_page < self._get_total_pages(total_count, size):
+            links.append(('next', f'{page_url}{current_page + 1}', ACQUISITION_FEED))
+        if current_page > 1:
+            links.append(('previous', f'{page_url}{current_page - 1}', ACQUISITION_FEED))
+        return links
+
+    def _validate_folder_access(self, folder_full_path):
+        if not self.security.is_within_library_dir(folder_full_path) or not os.path.isdir(folder_full_path):
+            self._send_error(404, 'Folder not found or access denied')
+            return False
+        return True
+
+    def _create_book_entries(self, file_list: list[dict]) -> list[dict]:
+        """Feed entries of books (dicts with title, author, relative_path and path): acquisition and
+        cover links, plus the light metadata of each book (`_book_metadata_fields`)."""
+        entries = []
+        for file_info in file_list:
+            book_id = f'urn:book:{hashlib.md5(file_info["relative_path"].encode()).hexdigest()}'
+            encoded_path = quote(file_info['relative_path'].replace(os.sep, '/'))
+
+            # Cover links are always listed: /cover/ answers 404 when the EPUB has none,
+            # which OPDS clients treat as "no cover" (checking here would open every EPUB)
+            entry_links = [
+                (
+                    'http://opds-spec.org/acquisition/open-access',
+                    f'/download/{encoded_path}',
+                    'application/epub+zip',
+                ),
+                ('http://opds-spec.org/image', f'/cover/{encoded_path}', 'image/jpeg'),
+                ('http://opds-spec.org/image/thumbnail', f'/cover/{encoded_path}', 'image/jpeg'),
+            ]
+
+            entry = {
+                'title': file_info['title'],
+                'id': book_id,
+                'links': entry_links,
+                'author': file_info['author'],
+            }
+            fields = self._book_metadata_fields(file_info.get('path'))
+            # Navigation from a book (titled rel="related" links, the "More like this" of the CrossPoint
+            # Sync app; the web UI book sheet uses them too): its series, its author, then its genres
+            entry_links.extend(fields.pop('extra_links', []))
+            author = (file_info.get('author') or '').strip()
+            if author and author != 'Unknown':
+                entry_links.append(('related', f'/opds/by-author/{quote(author)}?page=1', ACQUISITION_FEED,
+                                    f'Auteur : {author}'))
+            for _, genre in fields.get('categories', []):
+                entry_links.append(('related', f'/opds/by-genre/{quote(genre)}?page=1', ACQUISITION_FEED,
+                                    f'Genre : {genre}'))
+            entry.update(fields)
+            entries.append(entry)
+
+        return entries
+
+    @staticmethod
+    def _book_metadata_fields(path: str | None) -> dict:
+        """Entry fields from the cached OPF metadata of a book (LibraryIndex.book_meta): summary,
+        categories (genres), issued (year), series, rating and a rel="related" link to the series feed
+        (the author and genre links are added by _create_book_entries).
+
+        Only the books of the current page are read; a missing or unreadable book gives no field.
+        """
+        if not path:
+            return {}
+        from controllers.library.index import LibraryIndex
+        try:
+            meta = LibraryIndex.get_instance().book_meta(path)
+        except OSError:
+            return {}
+        fields: dict = {}
+        if meta.get('description'):
+            fields['summary'] = meta['description']
+        if meta.get('genres'):
+            fields['categories'] = [(genre, genre) for genre in meta['genres']]
+        if meta.get('year'):
+            fields['issued'] = meta['year']
+        if meta.get('rating'):
+            fields['rating'] = meta['rating']
+        series = (meta.get('series') or '').strip()
+        if series:
+            index = meta.get('series_index')
+            fields['series'] = (series, index)
+            position = format_series_index(index)
+            title = f'Série : {series} (tome {position})' if position else f'Série : {series}'
+            fields['extra_links'] = [('related', f'/opds/series?name={quote(series)}', ACQUISITION_FEED, title)]
+        return fields
+
+    def _handle_download(self):
+        filename = unquote(self.request.path.split('/download/')[1])
+
+        if self.security.has_path_traversal(filename):
+            self._send_error(403, 'Access denied: Invalid path')
+            return
+
+        file_path = os.path.join(LIBRARY_DIR, filename)
+
+        if not self.security.is_within_library_dir(file_path):
+            self._send_error(403, 'Access denied: Path traversal detected')
+            return
+
+        if self._is_valid_epub_file(filename, file_path):
+            self._serve_file(file_path, filename)
+        else:
+            self._book_not_found()
+
+    def _book_not_found(self):
+        """404 for a missing EPUB; the catalog may still list it: the library is synced in the background."""
+        from controllers.library.store import Library
+        Library.get_instance().sync_later()
+        self._send_error(404, 'File not found')
+
+    def _is_valid_epub_file(self, filename, file_path):
+        return filename.endswith('.epub') and os.path.exists(file_path)
+
+    def _serve_file(self, file_path, filename):
+        self.request.send_response(200)
+        self.request.send_header('Content-Type', 'application/epub+zip')
+        
+        # Handle Unicode filenames per RFC 5987
+        basename = os.path.basename(filename)
+        try:
+            # Try ASCII encoding first (simple case)
+            basename.encode('ascii')
+            self.request.send_header(
+                'Content-Disposition',
+                f'attachment; filename="{basename}"',
+            )
+        except UnicodeEncodeError:
+            # Use RFC 5987 encoding for non-ASCII filenames
+            # Provide ASCII fallback + UTF-8 encoded version
+            ascii_name = basename.encode('ascii', 'replace').decode('ascii').replace('?', '_')
+            encoded_name = quote(basename, safe='')
+            self.request.send_header(
+                'Content-Disposition',
+                f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded_name}",
+            )
+        
+        # Add Content-Length for download progress
+        file_size = os.path.getsize(file_path)
+        self.request.send_header('Content-Length', str(file_size))
+        self.request.end_headers()
+
+        # Stream file in chunks to avoid loading entire file into memory
+        with open(file_path, 'rb') as f:
+            while chunk := f.read(8192):  # 8KB chunks
+                self.request.wfile.write(chunk)
+
+    def _handle_cover_download(self):
+        """Handle cover image download requests."""
+        filename = unquote(self.request.path.split('/cover/')[1])
+
+        if self.security.has_path_traversal(filename):
+            self._send_error(403, 'Access denied: Invalid path')
+            return
+
+        file_path = os.path.join(LIBRARY_DIR, filename)
+
+        if not self.security.is_within_library_dir(file_path):
+            self._send_error(403, 'Access denied: Path traversal detected')
+            return
+
+        if not filename.endswith('.epub') or not os.path.exists(file_path):
+            self._book_not_found()
+            return
+
+        # A cover changes with its EPUB: kept a week, then revalidated (304 while the EPUB is unchanged)
+        mtime = os.path.getmtime(file_path)
+        headers = {'Cache-Control': COVER_CACHE, 'Last-Modified': email.utils.formatdate(mtime, usegmt=True)}
+        if not_modified_since(self.request, mtime):
+            send_body(self.request, status=304, headers=headers)
+            return
+
+        # Extract cover from EPUB
+        cover_data, mime_type = BookMetadata.extract_epub_cover(file_path)
+
+        if cover_data is None:
+            self._send_error(404, 'Cover not found in EPUB')
+            return
+
+        send_body(self.request, cover_data, mime_type, headers=headers)
+
+    def _handle_opensearch_description(self):
+        """Generate and serve OpenSearch description document."""
+        # Get the host from the request headers
+        host = self.request.headers.get('Host', 'localhost:8080')
+        scheme = 'http'  # Could be enhanced to detect HTTPS
+        base_url = f'{scheme}://{host}'
+        
+        opensearch_xml = f'''<?xml version="1.0" encoding="UTF-8"?>
+<OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/">
+  <ShortName>PyOPDS</ShortName>
+  <Description>Search books in PyOPDS catalog</Description>
+  <Tags>opds epub books</Tags>
+  <Url type="application/atom+xml;profile=opds-catalog;kind=acquisition" 
+       template="{base_url}/opds/search?q={{searchTerms}}&amp;page={{startPage?}}"/>
+</OpenSearchDescription>'''
+        
+        send_body(self.request, opensearch_xml.encode('utf-8'), 'application/opensearchdescription+xml; charset=utf-8')
+
+    def _handle_search_results(self):
+        """Handle search requests and display results."""
+        page, size, parsed_url = self._parse_url_params()
+        query_params = parse_qs(parsed_url.query)
+        
+        # Get search query
+        query = query_params.get('q', [''])[0]
+        
+        # Perform search
+        read = self._read_filter()
+        search_results, total_count = self.book_scanner.search_books(query, page, size, read.exclude)
+        
+        total_pages = self._get_total_pages(total_count, size)
+        links = [*self._get_pagination_links(f'/opds/search?q={quote(query)}', page, size, total_count), START_LINK]
+        links.extend(read.links)
+
+        # Create book entries
+        entries = self._create_book_entries(search_results)
+        
+        # Generate title
+        if query:
+            title = f'Search results for "{query}"'
+            if total_pages > 1:
+                title = f'{title} (Page {page} of {total_pages})'
+        else:
+            title = f'All Books (Page {page} of {total_pages})'
+        
+        # Generate feed
+        feed_id = f'urn:search:{hashlib.md5(query.encode()).hexdigest()}'
+        xml = self.feed_generator.generate_feed(title, feed_id, links, entries)
+        
+        self._send_xml_response(xml, 'acquisition')
+
+    def _serve_xslt(self):
+        # Partials included and /static/... URLs versioned (like the HTML pages) on every request. The feeds
+        # name the current version (?v=, generate_feed): that URL is cached for good, a plain one revalidated (ETag).
+        from controllers.catalog.webui import IMMUTABLE, catalog_xslt
+        try:
+            text, version = catalog_xslt()
+        except OSError:
+            self._send_error(404, "XSLT file not found")
+            return
+        requested = parse_qs(urlparse(self.request.path).query).get('v', [''])[0]
+        headers = {
+            'ETag': f'"{version}"', 'Vary': 'Accept-Encoding',
+            'Cache-Control': IMMUTABLE if requested == version else 'no-cache',
+        }
+        if self.request.headers.get('If-None-Match') == f'"{version}"':
+            send_body(self.request, status=304, headers=headers)
+            return
+        data = text.encode('utf-8')
+        if 'gzip' in (self.request.headers.get('Accept-Encoding') or ''):
+            data = gzip.compress(data, compresslevel=6, mtime=0)
+            headers['Content-Encoding'] = 'gzip'
+        send_body(self.request, data, XML_TYPE, headers=headers)
+
+    def _send_xml_response(self, xml, catalog_kind):
+        send_body(self.request, xml.encode('utf-8'), XML_TYPE)
+
+    def _send_error(self, code, message):
+        error_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?><error><code>'
+            f'{code}</code><message>{xml_escape(str(message))}</message></error>'
+        )
+        send_body(self.request, error_xml.encode('utf-8'), XML_TYPE, code)
+
+
+__all__ = [
+    'LIBRARY_DIR',
+    'PAGE_SIZE',
+    'OPDSController',
+    'BookMetadata',
+    'SecurityUtils',
+    'OPDSFeedGenerator',
+    'BookScanner',
+]

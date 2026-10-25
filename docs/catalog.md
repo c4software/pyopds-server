@@ -36,7 +36,7 @@ Results are cached per user and recomputed as soon as a new reading sync arrives
 
 ## Personal shelves and « Masquer les livres lus »
 
-For a signed-in reader, the root catalog starts with the reader's tiles, in this order: **« En cours »**, **« Suite de vos séries »**, then « À lire ensuite ». They come from the reading sync, matched to the library EPUBs (`controllers/reading_state.py`, shared with the recommendations):
+For a signed-in reader, the root catalog starts with the reader's tiles, in this order: **« En cours »**, **« Suite de vos séries »**, then « À lire ensuite ». They come from the reading sync, matched to the library EPUBs (`controllers/reading/state.py`, shared with the recommendations):
 
 - `/opds/reading` (« En cours »): library books being read (neither finished, paused nor abandoned), most recently synced first; each summary starts with the progress (« Lu à 42 % »).
 - `/opds/series-next` (« Suite de vos séries »): for each series with a volume read, in progress or paused, the next library volume you never opened (whole-numbered volumes first, like `/documents/{document}/next`).

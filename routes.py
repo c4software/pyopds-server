@@ -7,19 +7,19 @@ import contextlib
 import importlib
 import re
 
-from controllers.opds import OPDSController
-from controllers.opds_auth import AuthController
-from controllers.webui import WebUIController
+from controllers.catalog.opds import OPDSController
+from controllers.accounts.opds_auth import AuthController
+from controllers.catalog.webui import WebUIController
 
 # Controllers of the full server, imported on their first request: in minimal mode (MINIMAL_MODE=true)
 # their modules (sync, web reader, reader's data) are never loaded
-AudiobookController = 'controllers.audiobook.AudiobookController'
-ClippingsController = 'controllers.clippings.ClippingsController'
-CrossPointSyncController = 'controllers.crosspoint_sync.CrossPointSyncController'
-KoReaderSyncController = 'controllers.koreader_sync.KoReaderSyncController'
-NextcloudNotesController = 'controllers.nextcloud_notes.NextcloudNotesController'
-ReaderFeedsController = 'controllers.reader_feeds.ReaderFeedsController'
-WebReaderController = 'controllers.web_reader.WebReaderController'
+AudiobookController = 'controllers.audiobook.controller.AudiobookController'
+ClippingsController = 'controllers.reading.clippings.ClippingsController'
+CrossPointSyncController = 'controllers.sync.crosspoint.CrossPointSyncController'
+KoReaderSyncController = 'controllers.sync.koreader.KoReaderSyncController'
+NextcloudNotesController = 'controllers.sync.nextcloud_notes.NextcloudNotesController'
+ReaderFeedsController = 'controllers.reading.reader_feeds.ReaderFeedsController'
+WebReaderController = 'controllers.reading.web_reader.WebReaderController'
 
 
 class Route:
@@ -42,7 +42,7 @@ class Route:
         self._controller, self.action = controller_action
         self.name = name
         self.auth = auth
-        # Part of the full server only: answers 404 in minimal mode (MINIMAL_MODE=true, controllers/features.py)
+        # Part of the full server only: answers 404 in minimal mode (MINIMAL_MODE=true, controllers/core/features.py)
         self.full = False
 
     @property
@@ -164,9 +164,9 @@ def register_routes(router):
         router.post(notes, (NextcloudNotesController, 'note_create'), name='nextcloud.notes.create', auth='user')
         router.get(rf'{notes}/(?P<id>\d{{1,18}})', (NextcloudNotesController, 'note_show'), name='nextcloud.notes.show', auth='user')
         router.put(rf'{notes}/(?P<id>\d{{1,18}})', (NextcloudNotesController, 'note_update'), name='nextcloud.notes.update', auth='user')
-    # Page assets only (no library data): public, the sign-in page needs them. One level of
-    # sub-folder (static/catalog/: scripts and styles of the catalog XSLT), names checked by the controller
-    router.get(r'/static/(?P<name>[^/]+(?:/[^/]+)?)', (WebUIController, 'static_file'), name='webui.static')
+    # Page assets only (no library data): public, the sign-in page needs them. Up to two levels of
+    # sub-folders (static/catalog/main.js, static/vendor/foliate/view.js), names checked by the controller
+    router.get(r'/static/(?P<name>[^/]+(?:/[^/]+){0,2})', (WebUIController, 'static_file'), name='webui.static')
     # Sign-in and sign-up page of the browsers, one session for the catalog and the reading page
     router.get('/login', (AuthController, 'login_page'), name='auth.login.page')
     router.post('/login', (AuthController, 'login'), name='auth.login')

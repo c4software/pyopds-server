@@ -1,4 +1,4 @@
-// Web reader: opens a library EPUB in a foliate-js view (static/foliate/, ES modules loaded with import()).
+// Web reader: opens a library EPUB in a foliate-js view (static/vendor/foliate/, ES modules loaded with import()).
 // The EPUB is never downloaded whole: GET /webui/reader/book lists its entries, GET /webui/reader/file
 // serves the ones foliate-js asks for (chapters, styles, images…), cached by the browser per EPUB version.
 // Also maps foliate's sections to the spine indexes used by KOReader and CrossPoint readers.
@@ -7,7 +7,7 @@
 
     const PyReader = window.PyReader = window.PyReader || {};
 
-    const FOLIATE = '/static/foliate/';
+    const FOLIATE = '/static/vendor/foliate/';
 
     /** Zip loader of foliate-js reading the entries from the server. */
     function serverLoader(info) {

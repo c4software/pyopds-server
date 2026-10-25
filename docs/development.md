@@ -13,6 +13,23 @@ The source is mounted into two containers built from the `dev` stage of the [`Do
 
 With rootful Docker, set `DEV_UID` / `DEV_GID` (e.g. in a `.env` file: `DEV_UID=1000`) so that the rebuilt stylesheet belongs to you; rootless Docker needs nothing.
 
+## Code layout
+
+The code is grouped by theme, with the same folders for the controllers and their tests:
+
+| Theme | `controllers/` | `static/` |
+|---|---|---|
+| Shared plumbing | `core/` (HTTP bodies and responses, shared services, optional parts) | `shared/` (account, page kit, menu, theme), `partials/`, `vendor/` (polyfill, icons, foliate-js) |
+| OPDS catalog and its web view | `catalog/` (feeds, web UI pages and assets) | `catalog/` (XSLT, scripts, styles) |
+| Accounts | `accounts/` (HTTP Basic, sessions, sign-in page) | `login/` |
+| Library | `library/` (metadata database, indexes, genres, author and series rules, online details) | |
+| Sync | `sync/` (KOSync, CrossPoint Sync, Nextcloud Notes, SQLite storage) | |
+| Reader's data | `reading/` (reading state and activity, recommendations, personal feeds, clippings, web reader) | `reading/`, `clippings/`, `reader/` |
+| Audiobook | `audiobook/` (settings, speech server client, controller) | `reader/narration.js`, `reader/audiobook.js` |
+| Command line tools | `tools/` (`python -m controllers.tools.duplicates`, `controllers.tools.metadata_fix`) | |
+
+Tests live in `tests/<theme>/`; `tests/support.py` (imported first by every test module) holds the shared setup and helpers.
+
 ## Tests
 
 The test suite only needs the standard library (`pytest` works too); it starts real HTTP servers on free ports and uses temporary libraries and databases:
@@ -44,7 +61,7 @@ python tools/tailwind.py          # build static/tailwind.css (minified)
 python tools/tailwind.py --watch  # rebuild on every change of static/
 ```
 
-[`tools/tailwind.py`](../tools/tailwind.py) downloads the pinned CLI version once (checked against its SHA-256) into `.cache/`, then runs it with [`tailwind.config.js`](../tailwind.config.js) (dark mode by class, classes scanned in `static/*.xslt|html|js`, `static/catalog/*.js` and `static/reader/*.js`) and [`styles/tailwind.css`](../styles/tailwind.css). Extra arguments go to the Tailwind CLI. The Docker image builds the stylesheet itself (`css` stage of the Dockerfile), and the development compose file rebuilds it on every change.
+[`tools/tailwind.py`](../tools/tailwind.py) downloads the pinned CLI version once (checked against its SHA-256) into `.cache/`, then runs it with [`tailwind.config.js`](../tailwind.config.js) (dark mode by class, classes scanned in the XSLT, pages and scripts of every folder of `static/` except `static/vendor/`) and [`styles/tailwind.css`](../styles/tailwind.css). Extra arguments go to the Tailwind CLI. The Docker image builds the stylesheet itself (`css` stage of the Dockerfile), and the development compose file rebuilds it on every change.
 
 ## Web UI files
 
@@ -52,10 +69,10 @@ The XSLT only holds the page structure; the page code lives next to it:
 
 | File | Role |
 | --- | --- |
-| `static/opds_to_html.xslt` | Feed → HTML: header, tiles, pagination, book sheet markup (plus a tiny inline script setting the dark theme before the first paint) |
+| `static/catalog/opds_to_html.xslt` | Feed → HTML: header, tiles, pagination, book sheet markup (plus a tiny inline script setting the dark theme before the first paint) |
 | `static/catalog/catalog.css` | Styles Tailwind utilities cannot express: tile colors, cover fade-in, mosaic, book sheet dialog, rating stars (served as is, after `tailwind.css`) |
 | `static/catalog/main.js` | Entry point: starts every feature below (loaded last) |
-| `static/partials/nav.html`, `static/nav.js` | Menu shared by every screen (catalog, reading, clippings, sign-in): catalog, statistics, clippings, sign-in / logout, light/dark theme |
+| `static/partials/nav.html`, `static/shared/nav.js` | Menu shared by every screen (catalog, reading, clippings, sign-in): catalog, statistics, clippings, sign-in / logout, light/dark theme |
 | `static/catalog/back-button.js` | « Retour » link to the parent feed |
 | `static/catalog/search.js` | Search query pre-fill, full-width search bar on phones |
 | `static/catalog/covers.js` | Lazy loading of the book covers |
@@ -65,4 +82,4 @@ The XSLT only holds the page structure; the page code lives next to it:
 | `static/catalog/book-sheet.js` | Book sheet dialog, `#book=` links |
 | `static/catalog/library-sync.js` | « Recharger » button: library sync and its result |
 
-They are plain scripts sharing a small `window.PyOPDS` namespace, loaded in order by `<script src>` tags at the end of the page: this runs the same with native XSLT and with the polyfill (which re-creates the scripts of the result one after the other, then dispatches `DOMContentLoaded`). The server adds `?v=<modification time>` to every `/static/…` URL of the XSLT it serves (as for the other pages): versioned files are cached for a year, and a deployment changes their URLs, so browsers and caching proxies never mix old and new scripts. Files of `static/` and of one level of sub-folder (`static/catalog/`) are served; Tailwind classes used in these scripts are picked up by `python tools/tailwind.py`.
+They are plain scripts sharing a small `window.PyOPDS` namespace, loaded in order by `<script src>` tags at the end of the page: this runs the same with native XSLT and with the polyfill (which re-creates the scripts of the result one after the other, then dispatches `DOMContentLoaded`). The server adds `?v=<modification time>` to every `/static/…` URL of the XSLT it serves (as for the other pages): versioned files are cached for a year, and a deployment changes their URLs, so browsers and caching proxies never mix old and new scripts. Files of `static/` and of up to two levels of sub-folders (`static/catalog/main.js`, `static/vendor/foliate/view.js`) are served; Tailwind classes used in these scripts are picked up by `python tools/tailwind.py`.

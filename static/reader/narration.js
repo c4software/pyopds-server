@@ -1,4 +1,4 @@
-// Web reader: reads the book aloud (audiobook, « Écouter »). foliate-js's TTS module (static/foliate/tts.js,
+// Web reader: reads the book aloud (audiobook, « Écouter »). foliate-js's TTS module (static/vendor/foliate/tts.js,
 // vendored) splits each chapter into blocks and sentences (SSML marks); the sentences are grouped into
 // requests of at most `maxChars` characters, each synthesized by the server (POST /webui/audiobook/speech)
 // just before it is played: one request played, the next AHEAD ones prepared, never the whole book.
@@ -11,7 +11,7 @@
 
     const PyReader = window.PyReader = window.PyReader || {};
 
-    const FOLIATE = '/static/foliate/';
+    const FOLIATE = '/static/vendor/foliate/';
     // Requests prepared after the one being played
     const AHEAD = 2;
     // The first request is shorter: the sound starts sooner

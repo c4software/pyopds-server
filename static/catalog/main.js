@@ -1,5 +1,5 @@
 // Catalog web UI entry point: starts the features of static/catalog/ (loaded before it, in order,
-// by plain <script src> tags at the end of the body of static/opds_to_html.xslt).
+// by plain <script src> tags at the end of the body of static/catalog/opds_to_html.xslt).
 // Works with the native XSLT and with the XSLT polyfill, which runs the scripts of the result
 // after the document is parsed and then dispatches a synthetic DOMContentLoaded: the deferred
 // part checks document.readyState and runs once only.

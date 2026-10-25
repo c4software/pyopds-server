@@ -3,8 +3,9 @@ import os
 import socketserver
 from urllib.parse import urlparse
 
-from controllers import features, opds_auth
-from controllers.opds import LIBRARY_DIR, OPDSController, PAGE_SIZE
+from controllers.accounts import opds_auth
+from controllers.core import features
+from controllers.catalog.opds import LIBRARY_DIR, OPDSController, PAGE_SIZE
 from routes import Router, register_routes
 
 PORT = int(os.environ.get('PORT', 8080))
@@ -99,7 +100,7 @@ def main():
     print(f"KoReader sync available at http://127.0.0.1:{PORT}/koreader/sync\n")
 
     # Library metadata (library.db): synced now, then every LIBRARY_SCAN_INTERVAL seconds
-    from controllers.library import Library
+    from controllers.library.store import Library
     Library.get_instance().start_auto_sync()
     with ThreadedServer(("", PORT), UnifiedHandler) as httpd:
         try:

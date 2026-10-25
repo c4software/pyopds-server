@@ -1,6 +1,6 @@
 // Catalog web UI: « Recharger la bibliothèque » button of the header (button#library-sync), shown to signed-in
 // readers (to everyone when the server has no accounts: minimal mode with a public catalog). A click asks
-// POST /webui/library/sync to read the new and modified EPUBs (controllers/library.py), shows what changed,
+// POST /webui/library/sync to read the new and modified EPUBs (controllers/library/store.py), shows what changed,
 // then reloads the page when the library changed.
 (function () {
     'use strict';
