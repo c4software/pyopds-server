@@ -70,7 +70,7 @@ The same catalog is a standard OPDS feed: add it to KoReader, a CrossPoint reade
 - **Docker Deployment**: Prebuilt multi-arch image (`ghcr.io/c4software/pyopds-server`) published on each release, a versioned `docker-compose.yml` and a git-ignored override for your own settings.
 - **Web Interface**: The OPDS feed rendered as a web page in browsers (XSLT transformation), with light/dark theme, search, sign-in / account creation and an optional animated mosaic of covers on the navigation tiles (see [Web interface](docs/web-ui.md#catalog-in-the-browser)).
 - **Web Reader**: « Lire » in the book sheet opens the EPUB in the browser (`/read`, [foliate-js](https://github.com/johnfactotum/foliate-js)), on phones (full screen, taps and swipes, screen kept on), tablets (two pages side by side in landscape) and computers (centered reading page). Once signed in, the position, the clippings and the reading time are those of your sync account: continue on KoReader or a CrossPoint reader where the browser stopped, and the other way round (see [Web reader](docs/web-ui.md#web-reader)).
-- **Audiobook**: with a text-to-speech server (an OpenAI-compatible one, `audiobook.toml`), « Écouter » reads the book aloud in the web reader, a few paragraphs at a time (never the whole book, the voice keeping its tone across them), the sentence read underlined and the pages following it; each book gets its own voice and reading tone, a free prompt (« voix grave, ton de conteur »).
+- **Audiobook**: with a text-to-speech server (an OpenAI-compatible one, `audiobook.toml`), « Écouter » reads the book aloud in the web reader, a few paragraphs at a time (never the whole book, the voice keeping its tone across them), the sentence read underlined and the pages following it; each book gets its own voice and reading tone, a free prompt (« voix grave, ton de conteur »), and voices can be cloned from a recording designed from a description (see [Audiobook](docs/audiobook.md)).
 - **Installable**: the web UI is a web app (manifest, icons): « Add to Home Screen » / « Install » opens it like an app (HTTPS required by the browsers).
 - **Reading Page**: `/reading` (chart icon in the web UI header) shows the books in progress per device with their last sync, finished and abandoned books, reading time, pages, a reading calendar, recent activity, devices and the latest highlights, with links to the matching books of the catalog; a synced book the server could not match can be associated by hand with a book of the library.
 - **KoReader highlights**: KoReader's « Nextcloud Notes » export lands in the server as highlights of the book.
@@ -103,7 +103,8 @@ Then, for reading sync, point KoReader (*Tools → Progress sync → Custom sync
 | [Catalog and library](docs/catalog.md) | How the library is read and kept up to date, book details in the feeds, recommendations, personal shelves |
 | [Web interface](docs/web-ui.md) | The catalog in the browser, the web reader, the reading and highlights pages |
 | [Sync API](docs/sync-api.md) | KOSync and CrossPoint Sync endpoints |
-| [Library tools](docs/tools.md) | Finding duplicate books, fixing metadata (genres, authors, titles) in bulk |
+| [Audiobook](docs/audiobook.md) | « Écouter » in the web reader: text-to-speech server, settings, ready-made and cloned voices, making a voice |
+| [Library tools](docs/tools.md) | Finding duplicate books, fixing metadata (genres, authors, titles) in bulk, making an audiobook voice |
 | [Development](docs/development.md) | Hot-reload environment, tests, styles, releasing |
 
 ## License

@@ -6,7 +6,7 @@
 # Disabled while `url` or `model` is empty. To turn it on, write your settings in another
 # file (for example config/audiobook.toml) and point the AUDIOBOOK_CONFIG_PATH environment
 # variable to it. That file completes this one, with the same keys (its values win).
-# Restart the server to apply changes.
+# Restart the server to apply changes. Guide: docs/audiobook.md (settings, voices, making a voice).
 #
 # String values may read the environment: "${TTS_API_KEY}" is replaced by that variable.
 #
