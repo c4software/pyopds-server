@@ -9,6 +9,7 @@ Optional and off by default: it needs an OpenAI-compatible text-to-speech server
 - [Settings](#settings)
 - [Voices](#voices)
 - [Making a voice](#making-a-voice)
+- [With curl](#with-curl)
 - [Endpoints](#endpoints)
 - [Troubleshooting](#troubleshooting)
 - [Code](#code)
@@ -141,6 +142,71 @@ docker exec cops python -m controllers.tools.voice_design narrateur "…"
 5. The `[clones.<name>]` table to add to the settings is printed; then restart the server.
 
 The design model invents the voice again on each call: run the tool again until the example pleases. Describe the gender, age, timbre, accent and reading style; the two voices of `voix/french/` came from the descriptions of [their README](../voix/french/README.md).
+
+## With curl
+
+The same steps by hand, straight to the speech server (here an llm-proxy in front of Qwen3-TTS; the model names carry its backend prefix). The JSON bodies are built with `jq`: a reference recording in base64 weighs about a megabyte, too much for a command line.
+
+```bash
+export TTS_URL=http://llm-proxy:8000 TTS_API_KEY=…
+TEXT="Il était une fois, au bord d'une forêt immense, un vieux meunier qui vivait seul avec son chat. Chaque matin, il ouvrait les volets de son moulin et regardait le soleil se lever sur les champs de blé."
+```
+
+**Voices of a model:**
+
+```bash
+curl -sS "$TTS_URL/v1/audio/voices?model=silentchuck/qwen3-tts-12hz-1.7b-customvoice" \
+  -H "Authorization: Bearer $TTS_API_KEY" | jq -c '[.data[].id]'
+```
+
+**A ready-made voice** (CustomVoice: `voice` required, `instructions` optional):
+
+```bash
+curl -sS -o essai.wav "$TTS_URL/v1/audio/speech" -H "Authorization: Bearer $TTS_API_KEY" -H "Content-Type: application/json" \
+  -d '{"model": "silentchuck/qwen3-tts-12hz-1.7b-customvoice", "voice": "ryan", "language": "French",
+       "instructions": "Voix posée de conteur", "input": "Bonjour, ceci est un essai.", "response_format": "wav"}'
+aplay essai.wav
+```
+
+**1. Design a voice** (VoiceDesign: the description goes in `instructions`, the reference text in `input`; a new voice on each call):
+
+```bash
+jq -n --arg text "$TEXT" --arg description "Voix masculine française d'une cinquantaine d'années, grave, chaude et veloutée. Narrateur professionnel de livre audio : diction parfaite, débit posé, intonation naturelle." \
+  '{model: "silentchuck/qwen3-tts-12hz-1.7b-voice-design", input: $text, instructions: $description,
+    language: "French", response_format: "wav"}' > design.json
+curl -sS -o design.wav "$TTS_URL/v1/audio/speech" -H "Authorization: Bearer $TTS_API_KEY" \
+  -H "Content-Type: application/json" -d @design.json
+aplay design.wav
+```
+
+Or record your own voice reading `$TEXT` (WAV), and check its transcript with the speech recognition model: the cloning model needs it word for word.
+
+```bash
+curl -sS "$TTS_URL/v1/audio/transcriptions" -H "Authorization: Bearer $TTS_API_KEY" \
+  -F model=silentchuck/qwen3-asr-1.7b -F language=fr -F file=@ma-voix.wav | jq -r .text
+```
+
+**2. Normalize the reference** (what the voice tool does without ffmpeg): mono 24 kHz, silences cut at both ends (the `areverse` pair trims the end; `stop_periods` would cut at the first pause of the sentence), level at -20 LUFS with peaks at -1 dB.
+
+```bash
+ffmpeg -i design.wav -ac 1 -ar 24000 -c:a pcm_s16le -af "silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.15,areverse,silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.15,areverse,loudnorm=I=-20:TP=-1:LRA=11" voix.wav
+```
+
+**3. Read with the cloned voice** (Base: the recording in `reference_audio`, base64 WAV, and its transcript in `reference_text`, both required; no `voice` nor `instructions`):
+
+```bash
+base64 -w0 voix.wav > voix.b64
+jq -n --rawfile audio voix.b64 --arg reference "$TEXT" --arg text "Le meunier soupira longuement. Il savait que le chat avait raison." \
+  '{model: "silentchuck/qwen3-tts-12hz-1.7b-base", input: $text, reference_audio: $audio, reference_text: $reference,
+    language: "French", response_format: "wav"}' > clone.json
+curl -sS -o exemple.wav "$TTS_URL/v1/audio/speech" -H "Authorization: Bearer $TTS_API_KEY" \
+  -H "Content-Type: application/json" -d @clone.json
+aplay exemple.wav
+```
+
+When the example pleases, declare the voice in the settings (`[clones.<name>]` with `audio = "voix.wav"` and `text` = the transcript) and restart the server: pyopds sends the same request for every passage read with it.
+
+A model server that loads one model at a time answers « backend … hors ligne » (or takes longer) while it switches models: try again a few seconds later.
 
 ## Endpoints
 
