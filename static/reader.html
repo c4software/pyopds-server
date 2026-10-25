@@ -21,6 +21,8 @@
     <script src="/static/reader/stats.js" defer></script>
     <script src="/static/reader/wake.js" defer></script>
     <script src="/static/reader/highlights.js" defer></script>
+    <script src="/static/reader/narration.js" defer></script>
+    <script src="/static/reader/audiobook.js" defer></script>
     <script src="/static/reader/reader.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.17.4/dist/cdn.min.js" defer></script>
 </head>
@@ -76,6 +78,10 @@
             </button>
             <input type="range" min="0" max="1000" step="1" class="reader-slider flex-1 mx-1" :value="progress.value"
                    @change="seek($event.target.value)" aria-label="Position dans le livre"/>
+            <button type="button" x-show="$store.audiobook.available" x-cloak @click="$store.audiobook.toggle()" class="reader-icon" :aria-pressed="$store.audiobook.active"
+                    :title="$store.audiobook.running ? 'Mettre la lecture audio en pause' : 'Écouter'" :aria-label="$store.audiobook.running ? 'Mettre la lecture audio en pause' : 'Écouter'">
+                <i data-lucide="headphones" class="w-5 h-5"></i>
+            </button>
             <button type="button" x-show="signedIn" @click="togglePanel('clips')" class="reader-icon" :aria-pressed="panel === 'clips'" title="Surlignages" aria-label="Surlignages">
                 <i data-lucide="highlighter" class="w-5 h-5"></i>
             </button>
@@ -231,5 +237,7 @@
             </div>
         </div>
     </template>
+
+    <!--#include reader-audio -->
 </body>
 </html>

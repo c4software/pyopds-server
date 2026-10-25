@@ -13,6 +13,7 @@ from controllers.webui import WebUIController
 
 # Controllers of the full server, imported on their first request: in minimal mode (MINIMAL_MODE=true)
 # their modules (sync, web reader, reader's data) are never loaded
+AudiobookController = 'controllers.audiobook.AudiobookController'
 ClippingsController = 'controllers.clippings.ClippingsController'
 CrossPointSyncController = 'controllers.crosspoint_sync.CrossPointSyncController'
 KoReaderSyncController = 'controllers.koreader_sync.KoReaderSyncController'
@@ -151,6 +152,12 @@ def register_routes(router):
         router.get('/webui/reader/book', (WebReaderController, 'book_info'), name='webui.reader.book', auth=opds)
         router.get('/webui/reader/file', (WebReaderController, 'book_file'), name='webui.reader.file', auth=opds)
         router.post('/webui/reader/session', (WebReaderController, 'reading_session'), name='webui.reader.session', auth='user')
+        # Audiobook of the web reader (audiobook.toml, 404 while no speech server is configured): voice and
+        # reading tone per book, synthesis of the text read a few sentences at a time
+        router.get('/webui/audiobook', (AudiobookController, 'settings'), name='webui.audiobook', auth='user')
+        router.put('/webui/audiobook', (AudiobookController, 'settings_update'), name='webui.audiobook.update', auth='user')
+        router.get('/webui/audiobook/voices', (AudiobookController, 'voices'), name='webui.audiobook.voices', auth='user')
+        router.post('/webui/audiobook/speech', (AudiobookController, 'speech'), name='webui.audiobook.speech', auth='user')
         # KOReader highlights (Export highlights → Nextcloud Notes, this server as host, sync account)
         notes = '/index.php/apps/notes/api/v1/notes'
         router.get(notes, (NextcloudNotesController, 'notes_list'), name='nextcloud.notes', auth='user')

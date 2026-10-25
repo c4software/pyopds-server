@@ -172,6 +172,23 @@ body.reader-page {
     background: var(--reader-bar);
     box-shadow: var(--reader-shadow);
 }
+/* Audiobook player (static/partials/reader-audio.html): at the bottom while reading, above the bar when it is shown */
+.reader-player {
+    position: fixed;
+    left: 50%;
+    bottom: calc(1rem + env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.3rem 0.5rem;
+    border-radius: 9999px;
+    background: var(--reader-bar);
+    color: var(--reader-ink);
+    box-shadow: var(--reader-shadow);
+}
+.reader-player-raised { bottom: calc(6.5rem + env(safe-area-inset-bottom)); }
 .reader-swatch {
     width: 1.75rem;
     height: 1.75rem;

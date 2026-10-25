@@ -1,0 +1,37 @@
+# Audiobook of the web reader (« Écouter »): the book is read aloud by a text-to-speech
+# server speaking the OpenAI API (POST /v1/audio/speech), for instance an llm-proxy or a
+# local model server. The text is sent a few sentences at a time, just before they are
+# played: the whole book is never generated.
+#
+# Disabled while `url` or `model` is empty. To turn it on, write your settings in another
+# file (for example config/audiobook.toml) and point the AUDIOBOOK_CONFIG_PATH environment
+# variable to it. That file completes this one, with the same keys (its values win).
+# Restart the server to apply changes.
+#
+# String values may read the environment: "${TTS_API_KEY}" is replaced by that variable.
+
+# Base URL of the server (/v1/audio/speech and /v1/audio/voices are appended)
+url = ""
+# Model of the requests (an llm-proxy names it with its backend: "bigchuck/<model>")
+model = ""
+# Bearer token sent to the server; empty: no Authorization header
+api_key = ""
+# Voice and reading tone used for a book the reader did not configure
+voice = ""
+instructions = ""
+# Audio format asked for (wav, mp3, opus, aac, flac: what the server supports, played by the browser)
+response_format = "wav"
+# Request field carrying the reading tone ("instructions" in the OpenAI API); empty: never sent
+instructions_field = "instructions"
+# Voices offered to the reader; empty: asked to the server (GET /v1/audio/voices?model=…)
+voices = []
+# Characters sent per request at most (a few sentences: the first sound comes after one of them)
+max_chars = 500
+# Seconds allowed for one request
+timeout = 120
+# Requests sent to the server at the same time, for all the readers
+concurrency = 2
+
+# Extra fields added to every request (options of a given model)
+[extra]
+# language = "French"

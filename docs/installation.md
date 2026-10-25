@@ -98,6 +98,21 @@ The following environment variables can be set:
   [series.aliases]
   "L'Assassin royal" = ["Assasin Royal"]
   ```
+- **AUDIOBOOK_CONFIG_PATH**: Path to a file completing [`audiobook.toml`](../audiobook.toml) (same keys, its values win) to turn on the audiobook of the web reader (« Écouter », see [Web reader](web-ui.md#web-reader)): an OpenAI-compatible text-to-speech server (`POST /v1/audio/speech`), for instance an LLM proxy or a local model server. Off while `url` or `model` is empty (default). String values may read the environment, so that the key stays out of the file. Only the text being read is sent, a few sentences at a time, with the voice and the reading tone; every request is made by the server (the browser never sees the key), for signed-in readers only. Restart the server after editing it. Example (`config/audiobook.toml`):
+
+  ```toml
+  url = "http://llm-proxy:8000"
+  model = "bigchuck/qwen3-tts-customvoice"
+  api_key = "${TTS_API_KEY}"
+  voice = "vivian"
+  instructions = "Lecture posée et chaleureuse, comme un livre audio"
+  response_format = "wav"   # wav, mp3, opus, aac or flac: what the server produces
+  max_chars = 500           # characters per request
+  concurrency = 2           # requests sent to the server at the same time, for all readers
+
+  [extra]                   # extra fields of every request (model options)
+  language = "French"
+  ```
 - **ONLINE_METADATA**: Set to `true` to look up, without any API key, the cover ([iTunes Search](https://performance-partners.apple.com/search-api), then [Open Library](https://openlibrary.org/developers/api)), print page count and description (Open Library) of synced books the library does not provide (default: disabled).
 - **HARDCOVER_API_KEY**: [Hardcover](https://hardcover.app/account/api) API key (`read:catalog` is enough) to add moods, genres, content warnings, community rating, series and position, release year and description to synced books, and the next book of a series (`GET /api/v1/documents/{document}/next`) (default: disabled). Requests are throttled (1.1 s apart, 4,000 a day, 10 min pause after a 429).
 

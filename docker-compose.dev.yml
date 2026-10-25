@@ -1,6 +1,6 @@
 # Development with hot reload: the source is mounted into the containers.
 #   docker compose -f docker-compose.dev.yml up --build
-# - app: http://localhost:8080, restarted on every change of the Python code or genres.toml
+# - app: http://localhost:8080, restarted on every change of the Python code or the TOML settings
 # - css: static/tailwind.css rebuilt on every change of the Tailwind classes in static/
 # EPUBs are read from ./books, the sync database is kept in ./config.
 name: pyopds-dev
@@ -13,6 +13,7 @@ services:
       - KOREADER_SYNC_DB_PATH=/config/koreader_sync.db
       - GENRES_CONFIG_PATH=/config/genres.toml
       - METADATA_CONFIG_PATH=/config/metadata.toml
+      - AUDIOBOOK_CONFIG_PATH=/config/audiobook.toml
     volumes:
       - .:/app
       - ./books:/books

@@ -13,6 +13,8 @@ services:
       - GENRES_CONFIG_PATH=/config/genres.toml
       # Custom author and series rules completing metadata.toml (ignored while the file does not exist)
       - METADATA_CONFIG_PATH=/config/metadata.toml
+      # Audiobook of the web reader: speech server completing audiobook.toml (off while the file does not exist)
+      - AUDIOBOOK_CONFIG_PATH=/config/audiobook.toml
     volumes:
       # Sync database and custom genres: kept across restarts and image updates
       - ./config:/config

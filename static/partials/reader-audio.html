@@ -1,0 +1,60 @@
+<!-- Audiobook of the web reader (store `audiobook`, static/reader/audiobook.js): the player shown while the book
+     is read aloud, and the voice and reading tone of the book. The start button is in the bottom bar. -->
+<div x-show="$store.audiobook.active &amp;&amp; !selecting" x-cloak x-transition.opacity class="reader-player" :class="chrome ? 'reader-player-raised' : ''" role="toolbar" aria-label="Lecture audio">
+    <span x-show="$store.audiobook.state === 'loading'" class="reader-icon" aria-hidden="true">
+        <i data-lucide="loader-circle" class="w-5 h-5 animate-spin"></i>
+    </span>
+    <button type="button" @click="$store.audiobook.replay()" class="reader-icon" title="Réécouter la phrase" aria-label="Réécouter la phrase">
+        <i data-lucide="rotate-ccw" class="w-5 h-5"></i>
+    </button>
+    <button type="button" @click="$store.audiobook.toggle()" class="reader-icon" :title="$store.audiobook.running ? 'Pause' : 'Lecture'" :aria-label="$store.audiobook.running ? 'Pause' : 'Lecture'">
+        <span x-show="$store.audiobook.running"><i data-lucide="pause" class="w-5 h-5"></i></span>
+        <span x-show="!$store.audiobook.running"><i data-lucide="play" class="w-5 h-5"></i></span>
+    </button>
+    <button type="button" @click="$store.audiobook.next()" class="reader-icon" title="Phrase suivante" aria-label="Phrase suivante">
+        <i data-lucide="skip-forward" class="w-5 h-5"></i>
+    </button>
+    <button type="button" @click="$store.audiobook.openPanel()" class="reader-icon" title="Voix et ton" aria-label="Voix et ton">
+        <i data-lucide="sliders-horizontal" class="w-5 h-5"></i>
+    </button>
+    <button type="button" @click="$store.audiobook.stop()" class="reader-icon" title="Arrêter la lecture" aria-label="Arrêter la lecture">
+        <i data-lucide="square" class="w-5 h-5"></i>
+    </button>
+</div>
+
+<div x-show="$store.audiobook.panel" x-cloak class="reader-scrim z-40" @click="$store.audiobook.cancel()"></div>
+<template x-if="$store.audiobook.panel">
+    <div class="reader-editor" role="dialog" aria-label="Voix et ton de lecture">
+        <h2 class="font-medium">Lecture audio de ce livre</h2>
+        <label class="flex flex-col gap-1 text-sm">
+            <span>Voix</span>
+            <input x-model="$store.audiobook.voice" list="audiobook-voices" maxlength="100" class="reader-input"
+                   :placeholder="$store.audiobook.defaults.voice ? 'Par défaut : ' + $store.audiobook.defaults.voice : 'Voix du serveur'"/>
+            <datalist id="audiobook-voices">
+                <template x-for="name in $store.audiobook.voices" :key="name">
+                    <option :value="name"></option>
+                </template>
+            </datalist>
+        </label>
+        <label class="flex flex-col gap-1 text-sm">
+            <span>Ton de lecture</span>
+            <textarea x-model="$store.audiobook.instructions" rows="4" maxlength="1000" class="reader-input"
+                      :placeholder="$store.audiobook.defaults.instructions || 'Ex. : voix grave et posée, ton de conteur, lecture lente, chuchotée dans les passages inquiétants'"></textarea>
+        </label>
+        <div class="flex flex-col gap-2 text-sm">
+            <span>Vitesse</span>
+            <div class="reader-segments">
+                <template x-for="rate in $store.audiobook.rates" :key="rate">
+                    <button type="button" @click="$store.audiobook.setRate(rate)" :aria-pressed="$store.audiobook.rate === rate" x-text="rate.toLocaleString('fr-FR') + ' ×'"></button>
+                </template>
+            </div>
+        </div>
+        <p class="text-xs reader-muted">La voix et le ton sont gardés pour ce livre ; la vitesse, dans ce navigateur. Le texte est envoyé au serveur de synthèse vocale quelques phrases à la fois.</p>
+        <div class="flex items-center gap-2">
+            <button type="button" @click="$store.audiobook.save(true)" :disabled="$store.audiobook.saving" class="reader-link text-sm">Valeurs par défaut</button>
+            <div class="flex-1"></div>
+            <button type="button" @click="$store.audiobook.cancel()" class="reader-chip">Annuler</button>
+            <button type="button" @click="$store.audiobook.save(false)" :disabled="$store.audiobook.saving" class="reader-chip reader-primary">Enregistrer</button>
+        </div>
+    </div>
+</template>

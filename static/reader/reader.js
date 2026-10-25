@@ -139,6 +139,10 @@
                         highlights = PyReader.highlights.create(reader, info.document, () => this.refreshClips());
                         highlights.load().catch(() => this.showNotice('Surlignages indisponibles pour le moment.'));
                     }
+                    // Audiobook: offered only when the server has a speech server (audiobook.js)
+                    if (this.signedIn) {
+                        PyReader.audiobook.attach(reader, this.path, { location: () => current, notice: (text) => this.showNotice(text) });
+                    }
                     await this.openAtLastPosition();
                     this.loading = false;
                     // Phones and tablets read full screen: the bars come back with a tap
