@@ -205,9 +205,10 @@ class AuthController:
         self.request = request_handler
 
     def login_page(self) -> None:
-        """GET /login: sign-in page, with account creation unless REGISTRATION_DISABLED."""
+        """GET /login: sign-in page, with account creation unless REGISTRATION_DISABLED or MINIMAL_MODE."""
         from controllers.webui import WebUIController
-        registration = 'closed' if koreader_sync.REGISTRATION_DISABLED else 'open'
+        from controllers.features import minimal_mode
+        registration = 'closed' if koreader_sync.REGISTRATION_DISABLED or minimal_mode() else 'open'
         WebUIController(self.request).serve_page('login.html', {'data-registration="open"': f'data-registration="{registration}"'})
 
     def login(self) -> None:

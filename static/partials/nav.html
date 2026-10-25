@@ -1,14 +1,16 @@
 <!-- Menu of every web UI screen (catalog XSLT, pages, sign-in), always the same icons in the same order.
      Included server-side ("#include nav", include_partials of controllers/webui.py), so it must stay
-     well-formed XML (the XSLT includes it) and free of Alpine directives; static/nav.js runs it. -->
-<nav id="site-nav" class="flex items-center gap-2.5 sm:gap-3 flex-shrink-0" aria-label="Menu">
+     well-formed XML (the XSLT includes it) and free of Alpine directives; static/nav.js runs it.
+     Placeholders of controllers/features.py (page_flags): the classes of the reader's sections (hidden in minimal
+     mode) and data-mode / data-accounts, the enabled parts of the server read by PageKit.features(). -->
+<nav id="site-nav" data-mode="{{mode}}" data-accounts="{{accounts}}" class="flex items-center gap-2.5 sm:gap-3 flex-shrink-0" aria-label="Menu">
     <a href="/opds" data-nav="catalog" class="nav-link flex items-center text-slate-600 hover:text-slate-900 aria-[current=page]:text-teal-600 dark:text-slate-400 dark:hover:text-slate-200 dark:aria-[current=page]:text-teal-400" title="Catalogue">
         <i data-lucide="home" class="w-4 h-4"></i>
     </a>
-    <a href="/reading" data-nav="reading" class="nav-link flex items-center text-slate-600 hover:text-slate-900 aria-[current=page]:text-teal-600 dark:text-slate-400 dark:hover:text-slate-200 dark:aria-[current=page]:text-teal-400" title="Lecture et statistiques">
+    <a href="/reading" data-nav="reading" class="nav-link {{display}} items-center text-slate-600 hover:text-slate-900 aria-[current=page]:text-teal-600 dark:text-slate-400 dark:hover:text-slate-200 dark:aria-[current=page]:text-teal-400" title="Lecture et statistiques">
         <i data-lucide="bar-chart-3" class="w-4 h-4"></i>
     </a>
-    <a href="/clippings" data-nav="clippings" class="nav-link flex items-center text-slate-600 hover:text-slate-900 aria-[current=page]:text-teal-600 dark:text-slate-400 dark:hover:text-slate-200 dark:aria-[current=page]:text-teal-400" title="Surlignages">
+    <a href="/clippings" data-nav="clippings" class="nav-link {{display}} items-center text-slate-600 hover:text-slate-900 aria-[current=page]:text-teal-600 dark:text-slate-400 dark:hover:text-slate-200 dark:aria-[current=page]:text-teal-400" title="Surlignages">
         <i data-lucide="highlighter" class="w-4 h-4"></i>
     </a>
     <!-- Account: sign-in link, or logout once signed in (the account name in its title) -->

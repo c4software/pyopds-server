@@ -1,12 +1,24 @@
 // Menu of every web UI screen (static/partials/nav.html): highlights the current section, shows the
 // sign-in or logout link (session user, static/account.js) and switches the light / dark theme
 // (localStorage 'color-theme', the class itself being set before the first paint by theme.js or the
-// XSLT's inline script). Plain script, loaded after account.js; it starts itself once the document
+// XSLT's inline script). Plain script, loaded after account.js and page-kit.js; it starts itself once the document
 // is parsed (also with the XSLT polyfill, which runs the scripts after parsing).
 (function () {
     'use strict';
 
     const SECTIONS = { catalog: /^\/(opds|$)/, reading: /^\/reading/, clippings: /^\/clippings/ };
+
+    function showAccount() {
+        const user = window.SyncAccount.sessionUser();
+        const account = document.getElementById(user ? 'nav-logout' : 'nav-login');
+        account.classList.remove('hidden');
+        account.classList.add('flex');
+        if (user) {
+            account.title = 'Se déconnecter (' + user + ')';
+        } else if (location.pathname !== '/login') {
+            account.href = '/login?next=' + encodeURIComponent(location.pathname + location.search);
+        }
+    }
 
     function init() {
         const nav = document.getElementById('site-nav');
@@ -17,15 +29,8 @@
             if (SECTIONS[link.dataset.nav].test(location.pathname)) link.setAttribute('aria-current', 'page');
         });
 
-        const user = window.SyncAccount.sessionUser();
-        const account = document.getElementById(user ? 'nav-logout' : 'nav-login');
-        account.classList.remove('hidden');
-        account.classList.add('flex');
-        if (user) {
-            account.title = 'Se déconnecter (' + user + ')';
-        } else if (location.pathname !== '/login') {
-            account.href = '/login?next=' + encodeURIComponent(location.pathname + location.search);
-        }
+        // No sign-in in minimal mode with a public catalog (controllers/features.py)
+        if (window.PageKit.features().accounts) showAccount();
 
         document.getElementById('theme-toggle').addEventListener('click', function () {
             const dark = document.documentElement.classList.toggle('dark');

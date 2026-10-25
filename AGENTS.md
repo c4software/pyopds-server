@@ -49,6 +49,7 @@ Le projet suit une architecture de type MVC (Modèle-Vue-Contrôleur) simplifié
     * `metadata_fix.py` : Outil en ligne de commande (`python -m controllers.metadata_fix export|apply`) de correction des métadonnées par CSV : export des livres sans genre affiché, sans auteur ou au titre à nettoyer (avec suggestions de genres : profil de l'auteur, Open Library avec `--online`), application du CSV complété dans l'OPF des EPUB (simulation sans `--write`, date de modification conservée).
     * `clippings.py` : Surlignages du lecteur connecté dans la webui (fiche livre, page `/clippings` avec recherche, export Markdown) : regroupement par livre et Markdown en fonctions pures, `ClippingsController` (sous-classe de `WebUIController`).
     * `web_reader.py` : Lecteur web `/read` (foliate-js) : entrées de l'EPUB servies une à une (`/webui/reader/book`, `/webui/reader/file`), temps de lecture ajouté aux statistiques de l'appareil de synchro du navigateur, celui de sa position (`POST /webui/reader/session`, fonctions pures de cumul ; les statistiques de l'ancien appareil commun « Lecteur web » passent au premier navigateur qui envoie les siennes). La position (XPointer KoReader + position riche CrossPoint) et les surlignages (décalages visibles CrossPoint) passent par `/api/v1`, appelée par la page.
+    * `features.py` : Parties optionnelles du serveur (`MINIMAL_MODE`, `minimal_mode()`, `accounts_enabled()`) et marqueurs des fragments HTML qui les décrivent (`page_flags`).
     * `webui.py` : Pages statiques de l'interface web hors flux OPDS (page « Lecture » `/reading`), fichiers `/static/...` (y compris `/static/catalog/...`), versionnés par `?v=`, et statut « lu » d'un livre du catalogue pour le lecteur connecté (`GET`/`PUT /webui/book-status`, bouton « Marquer comme lu » de la fiche livre).
 * `metadata.toml` : Normalisation des auteurs (« Nom, Prénom » → « Prénom Nom », casse, alias) et des séries (séries ignorées, alias), appliquée à l'extraction OPF (complétable via `METADATA_CONFIG_PATH`).
 * `genres.toml` : Correspondances sujets → genres, sujets ignorés et seuil d'affichage (complétable via `GENRES_CONFIG_PATH`).
@@ -94,6 +95,7 @@ Le projet suit une architecture de type MVC (Modèle-Vue-Contrôleur) simplifié
 ### Routage
 * Le routeur est "custom". Il supporte les Regex.
 * Format : `router.get(r'/url/pattern', (ControllerClass, 'method_name'), name='route.name')`.
+* Toute route qui n'est pas le catalogue ou sa vue web (synchro, données du lecteur, nouvelles pages) se déclare dans un bloc `with router.full_only():` (coupée par `MINIMAL_MODE`).
 * Les routes du catalogue et de la webui prennent `auth='opds'` (catalogue public, privé si `OPDS_AUTH=true`) ; celles qui dépendent du lecteur prennent `auth='user'` (compte requis). L'utilisateur identifié est exposé dans `request_handler.opds_user` (`None` sinon).
 
 ### Interface web (XSLT côté client)
@@ -133,6 +135,7 @@ L'application doit respecter ces variables de configuration :
 * `KOREADER_SYNC_DB_PATH` : Chemin de la DB SQLite.
 * `REGISTRATION_DISABLED` : `true` pour refuser la création de comptes de synchronisation.
 * `OPDS_AUTH` : `true` pour rendre privés le catalogue et la webui (routes `auth='opds'` ; synchro, `/cover/*`, `/static/*` et `/health` restent publics). Par défaut le catalogue est public et la connexion facultative (HTTP Basic pour les clients OPDS, page `/login` et cookie de session pour les navigateurs, une seule connexion pour le catalogue, les pages Lecture et Surlignages et leurs appels à `/api/v1` ; cookies jamais `Secure`, le site pouvant être ouvert en HTTP comme en HTTPS) ; elle active la tuile/flux « À lire ensuite » (`/opds/recommendations`).
+* `MINIMAL_MODE` : `true` pour ne garder que le catalogue OPDS et sa vue web XSLT (`controllers/features.py`) : routes déclarées dans un bloc `with router.full_only():` (synchro, pages et données du lecteur, lecteur web, notes Nextcloud) en 404, flux et tuiles personnels, filtre « Masquer les livres lus » et création de comptes coupés ; la vue web masque les entrées du lecteur (marqueurs `{{display}}`, `data-mode`, `data-accounts` du menu, `PageKit.features()` / `PageKit.reader()` côté JS). Avec `OPDS_AUTH=true`, la connexion reste possible avec les comptes existants.
 * `OPDS_SESSION_SECRET` : Clé de signature des cookies de session (par défaut, clé aléatoire écrite dans `session.secret` à côté de la DB de synchro).
 * `GENRES_CONFIG_PATH` : Fichier TOML de genres complétant `genres.toml` (mêmes clés, prioritaire).
 * `METADATA_CONFIG_PATH` : Fichier TOML de règles auteurs/séries complétant `metadata.toml` (mêmes clés, prioritaire).

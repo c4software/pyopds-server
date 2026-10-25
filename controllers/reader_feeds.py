@@ -30,7 +30,9 @@ class ReadFilter:
 
 
 def _user(request_handler) -> str | None:
-    return getattr(request_handler, 'opds_user', None)
+    """Signed-in reader whose feeds, tiles and filter are shown (none in minimal mode)."""
+    from controllers.features import minimal_mode
+    return None if minimal_mode() else getattr(request_handler, 'opds_user', None)
 
 
 def _state(user: str) -> ReadingState:

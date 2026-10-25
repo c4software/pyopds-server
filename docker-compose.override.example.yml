@@ -30,6 +30,7 @@ services:
     # ── Other settings (see the README's environment variables) ─────────
     # environment:
     #   - REGISTRATION_DISABLED=true
+    #   - MINIMAL_MODE=true      # catalog and its web view only (no sync, no web reader)
     #   - PAGE_SIZE=50
 
     # ── Example: frontal (~/stacks), the host's common base and a fixed name ──

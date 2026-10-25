@@ -55,6 +55,21 @@
         return Boolean(error) && (error.status === 401 || error.status === 200);
     }
 
+    /**
+     * Enabled parts of the server (menu attributes, controllers/features.py): {minimal} (MINIMAL_MODE: catalog
+     * only, no web reader nor reader's data) and {accounts} (signing in offered).
+     */
+    function features() {
+        const nav = document.getElementById('site-nav');
+        const data = nav ? nav.dataset : {};
+        return { minimal: data.mode === 'minimal', accounts: data.accounts !== 'off' };
+    }
+
+    /** Signed-in reader whose data the web UI shows (session user, none in minimal mode), else null. */
+    function reader() {
+        return features().minimal ? null : window.SyncAccount.sessionUser();
+    }
+
     // lucide replaces the <i data-lucide> placeholders by SVGs: run after each render of `component` that may
     // add some (placeholders are never Alpine roots nor bound elements, so the replacement never breaks a binding)
     function icons(component) {
@@ -63,6 +78,6 @@
 
     window.PageKit = {
         formatDate: formatDate, encodePath: encodePath, libraryLinks: libraryLinks, fetchJson: fetchJson, signedOut: signedOut,
-        icons: icons,
+        icons: icons, features: features, reader: reader,
     };
 })();

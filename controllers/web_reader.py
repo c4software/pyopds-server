@@ -18,6 +18,7 @@ import os
 import re
 import zipfile
 
+from controllers.http_io import not_modified_since
 from controllers.reading_activity import HISTORY_BYTES, HISTORY_DAYS, lenient_b64decode, longest_streak
 from controllers.webui import IMMUTABLE, WebUIController
 
@@ -190,7 +191,7 @@ class WebReaderController(WebUIController):
         name = self._query('entry')
         try:
             mtime = int(os.path.getmtime(epub))
-            if self._not_modified_since(mtime):
+            if not_modified_since(self.request, mtime):
                 self._send_body(b'', None, 304, self._file_headers(mtime))
                 return
             with zipfile.ZipFile(epub) as archive:

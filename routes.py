@@ -3,6 +3,7 @@ HTTP routing system for the OPDS server.
 Defines routes and router inspired by Laravel routing.
 """
 
+import contextlib
 import re
 
 from controllers.clippings import ClippingsController
@@ -36,6 +37,8 @@ class Route:
         self.controller_class, self.action = controller_action
         self.name = name
         self.auth = auth
+        # Part of the full server only: answers 404 in minimal mode (MINIMAL_MODE=true, controllers/features.py)
+        self.full = False
 
     def matches(self, method, path):
         """Check if this route matches the given method and path."""
@@ -68,6 +71,14 @@ class Router:
         self.routes.append(Route('DELETE', pattern, controller_action, name, auth))
         return self
 
+    @contextlib.contextmanager
+    def full_only(self):
+        """Routes registered inside the block are turned off in minimal mode (catalog and XSLT web view only)."""
+        start = len(self.routes)
+        yield self
+        for route in self.routes[start:]:
+            route.full = True
+
     def find_route(self, method, path):
         """Find matching route for given method and path."""
         for route in self.routes:
@@ -77,7 +88,8 @@ class Router:
 
 
 def register_routes(router):
-    """Register every route; catalog and web UI routes take auth='opds' (reader identified, required when OPDS_AUTH=true)."""
+    """Register every route; catalog and web UI routes take auth='opds' (reader identified, required when OPDS_AUTH=true).
+    Routes inside `router.full_only()` blocks are off in minimal mode (MINIMAL_MODE=true)."""
     opds = 'opds'
     # OPDS Catalog Routes
     router.get('/', (OPDSController, 'redirect_to_opds'), name='home', auth=opds)
@@ -88,9 +100,10 @@ def register_routes(router):
     router.get('/opds/books', (OPDSController, 'show_all_books'), name='opds.books', auth=opds)
     router.get('/opds/recent', (OPDSController, 'show_recent_books'), name='opds.recent', auth=opds)
     # Depends on the reader: an account is always required (sign-in page or HTTP Basic)
-    router.get('/opds/recommendations', (OPDSController, 'show_recommendations'), name='opds.recommendations', auth='user')
-    router.get('/opds/reading', (ReaderFeedsController, 'show_reading'), name='opds.reading', auth='user')
-    router.get('/opds/series-next', (ReaderFeedsController, 'show_series_next'), name='opds.series-next', auth='user')
+    with router.full_only():
+        router.get('/opds/recommendations', (OPDSController, 'show_recommendations'), name='opds.recommendations', auth='user')
+        router.get('/opds/reading', (ReaderFeedsController, 'show_reading'), name='opds.reading', auth='user')
+        router.get('/opds/series-next', (ReaderFeedsController, 'show_series_next'), name='opds.series-next', auth='user')
     router.get('/opds/by-year', (OPDSController, 'show_by_year_catalog'), name='opds.by-year', auth=opds)
     router.get(r'/opds/by-year/.*', (OPDSController, 'show_year_books'), name='opds.year', auth=opds)
     router.get('/opds/by-author', (OPDSController, 'show_by_author_catalog'), name='opds.by-author', auth=opds)
@@ -108,27 +121,29 @@ def register_routes(router):
     # Covers stay public: the CrossPoint Sync app shows them with <img> tags, without credentials
     router.get(r'/cover/.*', (OPDSController, 'download_cover'), name='opds.cover')
 
-    # Web UI: reading statistics / sync page (data fetched from the sync API by the page)
-    router.get('/reading', (WebUIController, 'reading_page'), name='webui.reading', auth='user')
-    # Reading status of a catalog book for the signed-in reader (book sheet: "Marquer comme lu")
-    router.get('/webui/book-status', (WebUIController, 'book_status'), name='webui.book-status', auth='user')
-    router.put('/webui/book-status', (WebUIController, 'book_status_update'), name='webui.book-status.update', auth='user')
-    # Clippings of the signed-in reader: book sheet, /clippings page and Markdown export
-    router.get('/clippings', (ClippingsController, 'clippings_page'), name='webui.clippings', auth='user')
-    router.get('/webui/clippings', (ClippingsController, 'clippings_list'), name='webui.clippings.list', auth='user')
-    router.get('/webui/clippings/export', (ClippingsController, 'clippings_export'), name='webui.clippings.export', auth='user')
-    # Web reader of the library EPUBs (foliate-js): like /download, the catalog's access rule; the
-    # position and the clippings go through the sync API, the reading time through /webui/reader/session
-    router.get('/read', (WebReaderController, 'reader_page'), name='webui.reader', auth=opds)
-    router.get('/webui/reader/book', (WebReaderController, 'book_info'), name='webui.reader.book', auth=opds)
-    router.get('/webui/reader/file', (WebReaderController, 'book_file'), name='webui.reader.file', auth=opds)
-    router.post('/webui/reader/session', (WebReaderController, 'reading_session'), name='webui.reader.session', auth='user')
-    # KOReader highlights (Export highlights → Nextcloud Notes, this server as host, sync account)
-    notes = '/index.php/apps/notes/api/v1/notes'
-    router.get(notes, (NextcloudNotesController, 'notes_list'), name='nextcloud.notes', auth='user')
-    router.post(notes, (NextcloudNotesController, 'note_create'), name='nextcloud.notes.create', auth='user')
-    router.get(rf'{notes}/(?P<id>\d{{1,18}})', (NextcloudNotesController, 'note_show'), name='nextcloud.notes.show', auth='user')
-    router.put(rf'{notes}/(?P<id>\d{{1,18}})', (NextcloudNotesController, 'note_update'), name='nextcloud.notes.update', auth='user')
+    # Reader's pages and data, web reader, KOReader notes: not in minimal mode
+    with router.full_only():
+        # Web UI: reading statistics / sync page (data fetched from the sync API by the page)
+        router.get('/reading', (WebUIController, 'reading_page'), name='webui.reading', auth='user')
+        # Reading status of a catalog book for the signed-in reader (book sheet: "Marquer comme lu")
+        router.get('/webui/book-status', (WebUIController, 'book_status'), name='webui.book-status', auth='user')
+        router.put('/webui/book-status', (WebUIController, 'book_status_update'), name='webui.book-status.update', auth='user')
+        # Clippings of the signed-in reader: book sheet, /clippings page and Markdown export
+        router.get('/clippings', (ClippingsController, 'clippings_page'), name='webui.clippings', auth='user')
+        router.get('/webui/clippings', (ClippingsController, 'clippings_list'), name='webui.clippings.list', auth='user')
+        router.get('/webui/clippings/export', (ClippingsController, 'clippings_export'), name='webui.clippings.export', auth='user')
+        # Web reader of the library EPUBs (foliate-js): like /download, the catalog's access rule; the
+        # position and the clippings go through the sync API, the reading time through /webui/reader/session
+        router.get('/read', (WebReaderController, 'reader_page'), name='webui.reader', auth=opds)
+        router.get('/webui/reader/book', (WebReaderController, 'book_info'), name='webui.reader.book', auth=opds)
+        router.get('/webui/reader/file', (WebReaderController, 'book_file'), name='webui.reader.file', auth=opds)
+        router.post('/webui/reader/session', (WebReaderController, 'reading_session'), name='webui.reader.session', auth='user')
+        # KOReader highlights (Export highlights → Nextcloud Notes, this server as host, sync account)
+        notes = '/index.php/apps/notes/api/v1/notes'
+        router.get(notes, (NextcloudNotesController, 'notes_list'), name='nextcloud.notes', auth='user')
+        router.post(notes, (NextcloudNotesController, 'note_create'), name='nextcloud.notes.create', auth='user')
+        router.get(rf'{notes}/(?P<id>\d{{1,18}})', (NextcloudNotesController, 'note_show'), name='nextcloud.notes.show', auth='user')
+        router.put(rf'{notes}/(?P<id>\d{{1,18}})', (NextcloudNotesController, 'note_update'), name='nextcloud.notes.update', auth='user')
     # Page assets only (no library data): public, the sign-in page needs them. One level of
     # sub-folder (static/catalog/: scripts and styles of the catalog XSLT), names checked by the controller
     router.get(r'/static/(?P<name>[^/]+(?:/[^/]+)?)', (WebUIController, 'static_file'), name='webui.static')
@@ -138,8 +153,9 @@ def register_routes(router):
     router.get('/logout', (AuthController, 'logout'), name='auth.logout')
 
     # Sync API, mounted at the root (CrossPoint Sync app: "host:port") and under /koreader/sync (KoReader)
-    for prefix in ('', '/koreader/sync'):
-        register_sync_routes(router, prefix)
+    with router.full_only():
+        for prefix in ('', '/koreader/sync'):
+            register_sync_routes(router, prefix)
 
     return router
 

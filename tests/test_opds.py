@@ -1,6 +1,7 @@
 import base64
 import contextlib
 import datetime
+import email.utils
 import gzip
 import hashlib
 import http.client
@@ -8,6 +9,7 @@ import importlib
 import io
 import json
 import os
+import re
 import shutil
 import socketserver
 import subprocess
@@ -187,7 +189,25 @@ class TestOPDSCatalog(unittest.TestCase):
             script = self._parse_feed(body).find('{http://www.w3.org/1999/xhtml}script')
             self.assertIsNotNone(script, path)
             self.assertRegex(script.get('src'), r'^/static/xslt-polyfill\.min\.js\?v=\d+$')
-            self.assertIn(b'<?xml-stylesheet type="text/xsl" href="/opds_to_html.xslt"?>', body)
+            self.assertRegex(body, rb'<\?xml-stylesheet type="text/xsl" href="/opds_to_html\.xslt\?v=[0-9a-f]{12}"\?>')
+
+    def test_xslt_and_covers_are_cached_by_the_browsers(self):
+        # The feeds name the current XSLT version: cached for good, gzip, ETag on the plain URL
+        _, _, body = self._get('/opds')
+        href = re.search(rb'href="(/opds_to_html\.xslt\?v=([0-9a-f]+))"', body)
+        status, headers, data = self._get(href.group(1).decode(), {'Accept-Encoding': 'gzip'})
+        self.assertEqual((status, headers['Content-Encoding']), (200, 'gzip'))
+        self.assertIn('immutable', headers['Cache-Control'])
+        self.assertIn(b'xsl:stylesheet', gzip.decompress(data))
+        self.assertEqual(headers['ETag'], '"' + href.group(2).decode() + '"')
+        status, headers, _ = self._get('/opds_to_html.xslt?v=old')
+        self.assertEqual(headers['Cache-Control'], 'no-cache')
+        self.assertEqual(self._get('/opds_to_html.xslt', {'If-None-Match': headers['ETag']})[0], 304)
+        # Covers: a week, then revalidated by the EPUB's date
+        epub_date = email.utils.formatdate(os.path.getmtime(os.path.join(self.library_dir.name, 'alpha.epub')), usegmt=True)
+        status, headers, _ = self._get('/cover/alpha.epub', {'If-Modified-Since': epub_date})
+        self.assertEqual((status, headers['Last-Modified']), (304, epub_date))
+        self.assertIn('max-age=604800', headers['Cache-Control'])
 
     def test_served_xslt_versions_its_static_assets(self):
         # Every /static/ script and stylesheet of the XSLT gets ?v=<mtime>: a deployment changes their URLs
@@ -894,6 +914,41 @@ class TestOPDSAuthAndRecommendations(unittest.TestCase):
             self.assertEqual(self._request('GET', '/download/dune.epub', headers=good)[0], 200)
             # Page assets hold no library data: public, the sign-in page needs them
             self.assertEqual(self._request('GET', '/static/reading.js')[0], 200)
+
+    def test_minimal_mode_keeps_the_catalog_only(self):
+        good = basic_header('reader', self.password)
+        browser = {'Accept': 'text/html'}
+        with mock.patch.dict(os.environ, {'MINIMAL_MODE': 'true'}):
+            # Catalog, its web view and the books
+            for path in ('/opds', '/opds/books', '/opds/search?q=dune', '/download/dune.epub', '/static/catalog/main.js'):
+                self.assertEqual(self._request('GET', path)[0], 200, path)
+            # No reader's feeds, tiles nor filter, even signed in
+            status, _, body = self._request('GET', '/opds', headers=good)
+            self.assertEqual(status, 200)
+            self.assertNotIn(b'urn:recommendations', body)
+            self.assertNotIn(b'urn:reading', body)
+            self.assertNotIn(b'facetGroup', self._request('GET', '/opds/books', headers=good)[2])
+            # Pages, web reader and sync APIs are gone
+            for method, path in (('GET', '/reading'), ('GET', '/clippings'), ('GET', '/read?path=dune.epub'),
+                                 ('GET', '/opds/recommendations'), ('GET', '/opds/reading'), ('GET', '/healthz'),
+                                 ('GET', '/users/auth'), ('GET', '/api/v1/progress'), ('GET', '/koreader/sync/users/auth'),
+                                 ('POST', '/users/create'), ('GET', '/webui/book-status?path=dune.epub'),
+                                 ('GET', '/index.php/apps/notes/api/v1/notes')):
+                self.assertEqual(self._request(method, path, headers=good)[0], 404, path)
+            # The web view hides the reader's sections and the sign-in of a public catalog
+            xslt = self._request('GET', '/opds_to_html.xslt')[2].decode('utf-8')
+            self.assertIn('data-mode="minimal"', xslt)
+            self.assertIn('data-accounts="off"', xslt)
+            self.assertRegex(xslt, r'href="/reading" data-nav="reading" class="nav-link hidden ')
+            self.assertIn(b'data-registration="closed"', self._request('GET', '/login', headers=browser)[2])
+            # A private catalog keeps its sign-in, with the existing accounts
+            with mock.patch.dict(os.environ, {'OPDS_AUTH': 'true'}):
+                self.assertEqual(self._request('GET', '/opds')[0], 401)
+                self.assertEqual(self._request('GET', '/opds', headers=good)[0], 200)
+                self.assertIn('data-accounts="on"', self._request('GET', '/opds_to_html.xslt', headers=good)[2].decode('utf-8'))
+        xslt = self._request('GET', '/opds_to_html.xslt')[2].decode('utf-8')
+        self.assertIn('data-mode="full"', xslt)
+        self.assertRegex(xslt, r'href="/reading" data-nav="reading" class="nav-link flex ')
 
     def test_browsers_sign_in_with_a_session(self):
         browser = {'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8'}

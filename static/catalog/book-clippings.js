@@ -29,7 +29,7 @@
     async function show(path) {
         block.hidden = true;
         list.replaceChildren();
-        current = window.SyncAccount.sessionUser() ? path : null;
+        current = window.PageKit.reader() ? path : null;
         if (!current) return;
         try {
             const data = await window.PageKit.fetchJson('/webui/clippings?path=' + encodeURIComponent(path));

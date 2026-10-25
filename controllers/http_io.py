@@ -1,5 +1,6 @@
 """HTTP plumbing shared by the controllers: request bodies (announced size checked against a limit,
 then raw bytes or JSON) and complete responses."""
+import email.utils
 import json
 from collections.abc import Iterable, Mapping
 
@@ -47,9 +48,21 @@ def send_body(request_handler, body: bytes = b'', content_type: str | None = Non
         request_handler.wfile.write(body)
 
 
+def not_modified_since(request_handler, mtime: float) -> bool:
+    """Whether the browser's copy (If-Modified-Since) is as recent as `mtime` (unix seconds)."""
+    header = request_handler.headers.get('If-Modified-Since')
+    if not header:
+        return False
+    try:
+        since = email.utils.parsedate_to_datetime(header).timestamp()
+    except (TypeError, ValueError, IndexError):
+        return False
+    return int(mtime) <= since
+
+
 def redirect(request_handler, location: str, status: int = 302, headers: Iterable[tuple[str, str]] = ()) -> None:
     """Redirect to `location` (extra headers as (name, value) pairs, e.g. Set-Cookie)."""
     send_body(request_handler, status=status, headers=[('Location', location), *headers])
 
 
-__all__ = ['content_length', 'read_body', 'read_json', 'redirect', 'send_body']
+__all__ = ['content_length', 'not_modified_since', 'read_body', 'read_json', 'redirect', 'send_body']

@@ -3,7 +3,7 @@ import os
 import socketserver
 from urllib.parse import urlparse
 
-from controllers import opds_auth
+from controllers import features, opds_auth
 from controllers.opds import LIBRARY_DIR, OPDSController, PAGE_SIZE
 from routes import Router, register_routes
 
@@ -51,6 +51,8 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
         # Find matching route
         route = self.router.find_route(method, path)
 
+        if route and route.full and features.minimal_mode():
+            route = None
         if route:
             # Authentication middleware (sets self.opds_user, answers 401 itself when refused)
             if not opds_auth.guard(self, route.auth):

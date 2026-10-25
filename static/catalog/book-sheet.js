@@ -114,7 +114,7 @@
         // Web reader of a library EPUB
         const path = bookPath(link);
         const read = document.getElementById('book-dialog-open');
-        read.hidden = !path;
+        read.hidden = !path || window.PageKit.features().minimal;
         if (path) read.href = window.PageKit.libraryLinks(path, title).read;
 
         const summary = bookField(link, 'summary');

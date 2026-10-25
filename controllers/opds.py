@@ -1,5 +1,7 @@
 """OPDS catalog HTTP handler and helpers."""
 import datetime
+import email.utils
+import gzip
 import hashlib
 import heapq
 import os
@@ -12,11 +14,13 @@ from collections.abc import Collection
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from controllers.genres import genre_key, get_genre_config, normalize_genres
-from controllers.http_io import redirect, send_body
+from controllers.http_io import not_modified_since, redirect, send_body
 from controllers.metadata_rules import author_key, normalize_author_name, normalize_series_name
 
 LIBRARY_DIR = os.environ.get('LIBRARY_DIR', 'books')
 PAGE_SIZE = int(os.environ.get('PAGE_SIZE', 25))
+# Covers: a week in the browsers, then a cheap revalidation (Last-Modified of the EPUB) for a month more
+COVER_CACHE = 'public, max-age=604800, stale-while-revalidate=2592000'
 # Covers shown as an animated mosaic in the background of the web view navigation tiles
 # (always listed; the web view only loads them when the viewer enables the mosaic)
 MOSAIC_REL = 'urn:pyopds:mosaic-cover'
@@ -391,9 +395,9 @@ class OPDSFeedGenerator:
 
         xml_string = ET.tostring(feed, encoding='unicode', method='xml')
         xml_declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
-        processing_instruction = (
-            '<?xml-stylesheet type="text/xsl" href="/opds_to_html.xslt"?>\n'
-        )
+        # Versioned stylesheet URL: browsers keep it until it changes (controllers.webui.catalog_xslt)
+        from controllers.webui import catalog_xslt_url
+        processing_instruction = f'<?xml-stylesheet type="text/xsl" href="{catalog_xslt_url()}"?>\n'
         return xml_declaration + processing_instruction + xml_string
 
 
@@ -1325,7 +1329,10 @@ class OPDSController:
     def _personal_root_entries(self) -> list[dict]:
         """Tiles of the reader first: « En cours », « Suite de vos séries » (controllers.reader_feeds), then
         « À lire ensuite »."""
+        from controllers.features import minimal_mode
         from controllers.reader_feeds import root_entries
+        if minimal_mode():
+            return []
         recommendations_entry = self._recommendations_root_entry()
         return [*root_entries(self.request), *([recommendations_entry] if recommendations_entry else [])]
 
@@ -1840,6 +1847,13 @@ class OPDSController:
             self._send_error(404, 'File not found')
             return
 
+        # A cover changes with its EPUB: kept a week, then revalidated (304 while the EPUB is unchanged)
+        mtime = os.path.getmtime(file_path)
+        headers = {'Cache-Control': COVER_CACHE, 'Last-Modified': email.utils.formatdate(mtime, usegmt=True)}
+        if not_modified_since(self.request, mtime):
+            send_body(self.request, status=304, headers=headers)
+            return
+
         # Extract cover from EPUB
         cover_data, mime_type = BookMetadata.extract_epub_cover(file_path)
 
@@ -1847,8 +1861,7 @@ class OPDSController:
             self._send_error(404, 'Cover not found in EPUB')
             return
 
-        # Serve the cover image
-        send_body(self.request, cover_data, mime_type, headers={'Cache-Control': 'public, max-age=86400'})
+        send_body(self.request, cover_data, mime_type, headers=headers)
 
     def _handle_opensearch_description(self):
         """Generate and serve OpenSearch description document."""
@@ -1902,20 +1915,27 @@ class OPDSController:
         self._send_xml_response(xml, 'acquisition')
 
     def _serve_xslt(self):
-        # Its /static/... scripts and stylesheets get ?v=<mtime> (like the HTML pages): a deployment
-        # changes their URLs, so a proxy caching static files never serves stale ones. The XSLT
-        # itself is revalidated on every use (no-cache), the versions being computed here.
-        from controllers.webui import STATIC_DIR, include_partials, version_asset_refs
+        # Partials included and /static/... URLs versioned (like the HTML pages) on every request. The feeds
+        # name the current version (?v=, generate_feed): that URL is cached for good, a plain one revalidated (ETag).
+        from controllers.webui import IMMUTABLE, catalog_xslt
         try:
-            xslt_path = os.path.join(STATIC_DIR, 'opds_to_html.xslt')
-            if not os.path.exists(xslt_path):
-                self._send_error(404, "XSLT file not found")
-                return
-            with open(xslt_path, 'r', encoding='utf-8') as f:
-                data = version_asset_refs(include_partials(f.read())).encode('utf-8')
-            send_body(self.request, data, XML_TYPE, headers={'Cache-Control': 'no-cache'})
-        except Exception as exc:
-            self._send_error(500, f"Error serving XSLT file: {exc}")
+            text, version = catalog_xslt()
+        except OSError:
+            self._send_error(404, "XSLT file not found")
+            return
+        requested = parse_qs(urlparse(self.request.path).query).get('v', [''])[0]
+        headers = {
+            'ETag': f'"{version}"', 'Vary': 'Accept-Encoding',
+            'Cache-Control': IMMUTABLE if requested == version else 'no-cache',
+        }
+        if self.request.headers.get('If-None-Match') == f'"{version}"':
+            send_body(self.request, status=304, headers=headers)
+            return
+        data = text.encode('utf-8')
+        if 'gzip' in (self.request.headers.get('Accept-Encoding') or ''):
+            data = gzip.compress(data, compresslevel=6, mtime=0)
+            headers['Content-Encoding'] = 'gzip'
+        send_body(self.request, data, XML_TYPE, headers=headers)
 
     def _send_xml_response(self, xml, catalog_kind):
         send_body(self.request, xml.encode('utf-8'), XML_TYPE)

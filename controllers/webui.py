@@ -2,12 +2,13 @@
 and the reading status of a catalog book (book sheet)."""
 import email.utils
 import gzip
+import hashlib
 import json
 import os
 import re
 from urllib.parse import parse_qs, urlparse
 
-from controllers.http_io import read_json, send_body
+from controllers.http_io import not_modified_since, read_json, send_body
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static')
 
@@ -57,16 +58,35 @@ def version_asset_refs(text: str) -> str:
 
 def include_partials(text: str) -> str:
     """Replace each `<!--#include name key="value"… -->` of a page by static/partials/<name>.html, whose
-    `{{key}}` placeholders take the given values (markup shared by the pages, e.g. their header)."""
+    `{{key}}` placeholders take the given values (markup shared by the pages, e.g. their header), then the
+    enabled parts of the server (`{{mode}}`, `{{accounts}}`: controllers.features.page_flags)."""
+    from controllers.features import page_flags
+
     def include(match: re.Match) -> str:
         with open(os.path.join(STATIC_DIR, 'partials', f'{match.group(1)}.html'), encoding='utf-8') as f:
             partial = f.read()
-        for key, value in PARTIAL_ARG_RE.findall(match.group(2)):
+        for key, value in [*PARTIAL_ARG_RE.findall(match.group(2)), *page_flags().items()]:
             partial = partial.replace('{{' + key + '}}', value)
         # A partial may include others (the page header includes the menu)
         return include_partials(partial)
 
     return PARTIAL_RE.sub(include, text)
+
+
+def catalog_xslt() -> tuple[str, str]:
+    """The catalog XSLT as served (partials included, asset URLs versioned) and its version (hash of the
+    content): the feeds reference it as /opds_to_html.xslt?v=<version>, cached for good by the browsers."""
+    with open(os.path.join(STATIC_DIR, 'opds_to_html.xslt'), encoding='utf-8') as f:
+        text = version_asset_refs(include_partials(f.read()))
+    return text, hashlib.md5(text.encode('utf-8')).hexdigest()[:12]
+
+
+def catalog_xslt_url() -> str:
+    """URL of the catalog XSLT named by the feeds, versioned by its content (plain when unreadable)."""
+    try:
+        return f'/opds_to_html.xslt?v={catalog_xslt()[1]}'
+    except OSError:
+        return '/opds_to_html.xslt'
 
 
 def asset_url(name: str) -> str:
@@ -203,7 +223,7 @@ class WebUIController:
             mtime = int(os.path.getmtime(path))
             last_modified = email.utils.formatdate(mtime, usegmt=True)
             # Unchanged since the browser's copy: no body (the XSLT polyfill weighs 1.5 MB)
-            if match.group(1) != 'html' and self._not_modified_since(mtime):
+            if match.group(1) != 'html' and not_modified_since(self.request, mtime):
                 send_body(self.request, status=304,
                           headers={'Last-Modified': last_modified, 'Cache-Control': self._cache_control()})
                 return
@@ -232,16 +252,6 @@ class WebUIController:
     def _cache_control(self) -> str:
         """Versioned asset URLs are immutable; plain ones are revalidated (Last-Modified)."""
         return IMMUTABLE if 'v=' in self.request.path.partition('?')[2] else 'no-cache'
-
-    def _not_modified_since(self, mtime: int) -> bool:
-        header = self.request.headers.get('If-Modified-Since')
-        if not header:
-            return False
-        try:
-            since = email.utils.parsedate_to_datetime(header).timestamp()
-        except (TypeError, ValueError, IndexError):
-            return False
-        return mtime <= since
 
     def _send_error(self, code: int, message: str) -> None:
         self._send_body(message.encode('utf-8'), 'text/plain; charset=utf-8', code)

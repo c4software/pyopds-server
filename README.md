@@ -25,6 +25,7 @@ If you browse your OPDS feed in a web browser, it will display a simple HTML rep
 - **Reading Sync API**: KOSync-compatible progress sync for KoReader and CrossPoint / CrossInk readers.
 - **CrossPoint Sync Compatible**: Implements the [crosspoint-sync](https://github.com/crosspoint-reader/crosspoint-sync) extensions (`/api/v1`): the CrossPoint Sync app shows your library, reading statuses, statistics, activity and clippings, and CrossPoint readers sync rich positions and clippings.
 - **Accounts**: the catalog is public; readers can sign in (or create an account) from the web UI or with HTTP Basic in their reading app, with the same account as the sync. `OPDS_AUTH=true` makes the whole catalog private.
+- **Minimal mode**: `MINIMAL_MODE=true` keeps the OPDS catalog and its web view only (no sync, no web reader, no reader pages).
 - **« À lire ensuite » Recommendations**: once signed in, a tile and feed (`/opds/recommendations`) suggest unread books of the library from your reading sync history, computed locally.
 - **Personal shelves**: once signed in, the root catalog starts with « En cours » (books being read) and « Suite de vos séries » (next volume of your series), and every book list can hide the books you finished (« Masquer les livres lus »).
 - **Docker Deployment**: Prebuilt multi-arch image (`ghcr.io/c4software/pyopds-server`) published on each release, a versioned `docker-compose.yml` and a git-ignored override for your own settings.
@@ -134,6 +135,7 @@ The following environment variables can be set:
 - **KOREADER_SYNC_DB_PATH**: Path to the SQLite database file used by the KoReader sync helper (default: `koreader_sync.db`).
 - **REGISTRATION_DISABLED**: Set to `true` to refuse new accounts, from the readers as well as from the web sign-in page (default: registration open).
 - **OPDS_AUTH**: Set to `true` to make the whole catalog and web UI private (default: public catalog, optional sign-in). See [Accounts and sign-in](#accounts-and-sign-in).
+- **MINIMAL_MODE**: Set to `true` for a minimal server: the OPDS catalog and its web view (XSLT: browsing, search, book sheet, download) only. The sync APIs (KOSync, CrossPoint Sync, Nextcloud Notes), the reading and clippings pages, the web reader, the reader's feeds and tiles (« En cours », « Suite de vos séries », « À lire ensuite », « Masquer les livres lus », « Marquer comme lu ») and the account creation answer 404 or disappear from the web view; the stored data is kept for when the mode is turned off. With `OPDS_AUTH=true` the sign-in stays, with the existing accounts (default: full server).
 - **OPDS_SESSION_SECRET**: Key signing the browser sessions (default: a random key written once to `session.secret` next to the sync database).
 - **GENRES_CONFIG_PATH**: Path to a custom genre file completing [`genres.toml`](genres.toml), with the same format: its subject-to-genre aliases and ignored subjects are added to the default ones (and win over them), and its `min_books` overrides the default threshold. Restart the server after editing it. Example (for instance in the mounted `config/` folder):
 
