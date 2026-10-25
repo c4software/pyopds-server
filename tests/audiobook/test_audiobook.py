@@ -5,6 +5,7 @@ import http.server
 import importlib
 import io
 import json
+import math
 import os
 import tempfile
 import threading
@@ -19,12 +20,22 @@ from support import ThreadedTCPServer, basic_header, http_request, create_chapte
 
 def silent_wav(seconds: float = 0.5) -> bytes:
     """WAV recording of `seconds` of silence (16 kHz, mono)."""
+    return tone_wav(seconds, amplitude=0)
+
+
+def tone_wav(seconds: float = 1.0, amplitude: int = 3000, rate: int = 16000, channels: int = 1, silence: float = 0.0) -> bytes:
+    """WAV recording of a 220 Hz tone of `seconds`, between `silence` seconds of silence."""
+    frames = []
+    for i in range(int(rate * (seconds + 2 * silence))):
+        t = i / rate
+        value = round(amplitude * math.sin(2 * math.pi * 220 * t)) if silence <= t < silence + seconds else 0
+        frames.extend([value] * channels)
     out = io.BytesIO()
     with wave.open(out, 'wb') as recording:
-        recording.setnchannels(1)
+        recording.setnchannels(channels)
         recording.setsampwidth(2)
-        recording.setframerate(16000)
-        recording.writeframes(b'\0\0' * int(16000 * seconds))
+        recording.setframerate(rate)
+        recording.writeframes(b''.join(v.to_bytes(2, 'little', signed=True) for v in frames))
     return out.getvalue()
 
 
@@ -40,7 +51,7 @@ class FakeSpeechServer(http.server.BaseHTTPRequestHandler):
         if 'erreur' in body['input']:
             self._answer(500, b'{"error": {"message": "GPU indisponible"}}', 'application/json')
         elif body['model'] == 'bigchuck/tts-design':
-            self._answer(200, silent_wav(), 'audio/wav')
+            self._answer(200, tone_wav(), 'audio/wav')
         else:
             self._answer(200, b'RIFF-audio:' + body['input'].encode('utf-8'), 'audio/wav')
 
@@ -234,18 +245,47 @@ class TestAudiobook(unittest.TestCase):
         voice_design = importlib.import_module('controllers.tools.voice_design')
         output = Path(self.db_dir.name, 'voix', 'narratrice.wav')
         with contextlib.redirect_stdout(io.StringIO()) as printed:
-            code = voice_design.main(['narratrice', 'Voix féminine chaude et posée', '--text', 'Il était  une fois.'])
+            code = voice_design.main(['narratrice', 'Voix féminine chaude et posée', '--text', 'Il était  une fois.',
+                                      '--example', 'Bonjour.', '--no-play'])
         self.assertEqual(code, 0)
-        self.assertEqual(output.read_bytes(), silent_wav())
-        self.assertEqual(FakeSpeechServer.requests[-1]['body'], {
+        design, example = FakeSpeechServer.requests[-2:]
+        self.assertEqual(design['body'], {
             'language': 'French', 'model': 'bigchuck/tts-design', 'input': 'Il était une fois.', 'response_format': 'wav',
             'instructions': 'Voix féminine chaude et posée'})
+        # The reference is normalized (24 kHz mono), then the cloning model reads the example with it
+        with wave.open(str(output)) as reference:
+            self.assertEqual((reference.getnchannels(), reference.getframerate()), (1, 24000))
+        self.assertEqual(example['body'], {
+            'language': 'French', 'model': 'bigchuck/tts-base', 'input': 'Bonjour.', 'response_format': 'wav',
+            'reference_audio': base64.b64encode(output.read_bytes()).decode('ascii'), 'reference_text': 'Il était une fois.'})
+        self.assertEqual(Path(self.db_dir.name, 'voix', 'narratrice-exemple.wav').read_bytes(), b'RIFF-audio:Bonjour.')
         # The table to add to the settings, its path relative to the settings folder
         self.assertIn('[clones.narratrice]\naudio = "voix/narratrice.wav"\ntext = "Il était une fois."', printed.getvalue())
         # The server's error is reported
         with contextlib.redirect_stderr(io.StringIO()) as errors:
             self.assertEqual(voice_design.main(['x', 'Voix', '--text', 'Une erreur.', '--output', str(output)]), 1)
         self.assertIn('GPU indisponible', errors.getvalue())
+
+    def test_voice_design_tool_takes_a_recording(self):
+        voice_design = importlib.import_module('controllers.tools.voice_design')
+        recording = Path(self.db_dir.name, 'ma-voix.wav')
+        recording.write_bytes(tone_wav(4.0, amplitude=800, rate=44100, channels=2, silence=1.0))
+        output = Path(self.db_dir.name, 'voix', 'moi.wav')
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = voice_design.main(['moi', '--recording', str(recording), '--text', 'Bonjour à tous.', '--no-play'])
+        self.assertEqual(code, 0)
+        # No design request: the recording itself, normalized, then the example
+        self.assertEqual(FakeSpeechServer.requests[-1]['body']['reference_text'], 'Bonjour à tous.')
+        self.assertNotIn('bigchuck/tts-design', [r['body']['model'] for r in FakeSpeechServer.requests if 'body' in r])
+        with wave.open(str(output)) as reference:
+            self.assertEqual((reference.getnchannels(), reference.getframerate()), (1, 24000))
+            # Silences cut: 4 s of tone and 150 ms kept around it
+            self.assertAlmostEqual(reference.getnframes() / 24000, 4.3, delta=0.05)
+        # A recording needs its transcript; a description and a recording are not both taken
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            voice_design.main(['moi', '--recording', str(recording)])
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            voice_design.main(['moi', 'Voix', '--recording', str(recording), '--text', 'x'])
 
     def test_unconfigured_audiobook_answers_404(self):
         config = importlib.import_module('controllers.audiobook.config')
@@ -259,3 +299,29 @@ class TestAudiobook(unittest.TestCase):
         self.assertIn('/static/reader/audiobook.js?v=', page)
         self.assertIn('class="reader-player"', page)
         self.assertEqual(self._request('GET', '/static/vendor/foliate/tts.js')[0], 200)
+
+
+class TestRecordingNormalization(unittest.TestCase):
+    """Reference recordings of the cloned voices: mono 24 kHz, silences cut, level set."""
+
+    def setUp(self):
+        self.recording = importlib.import_module('controllers.audiobook.recording')
+
+    def test_quiet_stereo_recording_is_normalized(self):
+        normalized = self.recording.normalize(tone_wav(2.0, amplitude=500, rate=44100, channels=2, silence=0.5))
+        samples, rate = self.recording.read_samples(normalized.wav)
+        self.assertEqual(rate, 24000)
+        self.assertAlmostEqual(normalized.seconds, 2.3, delta=0.05)
+        rms = math.sqrt(sum(s * s for s in samples) / len(samples))
+        self.assertAlmostEqual(20 * math.log10(rms), -20.0, delta=0.5)
+        self.assertGreater(normalized.gain_db, 0)
+
+    def test_loud_recording_is_limited_by_its_peak(self):
+        samples, _ = self.recording.read_samples(self.recording.normalize(tone_wav(1.0, amplitude=32000)).wav)
+        self.assertLessEqual(max(abs(s) for s in samples), 10 ** (-1 / 20) + 0.001)
+
+    def test_silent_or_invalid_recordings_are_refused(self):
+        with self.assertRaises(ValueError):
+            self.recording.normalize(silent_wav())
+        with self.assertRaises((wave.Error, EOFError)):
+            self.recording.normalize(b'RIFF-not-a-wav')

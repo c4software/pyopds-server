@@ -21,16 +21,23 @@ In each group one file is kept: the one already read on a reader (known to the s
 
 ## Audiobook voices
 
-A command line tool creates a voice of the audiobook from a written description, without any recording of a real person: the voice design model of the settings (`design_model` of [`audiobook.toml`](../audiobook.toml), Qwen3-TTS « VoiceDesign ») reads a reference text with a voice made from the description, and the recording becomes a cloned voice, read by the cloning model (`clone_model`) for the whole book (see [`AUDIOBOOK_CONFIG_PATH`](installation.md#configuration)).
+A command line tool makes a cloned voice of the audiobook (see [`AUDIOBOOK_CONFIG_PATH`](installation.md#configuration)): a reference recording, normalized, and an example read with it, to listen to before keeping the voice. The reference is a WAV file, either designed from a written description by the voice design model of the settings (`design_model` of [`audiobook.toml`](../audiobook.toml), Qwen3-TTS « VoiceDesign »: no real person's voice), or a recording of your own voice (`--recording`, with its word-for-word transcript `--text`).
 
 ```bash
+# From a description
 python -m controllers.tools.voice_design narrateur "Voix masculine française d'une cinquantaine d'années, grave, chaude et veloutée, légèrement feutrée. Narrateur professionnel de livre audio : diction parfaite, accent français standard, débit posé, intonation naturelle et expressive sans excès."
-python -m controllers.tools.voice_design narratrice "Voix féminine française d'une quarantaine d'années, chaude, douce et légèrement grave, timbre velouté et rassurant. Narratrice professionnelle de livre audio : diction parfaite, accent français standard, débit posé, intonation naturelle et expressive sans excès."
-# In the Docker image: written to /config/voix/<name>.wav, next to AUDIOBOOK_CONFIG_PATH
+# From your own voice: read the reference text below, about fifteen seconds, in a quiet room
+python -m controllers.tools.voice_design moi --recording ma-voix.wav --text "Il était une fois, au bord d'une forêt immense, un vieux meunier qui vivait seul avec son chat. Chaque matin, il ouvrait les volets de son moulin et regardait le soleil se lever sur les champs de blé."
+# In the Docker image: files written to /config/voix/, next to AUDIOBOOK_CONFIG_PATH (nothing played)
 docker exec cops python -m controllers.tools.voice_design narrateur "…"
 ```
 
-The recording (`voix/<name>.wav` next to the settings file, or `--output`) is about fifteen seconds of a fixed French text (`--text` to read another one); the tool prints the `[clones.<name>]` table to add to the settings, then restart the server. The design model invents the voice again on each call: listen to the recording (`aplay voix/narrateur.wav`) and run the tool again until one pleases. Describe the gender, age, timbre, accent and reading style; the descriptions above gave the two voices of the example settings.
+1. **Reference**: designed (about fifteen seconds of a fixed French text, `--text` to read another one) or read from `--recording` (a PCM WAV file, any rate and channels).
+2. **Normalization** (standard library only): mono 24 kHz, DC offset removed, silences cut at both ends (150 ms kept), level set to -20 dBFS RMS with peaks at -1 dBFS at most, 10 ms fades. The cloning model copies the level, the room and the pauses of its reference: a clean, even recording gives a clean voice. A reference of 3 to 20 seconds clones best (a warning is printed otherwise). Written to `voix/<name>.wav` next to the settings file, or `--output`.
+3. **Example**: the cloning model (`clone_model`) reads a short passage with the new voice (`--example` for another text), written to `voix/<name>-exemple.wav`.
+4. **Listening**: the reference, then the example, are played with the first player installed (`aplay`, `paplay`, `afplay`, `ffplay`; `--no-play` to skip; in Docker, copy the files to listen to them).
+
+The tool prints the `[clones.<name>]` table to add to the settings, then restart the server. The design model invents the voice again on each call: run the tool again until the example pleases. Clone only voices you may use: designed ones, yours, or one whose owner agreed.
 
 ## Fixing metadata (genres, authors, titles)
 

@@ -24,4 +24,6 @@ text = "Il était une fois, au bord d'une forêt immense, un vieux meunier qui v
 
 Both read the same text, their transcript (`text`, word for word): « Il était une fois, au bord d'une forêt immense, un vieux meunier qui vivait seul avec son chat. Chaque matin, il ouvrait les volets de son moulin et regardait le soleil se lever sur les champs de blé. »
 
+To make another one (normalized, with an example to listen to): `python -m controllers.tools.voice_design <name> "<description>"`, see [docs/tools.md](../../docs/tools.md#audiobook-voices).
+
 Only add here voices that anyone may use: designed from a description, or recorded by someone who agreed to share their voice.
