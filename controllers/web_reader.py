@@ -6,7 +6,7 @@ position, the clippings and the statistics are those of the sync account (KOSync
 formats), so that the web reader, KOReader and CrossPoint readers continue each other:
 - position: PUT /api/v1/progress by the page (KOReader XPointer, CrossPoint rich position);
 - clippings: /api/v1/clippings/{document} by the page (CrossPoint offsets: visible code points of a spine item);
-- statistics: POST /webui/reader/session, added up here into the snapshots of one "web reader" device
+- statistics: POST /webui/reader/session, added up here into the snapshots of the browser's sync device
   (CrossPoint Sync statistics: totals, time of day, day of week, reading days, daily seconds).
 """
 import base64
@@ -15,14 +15,18 @@ import email.utils
 import gzip
 import mimetypes
 import os
+import re
 import zipfile
 
 from controllers.reading_activity import HISTORY_BYTES, HISTORY_DAYS, lenient_b64decode, longest_streak
 from controllers.webui import IMMUTABLE, WebUIController
 
-# Statistics device of the web reader (every browser of the account adds to it)
-WEB_DEVICE_ID = 'pyopds-web-reader'
-WEB_DEVICE_NAME = 'Lecteur web'
+# Statistics device of the first web reader version (every browser of the account added to it): its
+# statistics go to the first browser that sends its own, shown then as one device with its position
+LEGACY_DEVICE_ID = 'pyopds-web-reader'
+# Sync device of a browser (static/reader/sync.js): its statistics are those of its position
+BROWSER_DEVICE_ID_RE = re.compile(r'^web-[0-9a-f]{8,32}$')
+DEVICE_NAME_MAX = 64
 # Schema version of the statistics snapshots (crosspoint-sync stats_v5)
 STATS_VERSION = 5
 # Day 0 of the reading-day bitmaps (CrossPoint: days since 2000-01-01)
@@ -212,12 +216,13 @@ class WebReaderController(WebUIController):
         self._send_body(data, content_type, 200, headers)
 
     def reading_session(self) -> None:
-        """POST /webui/reader/session {path, seconds, pages, new_session, completed, tz}: add reading time
-        to the statistics of the web reader device (book and global snapshots, daily seconds).
+        """POST /webui/reader/session {path, seconds, pages, new_session, completed, tz, device_id, device}:
+        add reading time to the statistics of the browser's sync device (book and global snapshots, daily seconds).
 
         seconds: reading time since the last upload (at most an hour); pages: pages turned forward;
         new_session: first upload of a reading session; completed: the end of the book is reached;
-        tz: Date#getTimezoneOffset() of the browser (minutes behind UTC), for the day and the hour.
+        tz: Date#getTimezoneOffset() of the browser (minutes behind UTC), for the day and the hour;
+        device_id, device: the browser as a sync device ("web-…", "Navigateur (Android)").
         """
         from controllers.koreader_sync import get_sync_storage
         from controllers.sync_storage import now_seconds
@@ -232,6 +237,8 @@ class WebReaderController(WebUIController):
             and isinstance(body.get('new_session'), bool)
             and isinstance(body.get('completed'), bool)
             and isinstance(body.get('tz'), int) and not isinstance(body.get('tz'), bool) and abs(body['tz']) <= TZ_OFFSET_MAX
+            and isinstance(body.get('device_id'), str) and BROWSER_DEVICE_ID_RE.match(body['device_id']) is not None
+            and isinstance(body.get('device'), str) and 0 < len(body['device'].strip()) <= DEVICE_NAME_MAX
         )
         if not valid:
             self._send_json({'message': 'Champs invalides'}, 400)
@@ -249,7 +256,9 @@ class WebReaderController(WebUIController):
         })
         local = datetime.datetime.fromtimestamp(now_seconds() - body['tz'] * 60, datetime.UTC)
         date = local.date().isoformat()
-        global_stats, book_stats, day_seconds = storage.device_stats(user, WEB_DEVICE_ID, document, date)
+        device_id, device = body['device_id'], body['device'].strip()
+        storage.move_device_stats(user, LEGACY_DEVICE_ID, device_id)
+        global_stats, book_stats, day_seconds = storage.device_stats(user, device_id, document, date)
         session = {
             'seconds': body['seconds'], 'pages': body['pages'], 'new_session': body['new_session'],
             'completed': body['completed'], 'local': local,
@@ -257,9 +266,9 @@ class WebReaderController(WebUIController):
         }
         book_payload = add_to_book_stats(book_stats, session)
         global_payload = add_to_global_stats(global_stats, session)
-        storage.store_book_stats(user, WEB_DEVICE_ID, [{'document': document, **book_payload}])
+        storage.store_book_stats(user, device_id, [{'document': document, **book_payload}])
         daily = [{'date': date, 'seconds': day_seconds + body['seconds']}] if body['seconds'] else []
-        storage.store_global_stats(user, WEB_DEVICE_ID, WEB_DEVICE_NAME, global_payload, daily)
+        storage.store_global_stats(user, device_id, device, global_payload, daily)
         self._send_json({'document': document, 'seconds': book_payload['seconds'], 'pages': book_payload['pages']})
 
     def _epub(self, relative: str) -> tuple[str, str] | None:
@@ -293,6 +302,6 @@ class WebReaderController(WebUIController):
 
 
 __all__ = [
-    'WEB_DEVICE_ID', 'WEB_DEVICE_NAME', 'WebReaderController', 'add_to_book_stats', 'add_to_global_stats',
+    'LEGACY_DEVICE_ID', 'WebReaderController', 'add_to_book_stats', 'add_to_global_stats',
     'history_day', 'mark_reading_day', 'time_of_day',
 ]

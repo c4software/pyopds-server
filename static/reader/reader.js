@@ -68,6 +68,8 @@
             let reader = null;
             let highlights = null;
             let tracker = null;
+            let awake = null;
+            let fullscreenAsked = false;
             let current = null;
             let selection = null;
             let pushTimer = null;
@@ -132,12 +134,15 @@
                     PyReader.settings.apply(reader.view, this.settings);
                     this.wire();
                     tracker = PyReader.stats.track(this.path, this.signedIn);
+                    awake = PyReader.wake.keep();
                     if (this.signedIn && info.document) {
                         highlights = PyReader.highlights.create(reader, info.document, () => this.refreshClips());
                         highlights.load().catch(() => this.showNotice('Surlignages indisponibles pour le moment.'));
                     }
                     await this.openAtLastPosition();
                     this.loading = false;
+                    // Phones and tablets read full screen: the bars come back with a tap
+                    if (touchScreen) this.chrome = false;
                     window.PageKit.icons(this);
                 },
 
@@ -257,6 +262,7 @@
                     this.tocCurrent = detail.tocItem ? detail.tocItem.href : '';
                     this.runningHeads(chapter, page, detail.fraction || 0);
                     if (!opened) return;
+                    if (awake) awake.activity();
                     PyReader.sync.keepLocal(this.path, detail.cfi, detail.fraction || 0);
 
                     // Statistics: pages turned forward by the reader (jumps are not reading)
@@ -335,6 +341,12 @@
                     }
                 },
 
+                /** The reader is reading: counted by the statistics, the screen stays on. */
+                active() {
+                    if (tracker) tracker.activity();
+                    if (awake) awake.activity();
+                },
+
                 next() { if (reader) reader.view.goRight(); },
                 prev() { if (reader) reader.view.goLeft(); },
                 forward() { if (reader) reader.view.next(); },
@@ -342,7 +354,7 @@
 
                 key(event) {
                     if (!reader || editable(event.target) || event.ctrlKey || event.metaKey || event.altKey) return;
-                    if (tracker) tracker.activity();
+                    this.active();
                     const actions = {
                         ArrowLeft: () => this.prev(), ArrowRight: () => this.next(),
                         PageDown: () => this.forward(), PageUp: () => this.backward(),
@@ -421,9 +433,14 @@
                  */
                 tapAt(x, y) {
                     if (!reader) return;
-                    if (tracker) tracker.activity();
+                    this.active();
                     const box = this.$refs.book.getBoundingClientRect();
                     const side = this.inBarsBand(y) ? 0.5 : (x - box.left) / (box.width || 1);
+                    // A phone reads full screen: entered on the first tap (a user gesture is required)
+                    if (this.fullscreenAvailable && !fullscreenAsked) {
+                        fullscreenAsked = true;
+                        this.enterFullscreen();
+                    }
                     // After the highlight hit test of foliate (same click), which opens the clipping instead
                     setTimeout(() => {
                         if (this.editor) return;

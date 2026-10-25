@@ -1304,7 +1304,11 @@ class TestWebReader(unittest.TestCase):
         self.assertEqual(self._request('GET', '/webui/reader/book?path=absent.epub')[0], 404)
 
     def test_reading_session_adds_to_the_web_reader_statistics(self):
-        session = {'path': 'Romans/roman.epub', 'seconds': 120, 'pages': 4, 'new_session': True, 'completed': False, 'tz': -120}
+        session = {'path': 'Romans/roman.epub', 'seconds': 120, 'pages': 4, 'new_session': True, 'completed': False, 'tz': -120,
+                   'device_id': 'web-0123456789abcdef', 'device': 'Navigateur (Android)'}
+        # Statistics of the first web reader version (one device for every browser): given to the first browser
+        storage = self.koreader_sync.SyncControllerBase._sync_storage_instance
+        storage.store_global_stats('liseur', self.web_reader.LEGACY_DEVICE_ID, 'Lecteur web', {'v': 5}, [{'date': '2026-01-01', 'seconds': 5}])
         # An account is always required
         self.assertEqual(self._request('POST', '/webui/reader/session', session)[0], 401)
         status, _, body = self._request('POST', '/webui/reader/session', session, self._auth())
@@ -1317,9 +1321,10 @@ class TestWebReader(unittest.TestCase):
         _, _, body = self._request('GET', '/api/v1/stats/summary', headers=self._sync_headers())
         summary = json.loads(body)
         self.assertEqual((summary['sessions'], summary['seconds'], summary['pages'], summary['completed']), (1, 180, 6, 1))
-        self.assertEqual(summary['devices'][0]['device'], 'Lecteur web')
+        # The browser is one device: its statistics and its position (PUT /api/v1/progress) go together
+        self.assertEqual([(d['device_id'], d['device']) for d in summary['devices']], [('web-0123456789abcdef', 'Navigateur (Android)')])
         self.assertEqual(summary['current_streak'], 1)
-        self.assertEqual(sum(day['seconds'] for day in summary['daily']), 180)
+        self.assertEqual(sum(day['seconds'] for day in summary['daily']), 185)
         _, _, body = self._request('GET', f'/api/v1/stats/books/{document}', headers=self._sync_headers())
         combined = json.loads(body)['combined']
         self.assertEqual((combined['seconds'], combined['pages'], combined['completed'], combined['avg_fwd']), (180, 6, True, 30))
@@ -1329,7 +1334,8 @@ class TestWebReader(unittest.TestCase):
         self.assertEqual(json.loads(body)['items'], [])
         # Invalid uploads
         for bad in ({**session, 'seconds': 7200}, {**session, 'pages': -1}, {**session, 'tz': 'x'},
-                    {**session, 'new_session': 1}, {**session, 'path': 'absent.epub'}):
+                    {**session, 'new_session': 1}, {**session, 'path': 'absent.epub'}, {**session, 'device_id': 'cp-1'},
+                    {**session, 'device': ' '}):
             self.assertIn(self._request('POST', '/webui/reader/session', bad, self._auth())[0], (400, 404))
 
     def test_statistics_helpers(self):

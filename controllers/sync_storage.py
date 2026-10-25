@@ -1004,6 +1004,22 @@ class SyncStorage:
             ]
         return devices, daily
 
+    def move_device_stats(self, user: str, source: str, target: str) -> bool:
+        """Give a device's statistics (global, books, days) to another device that has none yet; False otherwise."""
+        with self._get_connection() as conn:
+            exists = conn.execute(
+                'SELECT 1 FROM stats_device_global WHERE user = ? AND device_id = ?', (user, target)
+            ).fetchone()
+            if exists:
+                return False
+            moved = conn.execute(
+                'UPDATE stats_device_global SET device_id = ? WHERE user = ? AND device_id = ?', (target, user, source)
+            ).rowcount
+            if moved:
+                for table in ('stats_device_book', 'stats_device_day'):
+                    conn.execute(f'UPDATE {table} SET device_id = ? WHERE user = ? AND device_id = ?', (target, user, source))
+        return moved > 0
+
     def device_stats(self, user: str, device_id: str, document: str, date: str) -> tuple[dict | None, dict | None, int]:
         """One device's snapshots: global statistics, statistics of a book (None when never sent) and
         reading seconds of a day ('YYYY-MM-DD', 0 when none)."""

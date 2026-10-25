@@ -1,6 +1,6 @@
 // Web reader: reading time for the statistics of the sync account. Counts the seconds the page is
 // visible while the reader is active (a page turned, a key, a tap or a scroll in the last minutes) and
-// the pages turned forward, then adds them to the "web reader" device (POST /webui/reader/session)
+// the pages turned forward, then adds them to this browser's sync device (POST /webui/reader/session)
 // every minute and when the page is hidden or closed. A pause of more than 10 minutes starts a new
 // reading session.
 (function () {
@@ -44,10 +44,12 @@
         async function flush(keepalive) {
             state.lastFlush = Date.now();
             const seconds = Math.min(Math.floor(state.seconds), SESSION_SECONDS_MAX);
+            const device = PyReader.sync.thisDevice();
             if (!signedIn || state.sending || (seconds < 1 && !state.pages)) return;
             const body = {
                 path: path, seconds: seconds, pages: state.pages, new_session: state.newSession && seconds > 0,
                 completed: state.completed, tz: new Date().getTimezoneOffset(),
+                device_id: device.id, device: device.name,
             };
             state.seconds -= seconds;
             state.pages = 0;
