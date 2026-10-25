@@ -9,11 +9,10 @@
 The root catalog shows the feeds as tiles first (with « À lire ensuite »); OPDS clients without
 credentials see them too, opening them asks for the account (routes with auth='user').
 """
-from dataclasses import dataclass, field
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from controllers.opds import (
-    ACQUISITION_FEED, START_LINK, OPDSController, format_series_index, navigation_tile, prepend_summary,
+    ACQUISITION_FEED, START_LINK, OPDSController, ReadFilter, format_series_index, navigation_tile, prepend_summary,
 )
 from controllers.reading_state import ReadingState, ReadingStateService
 
@@ -22,17 +21,8 @@ HIDE_READ_PREFERENCE = 'hide_read'
 READ_FACET_GROUP = 'Livres lus'
 
 
-@dataclass
-class ReadFilter:
-    """Books left out of a list (`exclude`, EPUB paths) and the facet links that toggle the filter."""
-    exclude: frozenset[str] = frozenset()
-    links: list[tuple] = field(default_factory=list)
-
-
 def _user(request_handler) -> str | None:
-    """Signed-in reader whose feeds, tiles and filter are shown (none in minimal mode)."""
-    from controllers.features import minimal_mode
-    return None if minimal_mode() else getattr(request_handler, 'opds_user', None)
+    return getattr(request_handler, 'opds_user', None)
 
 
 def _state(user: str) -> ReadingState:

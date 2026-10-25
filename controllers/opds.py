@@ -6,11 +6,13 @@ import hashlib
 import heapq
 import os
 import random
+import sys
 import time
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape as xml_escape
 import zipfile
 from collections.abc import Collection
+from dataclasses import dataclass, field
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from controllers.genres import genre_key, get_genre_config, normalize_genres
@@ -401,6 +403,14 @@ class OPDSFeedGenerator:
         return xml_declaration + processing_instruction + xml_string
 
 
+@dataclass
+class ReadFilter:
+    """Books left out of a list (`exclude`, EPUB paths) and the facet links that toggle the filter
+    (« Masquer les livres lus », controllers.reader_feeds)."""
+    exclude: frozenset[str] = frozenset()
+    links: list[tuple] = field(default_factory=list)
+
+
 class BookScanner:
     """Scanner for EPUB files with caching."""
     
@@ -438,13 +448,12 @@ class BookScanner:
         self._path_index = None
         self._recent_books_cache = None
         self._recent_books_cache_time = 0
-        # Series feeds, reading states and recommendations are derived from the library indexes
-        from controllers.library_index import LibraryIndex
-        LibraryIndex.get_instance().invalidate()
-        from controllers.reading_state import ReadingStateService
-        ReadingStateService.get_instance().invalidate()
-        from controllers.recommendations import RecommendationService
-        RecommendationService.get_instance().invalidate()
+        # Series feeds, reading states and recommendations are derived from the library indexes (modules
+        # loaded on first use: one never loaded caches nothing, e.g. the reader's ones in minimal mode)
+        for module, service in (('controllers.library_index', 'LibraryIndex'), ('controllers.reading_state', 'ReadingStateService'),
+                                ('controllers.recommendations', 'RecommendationService')):
+            if module in sys.modules:
+                getattr(sys.modules[module], service).get_instance().invalidate()
     
     def _create_book_info_from_path(self, path: str) -> dict:
         """Create book info dict from file path. Used to avoid code duplication."""
@@ -1330,9 +1339,9 @@ class OPDSController:
         """Tiles of the reader first: « En cours », « Suite de vos séries » (controllers.reader_feeds), then
         « À lire ensuite »."""
         from controllers.features import minimal_mode
-        from controllers.reader_feeds import root_entries
         if minimal_mode():
             return []
+        from controllers.reader_feeds import root_entries
         recommendations_entry = self._recommendations_root_entry()
         return [*root_entries(self.request), *([recommendations_entry] if recommendations_entry else [])]
 
@@ -1673,7 +1682,10 @@ class OPDSController:
         self._send_xml_response(xml, 'acquisition')
 
     def _read_filter(self):
-        """« Masquer les livres lus » filter of the signed-in reader (controllers.reader_feeds)."""
+        """« Masquer les livres lus » filter of the signed-in reader (controllers.reader_feeds), none in minimal mode."""
+        from controllers.features import minimal_mode
+        if minimal_mode():
+            return ReadFilter()
         from controllers.reader_feeds import read_filter
         return read_filter(self.request)
 

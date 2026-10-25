@@ -4,17 +4,21 @@ Defines routes and router inspired by Laravel routing.
 """
 
 import contextlib
+import importlib
 import re
 
-from controllers.clippings import ClippingsController
-from controllers.crosspoint_sync import CrossPointSyncController
-from controllers.koreader_sync import KoReaderSyncController
-from controllers.nextcloud_notes import NextcloudNotesController
 from controllers.opds import OPDSController
 from controllers.opds_auth import AuthController
-from controllers.reader_feeds import ReaderFeedsController
-from controllers.web_reader import WebReaderController
 from controllers.webui import WebUIController
+
+# Controllers of the full server, imported on their first request: in minimal mode (MINIMAL_MODE=true)
+# their modules (sync, web reader, reader's data) are never loaded
+ClippingsController = 'controllers.clippings.ClippingsController'
+CrossPointSyncController = 'controllers.crosspoint_sync.CrossPointSyncController'
+KoReaderSyncController = 'controllers.koreader_sync.KoReaderSyncController'
+NextcloudNotesController = 'controllers.nextcloud_notes.NextcloudNotesController'
+ReaderFeedsController = 'controllers.reader_feeds.ReaderFeedsController'
+WebReaderController = 'controllers.web_reader.WebReaderController'
 
 
 class Route:
@@ -27,18 +31,26 @@ class Route:
         Args:
             method: HTTP method ('GET', 'POST', 'PUT'.)
             pattern: URL pattern (string or regex)
-            controller_action: Tuple of (controller_class, action_method_name)
+            controller_action: Tuple of (controller class or its dotted path, imported on first use, action method name)
             name: Optional name for the route
             auth: Optional account guard ('opds': catalog, account required when OPDS_AUTH=true;
                 'user': account always required)
         """
         self.method = method
         self.pattern = pattern if isinstance(pattern, re.Pattern) else re.compile(f'^{pattern}$')
-        self.controller_class, self.action = controller_action
+        self._controller, self.action = controller_action
         self.name = name
         self.auth = auth
         # Part of the full server only: answers 404 in minimal mode (MINIMAL_MODE=true, controllers/features.py)
         self.full = False
+
+    @property
+    def controller_class(self):
+        """Controller class of the route, its module imported on the first request."""
+        if isinstance(self._controller, str):
+            module, _, name = self._controller.rpartition('.')
+            self._controller = getattr(importlib.import_module(module), name)
+        return self._controller
 
     def matches(self, method, path):
         """Check if this route matches the given method and path."""

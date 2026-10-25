@@ -10,6 +10,8 @@ import os
 from controllers.opds_auth import is_private
 
 TRUE_VALUES = ('1', 'true', 'yes', 'on')
+# Partials of static/partials/ left out in minimal mode (scripts of the reader's data)
+FULL_PARTIALS = frozenset({'catalog-reader'})
 
 
 def minimal_mode() -> bool:
@@ -32,4 +34,9 @@ def page_flags() -> dict[str, str]:
     }
 
 
-__all__ = ['accounts_enabled', 'minimal_mode', 'page_flags']
+def included_partial(name: str) -> bool:
+    """Whether a partial is part of the pages (the full-server ones are left out in minimal mode)."""
+    return name not in FULL_PARTIALS or not minimal_mode()
+
+
+__all__ = ['FULL_PARTIALS', 'accounts_enabled', 'included_partial', 'minimal_mode', 'page_flags']

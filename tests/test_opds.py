@@ -940,6 +940,7 @@ class TestOPDSAuthAndRecommendations(unittest.TestCase):
             self.assertIn('data-mode="minimal"', xslt)
             self.assertIn('data-accounts="off"', xslt)
             self.assertRegex(xslt, r'href="/reading" data-nav="reading" class="nav-link hidden ')
+            self.assertNotIn('/static/catalog/read-status.js', xslt)
             self.assertIn(b'data-registration="closed"', self._request('GET', '/login', headers=browser)[2])
             # A private catalog keeps its sign-in, with the existing accounts
             with mock.patch.dict(os.environ, {'OPDS_AUTH': 'true'}):
@@ -949,6 +950,19 @@ class TestOPDSAuthAndRecommendations(unittest.TestCase):
         xslt = self._request('GET', '/opds_to_html.xslt')[2].decode('utf-8')
         self.assertIn('data-mode="full"', xslt)
         self.assertRegex(xslt, r'href="/reading" data-nav="reading" class="nav-link flex ')
+        self.assertIn('/static/catalog/read-status.js?v=', xslt)
+
+    def test_minimal_mode_does_not_load_the_full_server_modules(self):
+        # Controllers of the sync, the web reader and the reader's data are imported on their first request only
+        script = ('import sys, server; '
+                  'print(" ".join(sorted(m for m in sys.modules if m.startswith("controllers."))))')
+        env = {**os.environ, 'MINIMAL_MODE': 'true'}
+        loaded = subprocess.run([sys.executable, '-c', script], cwd=PROJECT_ROOT, env=env, capture_output=True,
+                                text=True, check=True).stdout.split()
+        self.assertIn('controllers.opds', loaded)
+        for module in ('controllers.koreader_sync', 'controllers.sync_storage', 'controllers.crosspoint_sync',
+                       'controllers.web_reader', 'controllers.reader_feeds', 'controllers.clippings', 'controllers.online_metadata'):
+            self.assertNotIn(module, loaded)
 
     def test_browsers_sign_in_with_a_session(self):
         browser = {'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8'}

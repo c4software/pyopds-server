@@ -20,10 +20,7 @@ import secrets
 import time
 from urllib.parse import parse_qs, quote
 
-# Module attribute access: tests reload controllers.koreader_sync
 from controllers.http_io import content_length, read_body, redirect, send_body
-from controllers import koreader_sync
-from controllers.sync_storage import md5_hex
 
 REALM = 'PyOPDS'
 CHALLENGE = f'Basic realm="{REALM}", charset="UTF-8"'
@@ -66,17 +63,29 @@ def parse_basic_credentials(header: str | None) -> tuple[str, str] | None:
     return user, password
 
 
+def _sync():
+    """The sync module (accounts, database), imported on first use: a public catalog never loads it
+    (minimal mode). Looked up on each call, tests reload controllers.koreader_sync."""
+    from controllers import koreader_sync
+    return koreader_sync
+
+
+def authenticate(user: str, password: str) -> str | None:
+    """Sync username matching a user name and password, None otherwise (or when the database fails)."""
+    from controllers.sync_storage import md5_hex
+    try:
+        return _sync().get_sync_storage().authenticate(user, md5_hex(password))
+    except Exception:
+        # A broken database must not crash the server: the request is simply refused
+        return None
+
+
 def authenticate_basic(header: str | None) -> str | None:
     """Return the sync username matching the Basic credentials, None otherwise."""
     credentials = parse_basic_credentials(header)
     if credentials is None:
         return None
-    user, password = credentials
-    try:
-        return koreader_sync.get_sync_storage().authenticate(user, md5_hex(password))
-    except Exception:
-        # A broken database must not crash the server: the request is simply refused
-        return None
+    return authenticate(*credentials)
 
 
 def _secret() -> bytes:
@@ -87,7 +96,7 @@ def _secret() -> bytes:
         if configured:
             _session_secret = configured.encode('utf-8')
         else:
-            path = os.path.join(os.path.dirname(os.path.abspath(koreader_sync.KOREADER_SYNC_DB_PATH)), 'session.secret')
+            path = os.path.join(os.path.dirname(os.path.abspath(_sync().KOREADER_SYNC_DB_PATH)), 'session.secret')
             try:
                 with open(path, 'rb') as f:
                     _session_secret = f.read().strip()
@@ -208,7 +217,7 @@ class AuthController:
         """GET /login: sign-in page, with account creation unless REGISTRATION_DISABLED or MINIMAL_MODE."""
         from controllers.webui import WebUIController
         from controllers.features import minimal_mode
-        registration = 'closed' if koreader_sync.REGISTRATION_DISABLED or minimal_mode() else 'open'
+        registration = 'closed' if _sync().REGISTRATION_DISABLED or minimal_mode() else 'open'
         WebUIController(self.request).serve_page('login.html', {'data-registration="open"': f'data-registration="{registration}"'})
 
     def login(self) -> None:
@@ -235,12 +244,7 @@ class AuthController:
         username = str(body.get('username') or '').strip()
         password = str(body.get('password') or '')
         target = safe_next(body.get('next'))
-        user = None
-        if username:
-            try:
-                user = koreader_sync.get_sync_storage().authenticate(username, md5_hex(password))
-            except Exception:
-                user = None
+        user = authenticate(username, password) if username else None
         if user is None:
             if is_json:
                 self._status(401)

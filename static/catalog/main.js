@@ -31,8 +31,10 @@
     PyOPDS.backButton.init();
     PyOPDS.search.init();
     PyOPDS.mosaic.initToggle();
-    PyOPDS.readStatus.init();
-    PyOPDS.bookClippings.init();
+    // Reader's data of the book sheet: not loaded in minimal mode (static/partials/catalog-reader.html)
+    [PyOPDS.readStatus, PyOPDS.bookClippings].forEach(function (feature) {
+        if (feature) feature.init();
+    });
     PyOPDS.bookSheet.init();
 
     // Covers, mosaic and pagination once the whole document is there

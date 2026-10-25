@@ -65,11 +65,6 @@
         return { minimal: data.mode === 'minimal', accounts: data.accounts !== 'off' };
     }
 
-    /** Signed-in reader whose data the web UI shows (session user, none in minimal mode), else null. */
-    function reader() {
-        return features().minimal ? null : window.SyncAccount.sessionUser();
-    }
-
     // lucide replaces the <i data-lucide> placeholders by SVGs: run after each render of `component` that may
     // add some (placeholders are never Alpine roots nor bound elements, so the replacement never breaks a binding)
     function icons(component) {
@@ -78,6 +73,6 @@
 
     window.PageKit = {
         formatDate: formatDate, encodePath: encodePath, libraryLinks: libraryLinks, fetchJson: fetchJson, signedOut: signedOut,
-        icons: icons, features: features, reader: reader,
+        icons: icons, features: features,
     };
 })();

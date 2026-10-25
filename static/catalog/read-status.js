@@ -41,7 +41,7 @@
     async function show(path) {
         button.hidden = true;
         dateBlock.hidden = true;
-        current = window.PageKit.reader() ? path : null;
+        current = window.SyncAccount.sessionUser() ? path : null;
         if (!current) return;
         try {
             const state = await call('GET', path);

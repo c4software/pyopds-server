@@ -296,8 +296,7 @@
                 <script src="/static/catalog/search.js"></script>
                 <script src="/static/catalog/pagination.js"></script>
                 <script src="/static/catalog/book-sheet.js"></script>
-                <script src="/static/catalog/read-status.js"></script>
-                <script src="/static/catalog/book-clippings.js"></script>
+                <!--#include catalog-reader -->
                 <script src="/static/catalog/main.js"></script>
             </body>
         </html>

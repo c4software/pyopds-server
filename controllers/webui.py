@@ -59,10 +59,13 @@ def version_asset_refs(text: str) -> str:
 def include_partials(text: str) -> str:
     """Replace each `<!--#include name key="value"… -->` of a page by static/partials/<name>.html, whose
     `{{key}}` placeholders take the given values (markup shared by the pages, e.g. their header), then the
-    enabled parts of the server (`{{mode}}`, `{{accounts}}`: controllers.features.page_flags)."""
-    from controllers.features import page_flags
+    enabled parts of the server (`{{mode}}`, `{{accounts}}`: controllers.features.page_flags); the partials of the
+    full server only are left out in minimal mode (controllers.features.FULL_PARTIALS)."""
+    from controllers.features import included_partial, page_flags
 
     def include(match: re.Match) -> str:
+        if not included_partial(match.group(1)):
+            return ''
         with open(os.path.join(STATIC_DIR, 'partials', f'{match.group(1)}.html'), encoding='utf-8') as f:
             partial = f.read()
         for key, value in [*PARTIAL_ARG_RE.findall(match.group(2)), *page_flags().items()]:
