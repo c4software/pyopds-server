@@ -173,6 +173,10 @@ class TestAudiobook(unittest.TestCase):
         self.assertEqual((sent['path'], sent['auth']), ('/v1/audio/speech', 'Bearer jeton'))
         self.assertEqual(sent['body'], {'language': 'French', 'model': 'bigchuck/tts', 'input': 'Il était une fois.',
                                         'response_format': 'wav', 'voice': 'vivian', 'instructions': 'Chuchoté'})
+        # Several paragraphs: spaces collapsed, the line breaks kept (pauses of the voice)
+        status, _, _ = self._request('POST', '/webui/audiobook/speech', {'text': 'Chapitre un\n\n  Il était  une fois.\n'}, self._auth())
+        self.assertEqual(status, 200)
+        self.assertEqual(FakeSpeechServer.requests[-1]['body']['input'], 'Chapitre un\nIl était une fois.')
         # The server's error, a text too long or empty, no account
         status, _, body = self._request('POST', '/webui/audiobook/speech', {'text': 'Une erreur.'}, self._auth())
         self.assertEqual(status, 502)

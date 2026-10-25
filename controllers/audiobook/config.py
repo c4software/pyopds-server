@@ -55,7 +55,7 @@ class AudiobookConfig:
     response_format: str = 'wav'
     instructions_field: str = 'instructions'
     voices: tuple[str, ...] = ()
-    max_chars: int = 500
+    max_chars: int = 1000
     timeout: int = 120
     concurrency: int = 2
     extra: dict = field(default_factory=dict)

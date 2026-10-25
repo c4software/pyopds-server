@@ -89,7 +89,8 @@
                 if (this.voicesLoaded) return;
                 try {
                     this.voices = (await window.PageKit.fetchJson('/webui/audiobook/voices')).voices || [];
-                    this.voicesLoaded = true;
+                    // None listed (speech server busy or starting): asked again on the next opening
+                    this.voicesLoaded = this.voices.length > 0;
                 } catch (e) { /* none listed: the voice is typed */ }
             },
 

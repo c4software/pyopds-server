@@ -98,7 +98,7 @@ The following environment variables can be set:
   [series.aliases]
   "L'Assassin royal" = ["Assasin Royal"]
   ```
-- **AUDIOBOOK_CONFIG_PATH**: Path to a file completing [`audiobook.toml`](../audiobook.toml) (same keys, its values win) to turn on the audiobook of the web reader (« Écouter », see [Web reader](web-ui.md#web-reader)): an OpenAI-compatible text-to-speech server (`POST /v1/audio/speech`), for instance an LLM proxy or a local model server. Off while `url` or `model` is empty (default). String values may read the environment, so that the key stays out of the file. Only the text being read is sent, a few sentences at a time, with the voice and the reading tone; every request is made by the server (the browser never sees the key), for signed-in readers only. Restart the server after editing it. Example (`config/audiobook.toml`):
+- **AUDIOBOOK_CONFIG_PATH**: Path to a file completing [`audiobook.toml`](../audiobook.toml) (same keys, its values win) to turn on the audiobook of the web reader (« Écouter », see [Web reader](web-ui.md#web-reader)): an OpenAI-compatible text-to-speech server (`POST /v1/audio/speech`), for instance an LLM proxy or a local model server. Off while `url` or `model` is empty (default). String values may read the environment, so that the key stays out of the file. Only the text being read is sent, a few paragraphs at a time, with the voice and the reading tone; every request is made by the server (the browser never sees the key), for signed-in readers only. Restart the server after editing it. Example (`config/audiobook.toml`):
 
   ```toml
   url = "http://llm-proxy:8000"
@@ -110,7 +110,7 @@ The following environment variables can be set:
   voice = "uncle_fu"
   instructions = "Narrateur professionnel de livre audio : voix masculine grave, chaleureuse et posée. Diction claire et soignée, rythme calme et régulier, intonation naturelle et nuancée qui suit le sens du texte. Courtes pauses aux virgules, pauses plus marquées entre les phrases et les paragraphes. Dialogues interprétés avec sobriété, sans emphase théâtrale."
   response_format = "wav"   # wav, mp3, opus, aac or flac: what the server produces
-  max_chars = 500           # characters per request
+  max_chars = 1000          # characters per request (several paragraphs: the voice keeps its tone)
   concurrency = 2           # requests sent to the server at the same time, for all readers
 
   [extra]                   # extra fields of every request (model options)

@@ -1,6 +1,6 @@
 # Audiobook of the web reader (« Écouter »): the book is read aloud by a text-to-speech
 # server speaking the OpenAI API (POST /v1/audio/speech), for instance an llm-proxy or a
-# local model server. The text is sent a few sentences at a time, just before they are
+# local model server. The text is sent a few paragraphs at a time, just before they are
 # played: the whole book is never generated.
 #
 # Disabled while `url` or `model` is empty. To turn it on, write your settings in another
@@ -36,8 +36,9 @@ response_format = "wav"
 instructions_field = "instructions"
 # Voices offered to the reader; empty: asked to the server (GET /v1/audio/voices?model=…)
 voices = []
-# Characters sent per request at most (a few sentences: the first sound comes after one of them)
-max_chars = 500
+# Characters sent per request at most: several paragraphs read in one go keep the same tone (the first
+# requests are shorter, so that the sound starts soon)
+max_chars = 1000
 # Seconds allowed for one request
 timeout = 120
 # Requests sent to the server at the same time, for all the readers

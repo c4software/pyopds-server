@@ -1,7 +1,8 @@
 // Web reader: reads the book aloud (audiobook, « Écouter »). foliate-js's TTS module (static/vendor/foliate/tts.js,
-// vendored) splits each chapter into blocks and sentences (SSML marks); the sentences are grouped into
-// requests of at most `maxChars` characters, each synthesized by the server (POST /webui/audiobook/speech)
-// just before it is played: one request played, the next AHEAD ones prepared, never the whole book.
+// vendored) splits each chapter into blocks and sentences (SSML marks); the sentences of several paragraphs
+// are grouped into one request (the voice keeps its tone across them), each synthesized by the server
+// (POST /webui/audiobook/speech) just before it is played: one request played, the next AHEAD ones prepared,
+// never the whole book. The requests grow, so the sound starts soon: a short first one, then up to `maxChars`.
 // The sentence read is underlined and the pages follow it, so the reading position (sync.js) and the
 // statistics (stats.js) move with the listening. Two TTS instances walk the same chapter: one prepares
 // the requests ahead, the other follows the playback for the underlining (foliate's TTS only marks the
@@ -14,8 +15,9 @@
     const FOLIATE = '/static/vendor/foliate/';
     // Requests prepared after the one being played
     const AHEAD = 2;
-    // The first request is shorter: the sound starts sooner
-    const FIRST_CHARS = 200;
+    // Size limits of the first requests (characters), then `maxChars`: the first sound comes after a short one,
+    // the next ones are generated while the previous ones play
+    const GROWTH = [200, 500];
     // Overlay of the sentence read (foliate overlayer key) and its underline width (px)
     const MARK_KEY = 'pyopds-narration';
     const MARK_WIDTH = 2;
@@ -71,24 +73,38 @@
     }
 
     /**
-     * Requests of a block: its sentences grouped up to `max` characters (a longer one cut between words),
-     * each {text, marks: [{mark, at}]}, `at` being where the sentence starts (fraction of the text, which
-     * places it in the audio).
+     * Requests built across the blocks of a chapter: the sentences are joined (a line break between two blocks,
+     * a pause for the voice) until the next one would pass the size limit of the request (`limit()`, read as
+     * the request fills: the requests grow); a sentence longer than the limit is cut between words. A request is
+     * {text, marks: [{block, mark, at}]}, `at` being where the sentence starts (fraction of the text, which
+     * places it in the audio). Returns {add(block, sentences) → completed requests, close() → the last one}.
      */
-    function requests(list, max) {
-        const out = [];
+    function requestBuilder(limit) {
         let request = null;
-        list.forEach(function (sentence) {
-            pieces(sentence.text, max).forEach(function (piece, i) {
-                if (!request || request.text.length + 1 + piece.length > max) out.push(request = { text: '', marks: [] });
-                if (i === 0 && sentence.mark !== null) request.marks.push({ mark: sentence.mark, start: request.text ? request.text.length + 1 : 0 });
-                request.text = request.text ? request.text + ' ' + piece : piece;
+
+        function close() {
+            const done = request;
+            request = null;
+            if (done) done.marks.forEach(function (m) { m.at = m.start / done.text.length; });
+            return done;
+        }
+
+        function add(block, list) {
+            const out = [];
+            list.forEach(function (sentence, s) {
+                pieces(sentence.text, limit()).forEach(function (piece, i) {
+                    const separator = s === 0 && i === 0 ? '\n' : ' ';
+                    if (request && request.text.length + separator.length + piece.length > limit()) out.push(close());
+                    const join = request ? separator : '';
+                    request = request || { text: '', marks: [] };
+                    if (i === 0 && sentence.mark !== null) request.marks.push({ block: block, mark: sentence.mark, start: request.text.length + join.length });
+                    request.text += join + piece;
+                });
             });
-        });
-        out.forEach(function (r) {
-            r.marks.forEach(function (m) { m.at = m.start / r.text.length; });
-        });
-        return out;
+            return out;
+        }
+
+        return { add: add, close: close };
     }
 
     /** First block of a TTS: the one of the starting point in its chapter, else the chapter's first. */
@@ -140,6 +156,8 @@
         let follower = null;
         let lastRange = null;
         let stopPlaying = null;
+        // Sentences of the audio being played: {index() → sentence read, seek(i) → play from sentence i}
+        let playing = null;
 
         function setState(value) {
             state = value;
@@ -151,18 +169,26 @@
         async function* sequence() {
             const { TTS, textWalker } = await foliateTTS();
             const sections = reader.book.sections;
-            let first = true;
+            let count = 0;
+            const limit = function () { return Math.min(options.maxChars, GROWTH[count] || Infinity); };
             for (let index = start.index; index < sections.length; index++) {
                 if (index !== start.index && sections[index].linear === 'no') continue;
                 const doc = await PyReader.book.sectionDocument(reader, index);
                 if (!doc || !doc.body) continue;
                 const tts = new TTS(doc, textWalker, function () {}, 'sentence');
+                const builder = requestBuilder(limit);
                 let ssml = begin(tts, doc, index === start.index ? start : null);
                 for (let block = 0; ssml; block++, ssml = tts.next()) {
-                    for (const request of requests(sentences(ssml), first ? Math.min(options.maxChars, FIRST_CHARS) : options.maxChars)) {
-                        first = false;
-                        yield Object.assign({ index: index, block: block }, request);
+                    for (const request of builder.add(block, sentences(ssml))) {
+                        count++;
+                        yield Object.assign({ index: index }, request);
                     }
+                }
+                // A chapter ends its request: the next one starts on the next chapter's page
+                const last = builder.close();
+                if (last) {
+                    count++;
+                    yield Object.assign({ index: index }, last);
                 }
             }
         }
@@ -218,7 +244,7 @@
             view.renderer.getContents().forEach(function (content) { if (content.overlayer) content.overlayer.remove(MARK_KEY); });
         }
 
-        /** Show the chapter of a request and put the follower TTS on its block. */
+        /** Show the chapter of a request and the follower TTS on it (moved block by block as the sentences are read). */
         async function follow(request) {
             const { TTS, textWalker } = await foliateTTS();
             let content = shown(request.index);
@@ -232,10 +258,6 @@
                 begin(tts, content.doc, request.index === start.index ? start : null);
                 follower = { index: request.index, doc: content.doc, tts: tts, block: 0 };
             }
-            while (follower.block < request.block) {
-                follower.tts.next();
-                follower.block++;
-            }
             return true;
         }
 
@@ -247,20 +269,42 @@
                 const markAt = function (i) {
                     if (i === mark || !followed) return;
                     mark = i;
-                    follower.tts.setMark(request.marks[i].mark);
+                    const sentence = request.marks[i];
+                    while (follower.block < sentence.block) {
+                        follower.tts.next();
+                        follower.block++;
+                    }
+                    while (follower.block > sentence.block) {
+                        follower.tts.prev();
+                        follower.block--;
+                    }
+                    follower.tts.setMark(sentence.mark);
                 };
+                const known = function () { return audio.duration && Number.isFinite(audio.duration); };
                 const onTime = function () {
-                    if (!audio.duration || !Number.isFinite(audio.duration)) return;
+                    if (!known() || !request.marks.length) return;
                     const fraction = audio.currentTime / audio.duration;
-                    let i = Math.max(mark, 0);
+                    let i = 0;
                     while (i + 1 < request.marks.length && request.marks[i + 1].at <= fraction) i++;
-                    if (request.marks.length) markAt(i);
+                    markAt(i);
+                };
+                playing = {
+                    index: function () { return mark; },
+                    count: request.marks.length,
+                    /** Play from sentence i (false when the audio length is not known yet). */
+                    seek: function (i) {
+                        if (!known() || !request.marks[i]) return false;
+                        audio.currentTime = request.marks[i].at * audio.duration;
+                        onTime();
+                        return true;
+                    },
                 };
                 const cleanup = function () {
                     audio.removeEventListener('timeupdate', onTime);
                     audio.removeEventListener('ended', onEnded);
                     audio.removeEventListener('error', onFailed);
                     stopPlaying = null;
+                    playing = null;
                     URL.revokeObjectURL(url);
                 };
                 const onEnded = function () { cleanup(); resolve(); };
@@ -406,14 +450,18 @@
             });
         }
 
-        /** Skip to the next request (already prepared). */
+        /** Skip to the next sentence. */
         function next() {
-            if (state !== 'idle' && stopPlaying) stopPlaying();
+            if (state === 'idle' || !stopPlaying) return;
+            // The next sentence of this audio, else the next request (already prepared)
+            const i = playing ? playing.index() + 1 : 0;
+            if (!playing || i >= playing.count || !playing.seek(i)) stopPlaying();
         }
 
-        /** Hear the current request again from its start. */
+        /** Hear the sentence read again. */
         function replay() {
-            if (state !== 'idle' && stopPlaying) audio.currentTime = 0;
+            if (state === 'idle' || !stopPlaying) return;
+            if (!playing || !playing.seek(Math.max(playing.index(), 0))) audio.currentTime = 0;
         }
 
         return {
@@ -436,5 +484,5 @@
         };
     }
 
-    PyReader.narration = { create: create, sentences: sentences, requests: requests };
+    PyReader.narration = { create: create, sentences: sentences, requestBuilder: requestBuilder };
 })();

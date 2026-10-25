@@ -31,6 +31,12 @@ def book_voice(stored: str | None) -> dict[str, str]:
     return {name: data[name] if isinstance(data.get(name), str) else '' for name in ('voice', 'instructions')}
 
 
+def speech_text(text: str) -> str:
+    """Text sent to the speech server: spaces collapsed in each line, the line breaks between paragraphs kept
+    (a pause for the voice), empty lines dropped."""
+    return '\n'.join(line for line in (' '.join(part.split()) for part in text.splitlines()) if line)
+
+
 def voice_fields(body: dict) -> dict[str, str] | None:
     """{voice, instructions} of a request body, trimmed (absent: ''); None when a field is invalid."""
     fields = {}
@@ -99,7 +105,7 @@ class AudiobookController(WebUIController):
             return
         try:
             audio, content_type = get_speech_client().synthesize(
-                ' '.join(text.split()), fields['voice'] or config.voice, fields['instructions'] or config.instructions)
+                speech_text(text), fields['voice'] or config.voice, fields['instructions'] or config.instructions)
         except SpeechError as e:
             self._send_json({'message': e.message}, e.status)
             return
@@ -129,4 +135,4 @@ class AudiobookController(WebUIController):
                 'max_chars': config.max_chars}
 
 
-__all__ = ['AudiobookController', 'book_voice', 'voice_fields']
+__all__ = ['AudiobookController', 'book_voice', 'speech_text', 'voice_fields']
