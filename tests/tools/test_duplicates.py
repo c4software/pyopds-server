@@ -3,10 +3,8 @@ import io
 import os
 import tempfile
 import unittest
-import zipfile
-from unittest import mock
 
-import support  # noqa: F401  (first: test database, project on sys.path)
+from support import create_chapter_epub, use_library_dir  # (first: test database, project on sys.path)
 
 
 from controllers.tools import duplicates  # noqa: E402
@@ -15,23 +13,8 @@ from controllers.sync.storage import SyncStorage  # noqa: E402
 
 
 def create_epub(path, title, author, text='Il était une fois. ' * 2000, extra=''):
-    """Minimal EPUB with one chapter of `text` (`extra` changes the bytes, not the length)."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with zipfile.ZipFile(path, 'w') as zf:
-        zf.writestr('mimetype', 'application/epub+zip')
-        zf.writestr('META-INF/container.xml', """<?xml version='1.0'?>
-<container version='1.0' xmlns='urn:oasis:names:tc:opendocument:xmlns:container'>
-    <rootfiles><rootfile full-path='content.opf' media-type='application/oebps-package+xml'/></rootfiles>
-</container>""")
-        zf.writestr('content.opf', f"""<?xml version='1.0'?>
-<package xmlns='http://www.idpf.org/2007/opf' version='3.0'>
-    <metadata xmlns:dc='http://purl.org/dc/elements/1.1/'>
-        <dc:title>{title}</dc:title><dc:creator>{author}</dc:creator>
-    </metadata>
-    <manifest><item id='c1' href='c1.xhtml' media-type='application/xhtml+xml'/></manifest>
-    <spine><itemref idref='c1'/></spine>
-</package>""")
-        zf.writestr('c1.xhtml', f'<html><body><p>{text}</p><!-- {extra} --></body></html>')
+    """EPUB with one chapter of `text` (`extra` changes the bytes, not the length)."""
+    create_chapter_epub(path, title, author, chapters=1, bodies={1: f'<p>{text}</p><!-- {extra} -->'})
 
 
 class TestDuplicates(unittest.TestCase):
@@ -40,23 +23,22 @@ class TestDuplicates(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.library = os.path.join(self.tmp.name, 'books')
-        patcher = mock.patch.object(duplicates, 'LIBRARY_DIR', self.library)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        os.makedirs(self.library)
+        use_library_dir(self, self.library)
         self.addCleanup(self.tmp.cleanup)
 
     def path(self, relative):
         return os.path.join(self.library, relative)
 
     def scan(self, **kwargs):
-        books = [duplicates.load_book(os.path.join(root, name))
-                 for root, _, names in os.walk(self.library) for name in names]
-        return duplicates.find_duplicates(books, **kwargs)
+        return duplicates.find_duplicates(duplicates.load_books(), **kwargs)
 
     def test_normalized_keys(self):
-        self.assertEqual(duplicates.normalize_text("L'Odyssée  de l'Espace !"), 'l odyssee de l espace')
-        self.assertEqual(duplicates.author_key('Asimov, Isaac'), duplicates.author_key('Isaac Asimov'))
-        self.assertEqual(duplicates.author_key('Unknown'), '')
+        def key(title, author):
+            return duplicates.book_key(duplicates.BookFile('x.epub', 'x.epub', 0, 0, title, author))
+        self.assertEqual(key("L'Odyssée  de l'Espace !", 'Asimov, Isaac'), ('l odyssee de l espace', 'asimov isaac', ''))
+        self.assertEqual(key('Livre', 'Isaac Asimov'), key('LIVRE', 'Asimov, Isaac'))
+        self.assertEqual(key('Livre', 'Unknown')[1], '')
 
     def test_identical_files(self):
         create_epub(self.path('2025/Livre.epub'), 'Livre', 'Auteur')
@@ -93,7 +75,7 @@ class TestDuplicates(unittest.TestCase):
         with storage._get_connection() as conn:
             conn.execute("INSERT INTO progress (user, document, device_id, percentage, progress, updated_at) "
                          "VALUES ('u', ?, 'd', 0.5, '', 0)", (koreader_partial_md5(self.path('Lu/xx.epub')),))
-        books = [duplicates.load_book(self.path('Bon/Livre - Auteur.epub')), duplicates.load_book(self.path('Lu/xx.epub'))]
+        books = duplicates.load_books()
         duplicates.mark_synced(books, db_path)
         groups = duplicates.find_duplicates(books)
         self.assertEqual(groups[0].keep.relative, os.path.join('Lu', 'xx.epub'))

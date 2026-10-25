@@ -2,7 +2,7 @@
 
 ## Duplicate books
 
-A command line tool finds the duplicate EPUBs of the library (`LIBRARY_DIR`), and can remove them:
+A command line tool finds the duplicate EPUBs of the library (`LIBRARY_DIR`), and can remove them. It works from the library database (`library.db`, brought up to date first: only the new or modified EPUBs are opened), like the catalog; only the files of a group are read (content hash, then cover and text length, stored for the next runs):
 
 ```bash
 python -m controllers.tools.duplicates                         # report only

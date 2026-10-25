@@ -18,19 +18,23 @@ Two kinds of duplicates are found:
 
 In each group one file is kept (see `choose_keeper`): a file already synced by a reader first,
 so that the reading progress stays attached to a library book. The others are the duplicates.
+
+The books and their metadata come from the library database (controllers/library/store.py, synced
+first: only the new or modified EPUBs are opened); the files of a group are hashed, their cover and
+text length read once and stored with the library.
 """
 import argparse
 import hashlib
 import json
 import os
-import re
 import shutil
 import sys
-import unicodedata
 from dataclasses import dataclass, field
 
-from controllers.library.index import estimate_print_pages, filename_md5, koreader_partial_md5
-from controllers.catalog.opds import LIBRARY_DIR, BookMetadata, BookScanner
+from controllers.catalog.opds import LIBRARY_DIR, SecurityUtils
+from controllers.library.index import filename_md5, series_key
+from controllers.library.metadata_rules import author_key
+from controllers.library.store import Book, Library
 from controllers.sync.storage import KOREADER_SYNC_DB_PATH, SyncStorage
 
 HASH_CHUNK_SIZE = 1024 * 1024
@@ -43,25 +47,39 @@ class BookFile:
     """An EPUB of the library with what the duplicate detection needs."""
 
     path: str
+    # Path relative to LIBRARY_DIR (shown in reports)
+    relative: str
     size: int
     mtime: float
     title: str | None = None
     author: str | None = None
     series_index: int | float | None = None
-    has_cover: bool = False
+    # KOReader document hash (partial MD5) stored with the library
+    document: str | None = None
     # Known to the sync database (read on a reader): its progress refers to this file
     synced: bool = False
 
+    @classmethod
+    def from_library(cls, book: Book) -> 'BookFile':
+        """The duplicate detection's view of a book of the library database."""
+        return cls(book.path, book.relative, book.size, book.mtime, book.meta.get('title'), book.meta.get('author'),
+                   book.meta.get('series_index'), book.document)
+
     @property
-    def relative(self) -> str:
-        """Path relative to LIBRARY_DIR (shown in reports)."""
-        return os.path.relpath(self.path, LIBRARY_DIR)
+    def has_cover(self) -> bool:
+        """Whether the EPUB has a cover (read once, stored with the library)."""
+        return bool(Library.get_instance().details(self.path).get('has_cover'))
+
+    @property
+    def page_count(self) -> int | None:
+        """Estimated print pages of the text (read once, stored with the library)."""
+        return Library.get_instance().details(self.path).get('page_count')
 
     @property
     def name_matches_title(self) -> bool:
         """File name containing the title: readable, not garbled by a wrong encoding (e.g. "Odyss‚e")."""
-        title = normalize_text(self.title)
-        return bool(title) and title in normalize_text(os.path.splitext(os.path.basename(self.path))[0])
+        title = series_key(self.title)
+        return bool(title) and title in series_key(os.path.splitext(os.path.basename(self.path))[0])
 
 
 @dataclass
@@ -85,28 +103,15 @@ class DuplicateGroup:
         }
 
 
-def normalize_text(value: str | None) -> str:
-    """Lowercase, accent and punctuation free text with collapsed spaces."""
-    if not value:
-        return ''
-    text = unicodedata.normalize('NFKD', value)
-    text = ''.join(char for char in text if not unicodedata.combining(char)).lower()
-    return ' '.join(re.sub(r'[\W_]+', ' ', text).split())
-
-
-def author_key(author: str | None) -> str:
-    """Author key independent of the word order ("Asimov, Isaac" == "Isaac Asimov")."""
-    words = normalize_text(author).split()
-    return ' '.join(sorted(words)) if words and words != ['unknown'] else ''
-
-
 def book_key(book: BookFile) -> tuple[str, str, str] | None:
-    """Key of the book described by the metadata, None when the title is unknown."""
-    title = normalize_text(book.title)
+    """Key of the book described by the metadata (title and author with case, accents, punctuation and the
+    author's word order ignored, series position), None when the title is unknown."""
+    title = series_key(book.title)
     if not title:
         return None
+    author = author_key(book.author)
     index = '' if book.series_index is None else str(float(book.series_index))
-    return title, author_key(book.author), index
+    return title, '' if author == 'unknown' else author, index
 
 
 def file_sha256(path: str) -> str | None:
@@ -121,19 +126,11 @@ def file_sha256(path: str) -> str | None:
     return digest.hexdigest()
 
 
-def load_book(path: str) -> BookFile | None:
-    """Read the size, date and metadata of a library EPUB, None when the file is missing."""
-    try:
-        stat = os.stat(path)
-    except OSError:
-        return None
-    info = BookMetadata.extract_epub_info(path) or {}
-    try:
-        has_cover = BookMetadata.extract_epub_cover(path)[0] is not None
-    except Exception:
-        has_cover = False
-    return BookFile(path=path, size=stat.st_size, mtime=stat.st_mtime, title=info.get('title'),
-                    author=info.get('author'), series_index=info.get('series_index'), has_cover=has_cover)
+def load_books() -> list[BookFile]:
+    """Every EPUB of the library, from its database brought up to date with the files first."""
+    library = Library.get_instance()
+    library.sync()
+    return [BookFile.from_library(book) for book in library.snapshot.books.values()]
 
 
 def mark_synced(books: list[BookFile], db_path: str = KOREADER_SYNC_DB_PATH) -> None:
@@ -145,7 +142,7 @@ def mark_synced(books: list[BookFile], db_path: str = KOREADER_SYNC_DB_PATH) -> 
     for book in books:
         name = os.path.basename(book.path)
         book.synced = (book.relative in library_paths or name in filenames or filename_md5(book.path) in documents
-                       or koreader_partial_md5(book.path) in documents)
+                       or book.document in documents)
 
 
 def choose_keeper(books: list[BookFile]) -> BookFile:
@@ -164,7 +161,7 @@ def _group(kind: str, books: list[BookFile]) -> DuplicateGroup:
 
 def same_text_length(books: list[BookFile]) -> bool:
     """Whether the books have texts of similar lengths (False when one cannot be measured)."""
-    pages = [estimate_print_pages(book.path) for book in books]
+    pages = [book.page_count for book in books]
     if not all(pages):
         return False
     return max(pages) / min(pages) <= MAX_LENGTH_RATIO
@@ -223,7 +220,7 @@ def remove_duplicates(groups: list[DuplicateGroup], move_to: str | None = None) 
                 continue
             folder = os.path.dirname(book.path)
             library = os.path.realpath(LIBRARY_DIR)
-            while os.path.realpath(folder).startswith(library + os.sep):
+            while SecurityUtils.is_within_library_dir(folder) and os.path.realpath(folder) != library:
                 try:
                     os.rmdir(folder)
                 except OSError:
@@ -272,10 +269,9 @@ def main(argv: list[str] | None = None) -> int:
     action.add_argument('--move-to', metavar='DOSSIER', help='déplacer les doublons dans ce dossier (hors bibliothèque)')
     args = parser.parse_args(argv)
 
-    library = os.path.realpath(LIBRARY_DIR)
-    if args.move_to and os.path.realpath(args.move_to).startswith(library + os.sep):
+    if args.move_to and SecurityUtils.is_within_library_dir(args.move_to):
         parser.error('--move-to doit être hors de la bibliothèque (sinon les doublons restent au catalogue)')
-    books = [book for path in BookScanner.get_instance().collect_all_epub_paths() if (book := load_book(path))]
+    books = load_books()
     mark_synced(books)
     groups = find_duplicates(books, identical_only=args.identical_only)
     if args.json:

@@ -29,9 +29,10 @@ from dataclasses import dataclass, field
 from xml.sax.saxutils import escape
 
 from controllers.library.genres import genre_key, get_genre_config, normalize_genres
-from controllers.library.index import description_text, release_year
+from controllers.library.index import LibraryIndex, description_text, release_year
 from controllers.library.metadata_rules import author_key
-from controllers.catalog.opds import LIBRARY_DIR, BookMetadata, BookScanner, library_relative_path
+from controllers.catalog.opds import LIBRARY_DIR, BookMetadata, library_relative_path
+from controllers.library.store import Library, forget
 
 CSV_COLUMNS = ['chemin', 'probleme', 'titre', 'auteur', 'serie', 'tome', 'annee', 'description',
                'suggestion', 'genres', 'titre_corrige', 'auteur_corrige']
@@ -96,13 +97,11 @@ def known_genres() -> dict[str, str]:
 
 
 def load_books() -> list[Book]:
-    """Every readable EPUB of the library."""
-    books = []
-    for path in BookScanner.get_instance().collect_all_epub_paths():
-        info = BookMetadata.extract_epub_info(path)
-        if info is not None:
-            books.append(Book(path, info))
-    return books
+    """Every EPUB of the library with its metadata, from the library database brought up to date with the
+    files first (only the new or modified EPUBs are opened)."""
+    library = Library.get_instance()
+    library.sync()
+    return [Book(book.path, book.meta) for book in library.snapshot.books.values()]
 
 
 def problems(book: Book, genre_counts: dict[str, int]) -> list[str]:
@@ -227,17 +226,6 @@ def write_csv(path: str, rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
-def library_path(relative: str) -> str | None:
-    """Absolute path of a CSV `chemin`, None when outside the library or not an EPUB."""
-    if not relative or '..' in relative.replace('\\', '/').split('/') or os.path.isabs(relative):
-        return None
-    path = os.path.join(LIBRARY_DIR, relative)
-    library = os.path.realpath(LIBRARY_DIR)
-    if not os.path.realpath(path).startswith(library + os.sep) or not path.lower().endswith('.epub'):
-        return None
-    return path
-
-
 def plan_changes(rows: list[dict], accept_suggestions: bool = False) -> tuple[list[Change], list[str]]:
     """Changes to write from the completed CSV rows, and the warnings (unknown genres, missing files…).
 
@@ -249,8 +237,8 @@ def plan_changes(rows: list[dict], accept_suggestions: bool = False) -> tuple[li
     changes, warnings = [], []
     for number, row in enumerate(rows, start=2):
         relative = (row.get('chemin') or '').strip()
-        path = library_path(relative)
-        if path is None or not os.path.isfile(path):
+        path = LibraryIndex.resolve_relative(relative)
+        if path is None:
             warnings.append(f'ligne {number} : fichier introuvable : {relative}')
             continue
         info = BookMetadata.extract_epub_info(path)
@@ -432,7 +420,6 @@ def main(argv: list[str] | None = None) -> int:
         print(describe(change))
     if args.write:
         # Their modification time is kept: the server's database must read them again (controllers/library/store.py)
-        from controllers.library.store import forget
         forget(written)
         print(f'{len(changes) - errors} EPUB modifié(s), {errors} erreur(s). Redémarrez le serveur pour relire les métadonnées.')
     else:

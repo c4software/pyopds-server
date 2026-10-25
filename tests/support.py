@@ -9,6 +9,7 @@ import socketserver
 import sys
 import tempfile
 import zipfile
+from unittest import mock
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if PROJECT_ROOT not in sys.path:
@@ -54,10 +55,12 @@ def create_epub(path, title, author, date=None, subjects=(), series=None, series
 
 
 def create_rich_epub(path, title, author, date=None, subjects=(), series=None, series_index=None,
-                     rating=None, description=None):
-    """EPUB with Calibre metadata (series, series index, rating) and an escaped HTML description."""
-    from xml.sax.saxutils import escape
-    metadata = [f'<dc:title>{escape(title)}</dc:title>', f'<dc:creator>{escape(author)}</dc:creator>']
+                     rating=None, description=None, file_as=None):
+    """EPUB with Calibre metadata (series, series index, rating, author sort name `file_as`) and an escaped
+    HTML description."""
+    from xml.sax.saxutils import escape, quoteattr
+    sort_name = f' opf:file-as={quoteattr(file_as)}' if file_as else ''
+    metadata = [f'<dc:title>{escape(title)}</dc:title>', f'<dc:creator{sort_name}>{escape(author)}</dc:creator>']
     if date:
         metadata.append(f'<dc:date>{date}</dc:date>')
     metadata += [f'<dc:subject>{escape(subject)}</dc:subject>' for subject in subjects]
@@ -82,6 +85,16 @@ def create_rich_epub(path, title, author, date=None, subjects=(), series=None, s
         zf.writestr('mimetype', 'application/epub+zip')
         zf.writestr('META-INF/container.xml', container)
         zf.writestr('content.opf', opf)
+
+
+def use_library_dir(test, path):
+    """Point every loaded module's LIBRARY_DIR to `path` for the length of a test (`test.addCleanup`): the
+    catalog, the library database (controllers/library/store.py) and the tools read it."""
+    for name, module in list(sys.modules.items()):
+        if name.startswith('controllers.') and hasattr(module, 'LIBRARY_DIR'):
+            patcher = mock.patch.object(module, 'LIBRARY_DIR', path)
+            patcher.start()
+            test.addCleanup(patcher.stop)
 
 
 def basic_header(user: str, password: str) -> dict:
@@ -110,6 +123,7 @@ def create_chapter_epub(path, title, author, chapters=2, toc=None, bodies=None):
     """EPUB with a manifest, a spine and `chapters` XHTML chapters (OEBPS/ch<n>.xhtml); `toc` ({href: label})
     adds an EPUB 3 table of contents (OEBPS/nav.xhtml, first in the spine), `bodies` ({n: body HTML})
     replaces the five paragraphs of chapters."""
+    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
     manifest = ''.join(f'<item id="c{n}" href="ch{n}.xhtml" media-type="application/xhtml+xml"/>' for n in range(1, chapters + 1))
     spine = ''.join(f'<itemref idref="c{n}"/>' for n in range(1, chapters + 1))
     if toc:

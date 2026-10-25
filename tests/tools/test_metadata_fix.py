@@ -5,9 +5,8 @@ import os
 import tempfile
 import unittest
 import zipfile
-from unittest import mock
 
-import support  # noqa: F401  (first: test database, project on sys.path)
+from support import create_rich_epub, use_library_dir  # (first: test database, project on sys.path)
 
 
 from controllers.tools import metadata_fix  # noqa: E402
@@ -15,31 +14,8 @@ from controllers.catalog.opds import BookMetadata  # noqa: E402
 
 
 def create_epub(path, title='', author='', subjects=(), series=None):
-    """Minimal EPUB 2 (calibre style) with a mimetype entry first and stored."""
-    metadata = ''
-    if title:
-        metadata += f'<dc:title>{title}</dc:title>'
-    if author:
-        metadata += f'<dc:creator opf:file-as="X, Y" opf:role="aut">{author}</dc:creator>'
-    metadata += ''.join(f'<dc:subject>{subject}</dc:subject>' for subject in subjects)
-    if series:
-        metadata += f'<meta name="calibre:series" content="{series}"/><meta name="calibre:series_index" content="1"/>'
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr(zipfile.ZipInfo('mimetype'), 'application/epub+zip', compress_type=zipfile.ZIP_STORED)
-        zf.writestr('META-INF/container.xml', """<?xml version='1.0'?>
-<container version='1.0' xmlns='urn:oasis:names:tc:opendocument:xmlns:container'>
-    <rootfiles><rootfile full-path='OEBPS/content.opf' media-type='application/oebps-package+xml'/></rootfiles>
-</container>""")
-        zf.writestr('OEBPS/content.opf', f"""<?xml version='1.0' encoding='utf-8'?>
-<package xmlns='http://www.idpf.org/2007/opf' version='2.0'>
-    <metadata xmlns:dc='http://purl.org/dc/elements/1.1/' xmlns:opf='http://www.idpf.org/2007/opf'>
-        {metadata}
-    </metadata>
-    <manifest><item id='c1' href='c1.xhtml' media-type='application/xhtml+xml'/></manifest>
-    <spine><itemref idref='c1'/></spine>
-</package>""")
-        zf.writestr('OEBPS/c1.xhtml', '<html><body><p>Texte.</p></body></html>')
+    """Calibre style EPUB 2 (author sort name, series in calibre:series), mimetype first and stored."""
+    create_rich_epub(path, title, author, subjects=subjects, series=series, series_index=1 if series else None, file_as='X, Y')
 
 
 class TestMetadataFix(unittest.TestCase):
@@ -49,9 +25,7 @@ class TestMetadataFix(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.library = os.path.join(self.tmp.name, 'books')
-        patcher = mock.patch.object(metadata_fix, 'LIBRARY_DIR', self.library)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        use_library_dir(self, self.library)
         # Author profile: three Asimov books in science fiction
         for n in range(3):
             create_epub(self.path(f'asimov/{n}.epub'), f'Robots {n}', 'Isaac Asimov', ['Science-fiction'])
@@ -65,12 +39,8 @@ class TestMetadataFix(unittest.TestCase):
     def path(self, relative):
         return os.path.join(self.library, relative)
 
-    def books(self):
-        return [metadata_fix.Book(os.path.join(root, name), BookMetadata.extract_epub_info(os.path.join(root, name)))
-                for root, _, names in os.walk(self.library) for name in names]
-
     def rows(self):
-        return {row['chemin']: row for row in metadata_fix.export_rows(self.books())}
+        return {row['chemin']: row for row in metadata_fix.export_rows(metadata_fix.load_books())}
 
     def test_export_lists_problems_and_suggestions(self):
         rows = self.rows()
@@ -135,7 +105,7 @@ class TestMetadataFix(unittest.TestCase):
             self.assertEqual((first.filename, first.compress_type), ('mimetype', zipfile.ZIP_STORED))
             self.assertIsNone(zf.testzip())
             # The stale sort name of the old author is dropped
-            self.assertNotIn('file-as', zf.read('OEBPS/content.opf').decode())
+            self.assertNotIn('file-as', zf.read('content.opf').decode())
 
     def test_genre_named_series_is_dropped(self):
         change = metadata_fix.Change(metadata_fix.Book(self.path('divers/serie.epub'), {}), ['Fantastique', 'Horreur'])
