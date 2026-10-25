@@ -186,7 +186,7 @@ curl -sS "$TTS_URL/v1/audio/transcriptions" -H "Authorization: Bearer $TTS_API_K
   -F model=silentchuck/qwen3-asr-1.7b -F language=fr -F file=@ma-voix.wav | jq -r .text
 ```
 
-**2. Normalize the reference** (what the voice tool does without ffmpeg): mono 24 kHz, silences cut at both ends (the `areverse` pair trims the end; `stop_periods` would cut at the first pause of the sentence), level at -20 LUFS with peaks at -1 dB.
+**2. Normalize the reference** with ffmpeg, the same targets as the voice tool (which does it in Python, without ffmpeg; its silence threshold is relative to the loudest part and its level an RMS, so results are close, not identical): mono 24 kHz, silences cut at both ends (the `areverse` pair trims the end; `stop_periods` would cut at the first pause of the sentence), level at -20 LUFS with peaks at -1 dB.
 
 ```bash
 ffmpeg -i design.wav -ac 1 -ar 24000 -c:a pcm_s16le -af "silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.15,areverse,silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.15,areverse,loudnorm=I=-20:TP=-1:LRA=11" voix.wav
