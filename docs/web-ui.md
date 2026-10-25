@@ -1,0 +1,46 @@
+# Web interface
+
+## Catalog in the browser
+
+Opening the catalog URL in a browser shows it as a web page: the browser turns the feed into HTML with [`static/opds_to_html.xslt`](../static/opds_to_html.xslt), so browsers and OPDS clients read the very same feed. Browsers without native XSLT (Chrome removes it in version 158, November 2026) use [xslt-polyfill](https://github.com/mfreed7/xslt_polyfill), the XSLT engine compiled to WebAssembly (BSD-3, `static/xslt-polyfill.min.js`): every feed references it, it is only downloaded when native XSLT is missing (1.5 MB, cached for a year), and OPDS clients ignore it. Styles come from a compiled Tailwind stylesheet (see [Web UI styles](development.md#web-ui-styles)), so they also work with the polyfill.
+
+The header holds the search field and these buttons:
+
+- **Home**, **Reading page** (chart icon, see [Reading page](#reading-page)) and **Recharger** (refresh icon, signed-in readers, or everyone on a server without accounts): syncs the library now (`POST /webui/library/sync`), shows what changed and reloads the page.
+- **Se connecter** / **logout**: optional sign-in (see below), which shows the « À lire ensuite » tile.
+- **Cover mosaic** (image icon): fills the navigation tiles (collections, authors, years, genres, folders) with an animated mosaic of the covers of their books, under a veil that keeps the text readable. It is off by default and remembered per browser. Covers are only requested while it is on; small thumbnails, books without a cover and the covers last shown on each tile are cached in the browser (IndexedDB, 7 days), so tiles fill at once on the next visits.
+- **Theme**: light or dark, remembered per browser.
+
+A click on a book opens its **book sheet** (a dialog closed with Escape, a click outside or the close button) instead of downloading it: large cover, title, author (link, with a person icon, to all the books of the author), « Tome N · Série » (link to the series feed), year, rating (stars), genres (tag chips linking to the genre feeds), description (« Lire la suite » when long), a **Lire** button (the [web reader](#web-reader)) and a **Télécharger** button. A middle click or Ctrl/⌘-click still downloads the book, as does a click without JavaScript; the address of an opened sheet (`#book=…`) can be shared. Series books show their volume (« T2 ») on their tile.
+
+## Web reader
+
+`/read?path=<EPUB relative to LIBRARY_DIR>` (« Lire » in the book sheet, « Continuer la lecture » on the reading page, « Lire » on the clippings page) reads a library EPUB in the browser with [foliate-js](https://github.com/johnfactotum/foliate-js) (MIT, vendored in `static/foliate/`: `view.js`, `epub.js`, `paginator.js`… from commit `78914ae`, unchanged). Same access rule as `/download` (public unless `OPDS_AUTH=true`).
+
+- **Phones**: the book fills the screen (full screen on the first tap where the browser allows it, the bottom bar button leaves it); a tap on the left / right third turns the page (swipes too) and hides the bars, a tap in the middle or in the top / bottom band (even on a link) shows or hides them (back, table of contents, position slider, clippings, display settings, full screen). The screen stays on while reading (Screen Wake Lock, HTTPS only; released after 10 minutes without a page turned).
+- **Tablets and computers**: two pages side by side when the screen is wide and in landscape, one column in portrait; on a computer the reading page keeps a limited width, with arrows, keys (←/→, Space, Page Up/Down) and the mouse wheel.
+- **Display settings** (kept in the browser): text size, line spacing, font (the book's, serif, sans), margins, justification, theme (auto, light, sepia, dark), pages or scrolling.
+- **Not signed in**: reading only, the last position is kept in the browser.
+- **Signed in** (the sync account, see [Accounts and sign-in](installation.md#accounts-and-sign-in)):
+  - **Position**: sent like a reader does (`PUT /api/v1/progress`, a few seconds after each page and when the page is left), as a KoReader XPointer (`/body/DocFragment[3]/body/section[1]/p[10]/text()[1].20`, the position CrossPoint readers also use first) and a CrossPoint rich position (`pctQ`, spine, page, paragraph). The browser is a device of its own (« Navigateur (Android) »…). On opening, the newest position of all the devices is used, with a notice (« Reprise à 72 %, position de CrossPoint ») and a way back; back on the tab, a newer position of another device is offered.
+  - **Clippings**: select text to highlight it (4 colors) or add a note; a tap on a highlight edits or deletes it. They are CrossPoint clippings (`/api/v1/clippings/{document}`: spine index, visible offsets of the selection in its chapter, paragraph, chapter title), so the readers syncing clippings, the CrossPoint Sync app, the book sheet and `/clippings` show them; the clippings of the readers are drawn in the book (KoReader's Nextcloud Notes exports are found by their text).
+  - **Statistics**: the time the page is visible while you read (pauses of more than 3 minutes excluded) and the pages turned are added to the statistics of the browser's sync device, the one of its position (`POST /webui/reader/session`, every minute and when the page is left): reading time, sessions, time of day, weekday, reading days, pace and finished books on the reading page.
+- `GET /webui/reader/book?path=…` lists the EPUB entries (`{path, title, author, filename, version, entries: {name: size}, document}`; `document` is the signed-in reader's sync document of the EPUB) and `GET /webui/reader/file?path=…&entry=…&v=<version>` serves one entry (chapters gzip-compressed, cached by the browser): the EPUB is never downloaded whole.
+
+## Clippings page and book sheet
+
+The clippings synced by the readers (CrossPoint « Sync Clippings », KoReader's Nextcloud Notes export) are shown to the signed-in reader (catalog session; the routes always require an account):
+
+- in the catalog **book sheet**, « Vos surlignages »: the clippings of the book in reading order (text, note, chapter, page, date), with its Markdown export;
+- on the **`/clippings` page** (highlighter icon of the catalog header, « Tous les surlignages » on the reading page): every clipping grouped by book, newest book first, with a search field (passage, note, chapter, title, author), a book filter and the Markdown export;
+- `GET /webui/clippings[?path=<EPUB relative to LIBRARY_DIR>]` returns `{groups: [{book: {document, title, author, path}, clippings: [{id, text, note, chapter, page, created_at}]}]}`; `GET /webui/clippings/export[?path=…]` the same as a Markdown file (`## Title — Author`, each clipping quoted, then its note and `*chapter · p. N*`).
+
+## Reading page
+
+`/reading` is a static page (`static/reading.html`, `reading.js`, `reading.css`) that calls the sync API from the browser with the web UI session: progress (`/api/v1/progress`, and `/api/v1/progress/{document}` for the per-device positions), `/api/v1/stats/summary`, `/api/v1/stats/activity` and `/api/v1/clippings`. It uses the common sign-in page and the single web UI session. Reading time, time of day and weekday charts need readers that upload statistics (CrossPoint); with KoReader alone, pages and reading days come from the progress history.
+
+A synced book that matches no EPUB of the library (shown by its document hash, e.g. a file changed since it was downloaded, or sent to the reader another way) has an **« Associer à un livre »** button: search the catalog and pick the book; its title, cover, pages and links then come from that EPUB (« Dissocier » removes the association).
+
+The reading and sign-in pages are written with [Alpine.js](https://alpinejs.dev) (3.17.4, pinned, loaded from jsDelivr, no build step): the templates are in the HTML (`x-for`, `x-text`…), the scripts only call the API and compute the view data (`Alpine.data('reading')`, `Alpine.data('login')`); `static/theme.js` sets the light/dark class before the first paint; the menu (`static/partials/nav.html`, `static/nav.js`) is the same as the catalog's.
+
+The page assets are served with a version (`/static/reading.js?v=<modification time>`), so that a reverse proxy caching static files never serves an outdated script after an update.

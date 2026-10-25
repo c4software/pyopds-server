@@ -64,6 +64,7 @@ Le projet suit une architecture de type MVC (Modèle-Vue-Contrôleur) simplifié
 * `tailwind.config.js`, `styles/tailwind.css`, `tools/tailwind.py` : génération de `static/tailwind.css` (outil de développement, jamais requis par le serveur).
 * `Dockerfile` : étapes `css` (compile la feuille de style), `dev` (rechargement à chaud) et image de production ; `docker-compose.dev.yml` pour le développement.
 * `tests/` : Tests unitaires (`unittest`).
+* `README.md` : présentation qui donne envie (captures, points forts, démarrage rapide, liste des fonctionnalités repliée) ; la documentation technique est dans `docs/` (`installation.md` : installation, variables d'environnement, clients, comptes, sécurité ; `catalog.md` : bibliothèque et flux ; `web-ui.md` ; `sync-api.md` ; `tools.md` ; `development.md`), référencée par le README. Toute nouvelle fonctionnalité se documente dans le fichier `docs/` concerné (et dans les points forts du README si elle se voit). Captures dans `docs/screenshots/`, faites sur une bibliothèque de démonstration (classiques du domaine public, compte fictif) : jamais de nom de domaine, d'adresse ni de données réelles.
 
 ### Ajout de fonctionnalités
 1.  **Contrôleur :** Créer ou modifier une méthode dans une classe de contrôleur (`controllers/`).

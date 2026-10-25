@@ -8,7 +8,7 @@
 .pytest_cache
 books
 config
-preview
+docs
 tests
 *.db
 session.secret
