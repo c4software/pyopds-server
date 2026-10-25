@@ -5,6 +5,10 @@ The settings are read from a TOML file: `audiobook.toml` at the project root, co
 named by AUDIOBOOK_CONFIG_PATH (same keys, its values win). String values may read the environment
 ("${TTS_API_KEY}"), so that a key stays out of the file. The audiobook is off while the server URL
 or the model is empty.
+
+Cloned voices (`[clones.<name>]`: a WAV recording and its transcript) are read by a voice cloning model
+(`clone_model`, Qwen3-TTS "Base"); their reference recordings can be made from a written description by a
+voice design model (`design_model`, python -m controllers.tools.voice_design).
 """
 import functools
 import os
@@ -22,6 +26,18 @@ RESPONSE_FORMATS = {'wav': 'audio/wav', 'mp3': 'audio/mpeg', 'opus': 'audio/ogg'
 MAX_CHARS_RANGE = (50, 4000)
 TIMEOUT_RANGE = (1, 600)
 CONCURRENCY_RANGE = (1, 32)
+
+
+@dataclass(frozen=True)
+class ClonedVoice:
+    """Voice read by the cloning model from a reference recording.
+
+    Attributes:
+        audio: WAV recording of the voice (a few seconds of speech).
+        text: Transcript of the recording, word for word.
+    """
+    audio: Path
+    text: str
 
 
 def expand_env(value: str) -> str:
@@ -46,6 +62,9 @@ class AudiobookConfig:
         timeout: Seconds allowed for one request.
         concurrency: Requests sent to the server at the same time.
         extra: Fields added to every request.
+        clone_model: Voice cloning model, for the cloned voices.
+        design_model: Voice design model (python -m controllers.tools.voice_design).
+        clones: Cloned voices by name, offered with the voices of the model.
     """
     url: str = ''
     model: str = ''
@@ -59,6 +78,9 @@ class AudiobookConfig:
     timeout: int = 120
     concurrency: int = 2
     extra: dict = field(default_factory=dict)
+    clone_model: str = ''
+    design_model: str = ''
+    clones: dict[str, ClonedVoice] = field(default_factory=dict)
 
     @property
     def enabled(self) -> bool:
@@ -66,8 +88,9 @@ class AudiobookConfig:
         return bool(self.url and self.model)
 
     @classmethod
-    def from_dict(cls, data: dict, base: 'AudiobookConfig | None' = None) -> 'AudiobookConfig':
-        """Build the settings from parsed TOML, completing `base` (its values are kept for the missing keys).
+    def from_dict(cls, data: dict, base: 'AudiobookConfig | None' = None, folder: Path | None = None) -> 'AudiobookConfig':
+        """Build the settings from parsed TOML, completing `base` (its values are kept for the missing keys);
+        relative paths of the cloned voices are read from `folder` (the TOML file's).
 
         Raises:
             ValueError: When a value has the wrong type or is out of bounds.
@@ -77,7 +100,8 @@ class AudiobookConfig:
         if unknown := sorted(set(data) - known):
             raise ValueError(f'unknown setting(s): {", ".join(unknown)}')
         changes: dict = {}
-        for name in ('url', 'model', 'api_key', 'voice', 'instructions', 'response_format', 'instructions_field'):
+        for name in ('url', 'model', 'api_key', 'voice', 'instructions', 'response_format', 'instructions_field',
+                     'clone_model', 'design_model'):
             if name in data:
                 if not isinstance(data[name], str):
                     raise ValueError(f'{name} must be a string')
@@ -104,7 +128,29 @@ class AudiobookConfig:
             if not isinstance(data['extra'], dict):
                 raise ValueError('[extra] must be a table')
             changes['extra'] = base.extra | data['extra']
-        return replace(base, **changes)
+        if 'clones' in data:
+            changes['clones'] = base.clones | cls._clones(data['clones'], folder or Path.cwd())
+        config = replace(base, **changes)
+        if config.clones and not config.clone_model:
+            raise ValueError('clone_model is required by [clones]')
+        return config
+
+    @staticmethod
+    def _clones(table: object, folder: Path) -> dict[str, ClonedVoice]:
+        """Cloned voices of a `[clones]` table: {name: {audio (path, relative to `folder`), text}}."""
+        if not isinstance(table, dict):
+            raise ValueError('[clones] must be a table')
+        clones = {}
+        for name, voice in table.items():
+            if not name.strip() or not isinstance(voice, dict):
+                raise ValueError(f'clones.{name} must be a table')
+            audio, text = voice.get('audio'), voice.get('text')
+            if not isinstance(audio, str) or not audio.strip() or not isinstance(text, str) or not text.strip():
+                raise ValueError(f'clones.{name} needs an audio path and its text')
+            if unknown := sorted(set(voice) - {'audio', 'text'}):
+                raise ValueError(f'clones.{name}: unknown setting(s): {", ".join(unknown)}')
+            clones[name.strip()] = ClonedVoice(folder / expand_env(audio).strip(), ' '.join(text.split()))
+        return clones
 
 
 def load_audiobook_config(path: str | os.PathLike, base: AudiobookConfig | None = None) -> AudiobookConfig:
@@ -115,7 +161,7 @@ def load_audiobook_config(path: str | os.PathLike, base: AudiobookConfig | None 
         tomllib.TOMLDecodeError, ValueError: When the file is invalid.
     """
     with open(path, 'rb') as f:
-        return AudiobookConfig.from_dict(tomllib.load(f), base)
+        return AudiobookConfig.from_dict(tomllib.load(f), base, Path(path).resolve().parent)
 
 
 @functools.cache
@@ -140,4 +186,4 @@ def get_audiobook_config() -> AudiobookConfig:
         return config
 
 
-__all__ = ['AudiobookConfig', 'expand_env', 'get_audiobook_config', 'load_audiobook_config']
+__all__ = ['AudiobookConfig', 'ClonedVoice', 'expand_env', 'get_audiobook_config', 'load_audiobook_config']

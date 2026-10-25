@@ -118,6 +118,24 @@ The following environment variables can be set:
   ```
 
   Each reader can give a book another voice and tone (« Voix et ton » in the web reader); these are the defaults. A sentence of about 6 seconds is synthesized in about 3 seconds by Qwen3-TTS 1.7B on a local GPU, so the sentences follow each other without waiting.
+
+  **Cloned voices.** The ready-made voices of a model are rarely native French speakers. A voice cloning model (Qwen3-TTS « Base ») reads with the voice of a short WAV recording instead, the same voice from one request to the next, with the accent of the recording. The recording is made once from a written description by a voice design model (Qwen3-TTS « VoiceDesign »), with [`python -m controllers.tools.voice_design`](tools.md#audiobook-voices): no real person's voice is needed. Each `[clones.<name>]` voice is offered to the readers before those of `model`, and can be the default `voice`:
+
+  ```toml
+  clone_model = "silentchuck/qwen3-tts-12hz-1.7b-base"            # reads the cloned voices
+  design_model = "silentchuck/qwen3-tts-12hz-1.7b-voice-design"   # creates them (voice_design tool)
+  voice = "narrateur"
+
+  [clones.narrateur]
+  audio = "voix/narrateur.wav"      # relative to this file's folder
+  text = "Il était une fois, au bord d'une forêt immense, un vieux meunier qui vivait seul avec son chat. Chaque matin, il ouvrait les volets de son moulin et regardait le soleil se lever sur les champs de blé."
+
+  [clones.narratrice]
+  audio = "voix/narratrice.wav"
+  text = "Il était une fois, au bord d'une forêt immense, un vieux meunier qui vivait seul avec son chat. Chaque matin, il ouvrait les volets de son moulin et regardait le soleil se lever sur les champs de blé."
+  ```
+
+  Two French voices made this way (a male and a female narrator) come with the project, in [`voix/french/`](../voix/french/README.md) (`/app/voix/french/` in the Docker image): use `audio = "/app/voix/french/narrateur.wav"` without creating any. `text` is the word-for-word transcript of the recording. The recording is sent with every request of its voice (`reference_audio`, base64 WAV, and `reference_text`); the reading tone of the book is not used by the cloning model, the voice reads as recorded. Clone only voices you may use: a voice designed from a description, your own, or one whose owner agreed (a narrator's voice is protected like their image, and published recordings by their publisher's rights). Model servers that load one model at a time (llama-swap) switch models when the books use both a cloned voice and a ready-made one.
 - **ONLINE_METADATA**: Set to `true` to look up, without any API key, the cover ([iTunes Search](https://performance-partners.apple.com/search-api), then [Open Library](https://openlibrary.org/developers/api)), print page count and description (Open Library) of synced books the library does not provide (default: disabled).
 - **HARDCOVER_API_KEY**: [Hardcover](https://hardcover.app/account/api) API key (`read:catalog` is enough) to add moods, genres, content warnings, community rating, series and position, release year and description to synced books, and the next book of a series (`GET /api/v1/documents/{document}/next`) (default: disabled). Requests are throttled (1.1 s apart, 4,000 a day, 10 min pause after a 429).
 

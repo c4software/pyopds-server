@@ -34,6 +34,7 @@ COPY --from=css /src/static/tailwind.css /app/static/tailwind.css
 COPY genres.toml /app/genres.toml
 COPY metadata.toml /app/metadata.toml
 COPY audiobook.toml /app/audiobook.toml
+COPY voix/ /app/voix/
 
 ENV LIBRARY_DIR=/books
 

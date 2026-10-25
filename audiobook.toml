@@ -44,6 +44,16 @@ timeout = 120
 # Requests sent to the server at the same time, for all the readers
 concurrency = 2
 
+# Cloned voices: a voice cloning model (Qwen3-TTS "Base") reads with the voice of a short WAV
+# recording (sent with every request, with its transcript); voices made from a description by a
+# voice design model with `python -m controllers.tools.voice_design <name> "<description>"`.
+# Each [clones.<name>] voice is offered before those of `model`, and can be the default `voice`.
+clone_model = ""
+design_model = ""
+# [clones.narrateur]
+# audio = "voix/narrateur.wav"     (relative to the settings file's folder)
+# text = "Il était une fois, …"    (transcript of the recording, word for word)
+
 # Extra fields added to every request (options of a given model)
 [extra]
 # language = "French"   (Qwen3-TTS: otherwise the language is guessed for each request)

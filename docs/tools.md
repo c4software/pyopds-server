@@ -19,6 +19,19 @@ docker exec cops python -m controllers.tools.duplicates --move-to /config/doublo
 
 In each group one file is kept: the one already read on a reader (known to the sync database, so its progress stays attached to a library book), then the one with a cover, a readable file name containing the title (not garbled by a wrong encoding), metadata, the largest file, the oldest. Folders left empty are removed. `--move-to` must be outside the library, otherwise the copies would still appear in the catalog.
 
+## Audiobook voices
+
+A command line tool creates a voice of the audiobook from a written description, without any recording of a real person: the voice design model of the settings (`design_model` of [`audiobook.toml`](../audiobook.toml), Qwen3-TTS « VoiceDesign ») reads a reference text with a voice made from the description, and the recording becomes a cloned voice, read by the cloning model (`clone_model`) for the whole book (see [`AUDIOBOOK_CONFIG_PATH`](installation.md#configuration)).
+
+```bash
+python -m controllers.tools.voice_design narrateur "Voix masculine française d'une cinquantaine d'années, grave, chaude et veloutée, légèrement feutrée. Narrateur professionnel de livre audio : diction parfaite, accent français standard, débit posé, intonation naturelle et expressive sans excès."
+python -m controllers.tools.voice_design narratrice "Voix féminine française d'une quarantaine d'années, chaude, douce et légèrement grave, timbre velouté et rassurant. Narratrice professionnelle de livre audio : diction parfaite, accent français standard, débit posé, intonation naturelle et expressive sans excès."
+# In the Docker image: written to /config/voix/<name>.wav, next to AUDIOBOOK_CONFIG_PATH
+docker exec cops python -m controllers.tools.voice_design narrateur "…"
+```
+
+The recording (`voix/<name>.wav` next to the settings file, or `--output`) is about fifteen seconds of a fixed French text (`--text` to read another one); the tool prints the `[clones.<name>]` table to add to the settings, then restart the server. The design model invents the voice again on each call: listen to the recording (`aplay voix/narrateur.wav`) and run the tool again until one pleases. Describe the gender, age, timbre, accent and reading style; the descriptions above gave the two voices of the example settings.
+
 ## Fixing metadata (genres, authors, titles)
 
 A command line tool lists the books whose metadata need fixing in a CSV file, then writes the completed file back into the EPUBs:
