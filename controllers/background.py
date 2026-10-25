@@ -9,6 +9,10 @@ import threading
 import time
 from collections.abc import Callable
 
+# Lifetime of the library caches (indexes, recent books, reading states, recommendations): past it, they are
+# rebuilt in the background. A synced reading refreshes its reader's caches at once, « Rafraîchir » all of them
+CACHE_LIFETIME = 3600
+
 _locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
 _running: set[str] = set()
@@ -75,4 +79,4 @@ def warm_up(tasks: list[Callable[[], None]]) -> None:
     threading.Thread(target=run, name='warm-up', daemon=True).start()
 
 
-__all__ = ['keep_fresh', 'refresh_in_background', 'shared_instance', 'warm_up']
+__all__ = ['CACHE_LIFETIME', 'keep_fresh', 'refresh_in_background', 'shared_instance', 'warm_up']

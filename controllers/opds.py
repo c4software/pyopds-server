@@ -16,7 +16,7 @@ from collections.abc import Collection
 from dataclasses import dataclass, field
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from controllers.background import keep_fresh, shared_instance
+from controllers.background import CACHE_LIFETIME, keep_fresh, shared_instance
 from controllers.genres import genre_key, get_genre_config, normalize_genres
 from controllers.http_io import not_modified_since, redirect, send_body
 from controllers.metadata_rules import author_key, normalize_author_name, normalize_series_name
@@ -436,7 +436,6 @@ class BookScanner:
         self._path_index = None  # {path: (author, [genres...])}
         self._recent_books_cache = None
         self._recent_books_cache_time = 0
-        self.RECENT_CACHE_TTL = 300
     
     def invalidate_caches(self) -> None:
         """Invalidate all caches. Called when a missing file is detected."""
@@ -599,7 +598,7 @@ class BookScanner:
             self._recent_books_cache, self._recent_books_cache_time = books, time.time()
 
         keep_fresh('recent-books', lambda: self._recent_books_cache_time if self._recent_books_cache is not None else 0,
-                   self.RECENT_CACHE_TTL, rescan)
+                   CACHE_LIFETIME, rescan)
         return self._recent_books_cache[:limit]
 
     def _scan_recent_books(self, directory_path: str, limit: int, exclude: Collection[str] = ()) -> list[dict]:

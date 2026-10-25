@@ -8,12 +8,11 @@ import zipfile
 from html.parser import HTMLParser
 from urllib.parse import unquote
 
-from controllers.background import keep_fresh, shared_instance
+from controllers.background import CACHE_LIFETIME, keep_fresh, shared_instance
 from controllers.genres import genre_key
 from controllers.opds import LIBRARY_DIR, BookMetadata, BookScanner, SecurityUtils, library_relative_path
 
 CHUNK_SIZE = 1024
-INDEX_TTL = 300
 # Books whose light metadata (book_meta) stays cached; the oldest entries are dropped beyond it
 META_CACHE_MAX = 4096
 # Characters of text per printed page (~300 words, a typical paperback novel page)
@@ -198,7 +197,7 @@ class LibraryIndex:
 
     def _refresh(self) -> None:
         """Hash index usable: built on first use, then rebuilt in the background every few minutes."""
-        keep_fresh('library-hashes', lambda: self._built_at, INDEX_TTL, self._rebuild)
+        keep_fresh('library-hashes', lambda: self._built_at, CACHE_LIFETIME, self._rebuild)
 
     def _rebuild(self) -> None:
         by_key: dict[str, str] = {}
@@ -293,7 +292,7 @@ class LibraryIndex:
 
     def _refresh_series(self) -> None:
         """Series and title indexes usable: built on first use, then rebuilt in the background every few minutes."""
-        keep_fresh('library-series', lambda: self._series_built_at, INDEX_TTL, self._rebuild_series)
+        keep_fresh('library-series', lambda: self._series_built_at, CACHE_LIFETIME, self._rebuild_series)
 
     def _rebuild_series(self) -> None:
         """Build the {series key: books} and {title key: books} indexes, reading only new or changed OPFs."""

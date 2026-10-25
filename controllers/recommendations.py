@@ -13,7 +13,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 
-from controllers.background import refresh_in_background, shared_instance
+from controllers.background import CACHE_LIFETIME, refresh_in_background, shared_instance
 from controllers.genres import genre_key
 from controllers.metadata_rules import author_key, normalize_author_name
 from controllers.reading_state import ReadingStateService, reading_signal
@@ -26,7 +26,6 @@ SERIES_NEXT_BONUS = 6.0
 SERIES_LATER_BONUS = 2.0
 SERIES_UNKNOWN_INDEX_BONUS = 1.5
 RECOMMENDATIONS_LIMIT = 30
-CACHE_TTL = 300
 # Candidates whose series is looked up (LibraryIndex.details opens the EPUB once, then caches it)
 MAX_SERIES_LOOKUPS = 200
 
@@ -179,7 +178,7 @@ class RecommendationService:
     """Compute and cache the recommendations of a sync user.
 
     The cache entry is dropped as soon as the user's reading state changes (ReadingStateService fingerprint),
-    so a new sync is reflected immediately; older than CACHE_TTL seconds, it keeps answering while scored
+    so a new sync is reflected immediately; older than CACHE_LIFETIME seconds, it keeps answering while scored
     again in the background.
     """
 
@@ -203,7 +202,7 @@ class RecommendationService:
                 self._cache.pop(user, None)
 
     def for_user(self, user: str) -> Recommendations:
-        """Recommendations of a user, cached while fresh (CACHE_TTL) and while the reading state is unchanged."""
+        """Recommendations of a user, cached while fresh (CACHE_LIFETIME) and while the reading state is unchanged."""
         state = ReadingStateService.get_instance().for_user(user)
 
         def compute() -> Recommendations:
@@ -216,7 +215,7 @@ class RecommendationService:
             cached = self._cache.get(user)
         if cached and cached[1] == state.fingerprint:
             # Same reading state, only old: kept while scored again in the background (library changes)
-            if time.time() - cached[0] >= CACHE_TTL:
+            if time.time() - cached[0] >= CACHE_LIFETIME:
                 refresh_in_background(f'recommendations:{user}', compute)
             return cached[2]
         return compute()

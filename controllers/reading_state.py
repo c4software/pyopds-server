@@ -9,10 +9,9 @@ import threading
 import time
 from dataclasses import dataclass, field
 
-from controllers.background import refresh_in_background, shared_instance
+from controllers.background import CACHE_LIFETIME, refresh_in_background, shared_instance
 
 FINISHED_RATIO = 0.9
-CACHE_TTL = 300
 HISTORY_LIMIT = 100_000
 
 
@@ -59,7 +58,7 @@ class ReadingStateService:
     """Compute and cache the reading state of a sync user.
 
     The cache entry is dropped as soon as the sync history changes (fingerprint of the progress rows, a
-    single SQL query); older than CACHE_TTL seconds, it keeps answering while recomputed in the background.
+    single SQL query); older than CACHE_LIFETIME seconds, it keeps answering while recomputed in the background.
     """
 
     _instance: 'ReadingStateService | None' = None
@@ -101,7 +100,7 @@ class ReadingStateService:
             cached = self._cache.get(user)
         if cached and cached[1].fingerprint == fingerprint:
             # Same history, only old: kept while it is matched again in the background (library changes)
-            if time.time() - cached[0] >= CACHE_TTL:
+            if time.time() - cached[0] >= CACHE_LIFETIME:
                 refresh_in_background(f'reading-state:{user}', compute)
             return cached[1]
         return compute()
