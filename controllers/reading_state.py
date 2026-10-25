@@ -6,10 +6,9 @@ recommendations, the personal OPDS feeds ("En cours", "Suite de vos séries") an
 books" filter of the catalog.
 """
 import threading
-import time
 from dataclasses import dataclass, field
 
-from controllers.background import CACHE_LIFETIME, refresh_in_background, shared_instance
+from controllers.background import shared_instance
 
 FINISHED_RATIO = 0.9
 HISTORY_LIMIT = 100_000
@@ -57,8 +56,8 @@ class ReadingState:
 class ReadingStateService:
     """Compute and cache the reading state of a sync user.
 
-    The cache entry is dropped as soon as the sync history changes (fingerprint of the progress rows, a
-    single SQL query); older than CACHE_LIFETIME seconds, it keeps answering while recomputed in the background.
+    The cache entry is replaced as soon as the sync history (fingerprint of the progress rows, a single SQL
+    query) or the library (snapshot version, controllers.library) changes.
     """
 
     _instance: 'ReadingStateService | None' = None
@@ -69,41 +68,29 @@ class ReadingStateService:
         return shared_instance(cls)
 
     def __init__(self):
-        self._cache: dict[str, tuple[float, ReadingState]] = {}
+        self._cache: dict[str, ReadingState] = {}
         self._lock = threading.Lock()
 
-    def invalidate(self, user: str | None = None) -> None:
-        """Forget the cached state of a user (of everyone when None, e.g. after a library rescan)."""
-        with self._lock:
-            if user is None:
-                self._cache.clear()
-            else:
-                self._cache.pop(user, None)
-
     def for_user(self, user: str) -> ReadingState:
-        """Reading state of a user, cached while fresh and while the sync history is unchanged."""
+        """Reading state of a user, cached while the sync history and the library are unchanged."""
         # Imported here: tests reload controllers.koreader_sync
         from controllers.koreader_sync import get_sync_storage
 
         rows, aliases = get_sync_storage().list_progress(user, HISTORY_LIMIT)
-        fingerprint = hash(tuple(
+        from controllers.library import snapshot
+        # The sync history and the library (its snapshot changes with each sync that finds new files)
+        fingerprint = hash((snapshot().version, tuple(
             (row['document'], row.get('status'), row.get('percentage'), row.get('updated_at'), row.get('library_path'))
             for row in rows
-        ))
-        def compute() -> ReadingState:
-            state = ReadingState(self._match(rows, aliases), fingerprint)
-            with self._lock:
-                self._cache[user] = (time.time(), state)
-            return state
-
+        )))
         with self._lock:
             cached = self._cache.get(user)
-        if cached and cached[1].fingerprint == fingerprint:
-            # Same history, only old: kept while it is matched again in the background (library changes)
-            if time.time() - cached[0] >= CACHE_LIFETIME:
-                refresh_in_background(f'reading-state:{user}', compute)
-            return cached[1]
-        return compute()
+        if cached and cached.fingerprint == fingerprint:
+            return cached
+        state = ReadingState(self._match(rows, aliases), fingerprint)
+        with self._lock:
+            self._cache[user] = state
+        return state
 
     @staticmethod
     def _match(rows: list[dict], aliases: dict[str, list[str]]) -> list[dict]:

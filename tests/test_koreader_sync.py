@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 import unittest
+import support  # noqa: F401  (temporary library database, before any library is opened)
 
 TEMP_DB = tempfile.NamedTemporaryFile(delete=False)
 TEMP_DB.close()

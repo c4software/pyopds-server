@@ -124,6 +124,18 @@ class WebUIController:
         """GET /static/{name} or /static/{folder}/{name}: a web UI asset (scripts, stylesheets) from static/."""
         self._serve(self.params.get('name') or '')
 
+    def library_sync(self) -> None:
+        """POST /webui/library/sync: read the new and modified EPUBs of the library now (controllers.library);
+        answers {added, updated, removed, total, seconds, at}. For signed-in readers, or anyone when the server
+        has no accounts (minimal mode with a public catalog)."""
+        from controllers.features import accounts_enabled
+        from controllers.library import Library
+
+        if accounts_enabled() and not self.request.opds_user:
+            self._send_json({'message': 'Connexion requise'}, 401)
+            return
+        self._send_json(Library.get_instance().sync())
+
     def book_status(self) -> None:
         """GET /webui/book-status?path=<EPUB relative to LIBRARY_DIR>: reading status of a catalog book
         for the signed-in reader ({read, status, percentage, finished_date}; status None when never synced)."""

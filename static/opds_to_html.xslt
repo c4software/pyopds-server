@@ -67,9 +67,11 @@
                         <button id="search-toggle" type="button" class="md:hidden text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Rechercher">
                             <i data-lucide="search" class="w-4 h-4"></i>
                         </button>
-                        <a href="/opds/refresh" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 flex items-center" title="Rafraîchir le cache">
-                            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
-                        </a>
+                        <!-- Library sync (static/catalog/library-sync.js): signed-in readers, everyone without accounts -->
+                        <button id="library-sync" type="button" class="hidden items-center gap-1 text-slate-600 hover:text-slate-900 disabled:opacity-60 dark:text-slate-400 dark:hover:text-slate-200" title="Recharger la bibliothèque">
+                            <i id="library-sync-icon" data-lucide="refresh-cw" class="w-4 h-4"></i>
+                            <span id="library-sync-status" class="text-xs" hidden="hidden"></span>
+                        </button>
                         <button id="mosaic-toggle" type="button" aria-pressed="false" class="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200" title="Activer la mosaïque de couvertures">
                             <i id="mosaic-toggle-on-icon" class="hidden w-4 h-4" data-lucide="image"></i>
                             <i id="mosaic-toggle-off-icon" class="w-4 h-4" data-lucide="image-off"></i>
@@ -296,6 +298,7 @@
                 <script src="/static/catalog/search.js"></script>
                 <script src="/static/catalog/pagination.js"></script>
                 <script src="/static/catalog/book-sheet.js"></script>
+                <script src="/static/catalog/library-sync.js"></script>
                 <!--#include catalog-reader -->
                 <script src="/static/catalog/main.js"></script>
             </body>

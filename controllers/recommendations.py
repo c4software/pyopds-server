@@ -6,14 +6,14 @@ each signal weighted by how recently the book was read.
 
 The scoring functions are pure (plain dicts in, plain values out); RecommendationService wires
 them to the user's reading state (controllers.reading_state: sync history matched to the library)
-and the BookScanner indexes.
+and the library indexes (controllers.library snapshot, through BookScanner).
 """
 import math
 import threading
 import time
 from dataclasses import dataclass, field
 
-from controllers.background import CACHE_LIFETIME, refresh_in_background, shared_instance
+from controllers.background import shared_instance
 from controllers.genres import genre_key
 from controllers.metadata_rules import author_key, normalize_author_name
 from controllers.reading_state import ReadingStateService, reading_signal
@@ -177,9 +177,8 @@ class Recommendations:
 class RecommendationService:
     """Compute and cache the recommendations of a sync user.
 
-    The cache entry is dropped as soon as the user's reading state changes (ReadingStateService fingerprint),
-    so a new sync is reflected immediately; older than CACHE_LIFETIME seconds, it keeps answering while scored
-    again in the background.
+    The cache entry is replaced as soon as the user's reading state changes (ReadingStateService fingerprint:
+    sync history and library), so a new sync is reflected immediately.
     """
 
     _instance: 'RecommendationService | None' = None
@@ -190,35 +189,21 @@ class RecommendationService:
         return shared_instance(cls)
 
     def __init__(self):
-        self._cache: dict[str, tuple[float, int, Recommendations]] = {}
+        self._cache: dict[str, tuple[int, Recommendations]] = {}
         self._lock = threading.Lock()
 
-    def invalidate(self, user: str | None = None) -> None:
-        """Forget the cached recommendations of a user (of everyone when None)."""
-        with self._lock:
-            if user is None:
-                self._cache.clear()
-            else:
-                self._cache.pop(user, None)
-
     def for_user(self, user: str) -> Recommendations:
-        """Recommendations of a user, cached while fresh (CACHE_LIFETIME) and while the reading state is unchanged."""
+        """Recommendations of a user, cached while the reading state is unchanged."""
         state = ReadingStateService.get_instance().for_user(user)
-
-        def compute() -> Recommendations:
-            result = self._compute(state.books)
-            with self._lock:
-                self._cache[user] = (time.time(), state.fingerprint, result)
-            return result
 
         with self._lock:
             cached = self._cache.get(user)
-        if cached and cached[1] == state.fingerprint:
-            # Same reading state, only old: kept while scored again in the background (library changes)
-            if time.time() - cached[0] >= CACHE_LIFETIME:
-                refresh_in_background(f'recommendations:{user}', compute)
-            return cached[2]
-        return compute()
+        if cached and cached[0] == state.fingerprint:
+            return cached[1]
+        result = self._compute(state.books)
+        with self._lock:
+            self._cache[user] = (state.fingerprint, result)
+        return result
 
     @staticmethod
     def _compute(history: list[dict]) -> Recommendations:

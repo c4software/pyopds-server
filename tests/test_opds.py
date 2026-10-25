@@ -22,6 +22,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 import zipfile
 from unittest import mock
+import support  # noqa: F401  (temporary library database, before any library is opened)
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if PROJECT_ROOT not in sys.path:
@@ -736,7 +737,7 @@ class TestBookDetailsInFeeds(unittest.TestCase):
         self.assertEqual((meta['year'], meta['rating'], meta['series_index']), (1952, 4.5, 2))
         opds = importlib.import_module('controllers.opds')
         with mock.patch.object(opds.BookMetadata, 'extract_epub_info', side_effect=AssertionError('read again')):
-            self.assertIs(library.book_meta(path), meta)
+            self.assertEqual(library.book_meta(path), meta)
             # details() reuses it: only the cover and the page estimate are read
             self.assertEqual(library.details(path)['description'], meta['description'])
         self.assertEqual([os.path.basename(p) for _, p in library.series_books('LA FONDATION')],
@@ -900,7 +901,7 @@ class TestOPDSAuthAndRecommendations(unittest.TestCase):
     def test_catalog_requires_basic_auth_when_enabled(self):
         with mock.patch.dict(os.environ, {'OPDS_AUTH': 'true'}):
             for path in ('/', '/opds', '/opds/books', '/opds/search?q=dune', '/opds/opensearch.xml', '/opds_to_html.xslt',
-                         '/download/dune.epub', '/reading', '/opds/refresh', '/opds/recommendations'):
+                         '/download/dune.epub', '/reading', '/opds/recommendations'):
                 status, headers, _ = self._request('GET', path)
                 self.assertEqual(status, 401, path)
                 self.assertEqual(headers.get('WWW-Authenticate'), 'Basic realm="PyOPDS", charset="UTF-8"')
@@ -951,6 +952,19 @@ class TestOPDSAuthAndRecommendations(unittest.TestCase):
         self.assertIn('data-mode="full"', xslt)
         self.assertRegex(xslt, r'href="/reading" data-nav="reading" class="nav-link flex ')
         self.assertIn('/static/catalog/read-status.js?v=', xslt)
+
+    def test_library_sync_button(self):
+        good = basic_header('reader', self.password)
+        # Signed-in readers only, everyone when the server has no accounts (minimal mode, public catalog)
+        self.assertEqual(self._request('POST', '/webui/library/sync', {})[0], 401)
+        status, _, body = self._request('POST', '/webui/library/sync', {}, good)
+        self.assertEqual(status, 200)
+        result = json.loads(body)
+        self.assertEqual((result['added'], result['removed']), (0, 0))
+        self.assertGreater(result['total'], 0)
+        with mock.patch.dict(os.environ, {'MINIMAL_MODE': 'true'}):
+            self.assertEqual(self._request('POST', '/webui/library/sync', {})[0], 200)
+        self.assertEqual(self._request('GET', '/opds/refresh')[0], 404)
 
     def test_minimal_mode_does_not_load_the_full_server_modules(self):
         # Controllers of the sync, the web reader and the reader's data are imported on their first request only
@@ -1427,39 +1441,60 @@ class TestWebReader(unittest.TestCase):
         self.assertEqual((book['start_date'], book['completed'], book['avg_fwd']), (1792800000, False, 30))
 
 
-class TestBackgroundRefresh(unittest.TestCase):
-    """Caches built once, then refreshed in the background while the old value keeps answering."""
+class TestLibrarySync(unittest.TestCase):
+    """Library metadata stored in SQLite (controllers/library.py): one sync rule, restarts without reading EPUBs."""
 
-    def test_keep_fresh_never_makes_a_request_wait_for_a_refresh(self):
-        from controllers.background import keep_fresh
-        cache = {'built_at': 0.0, 'value': None}
-        started, release = threading.Event(), threading.Event()
+    def setUp(self):
+        self.library_dir = tempfile.TemporaryDirectory()
+        self.db_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.library_dir.cleanup)
+        self.addCleanup(self.db_dir.cleanup)
+        self.library = importlib.import_module('controllers.library')
+        self.opds = importlib.import_module('controllers.opds')
+        self.db_path = os.path.join(self.db_dir.name, 'library.db')
+        create_epub(self.path('a.epub'), 'Alpha', 'Author One', date='2020-01-01')
+        create_epub(self.path('sub/b.epub'), 'Beta', 'Author Two')
 
-        def rebuild():
-            if cache['built_at']:
-                started.set()
-                release.wait(5)
-            cache['value'] = (cache['value'] or 0) + 1
-            cache['built_at'] = time.time()
+    def path(self, name):
+        path = os.path.join(self.library_dir.name, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        return path
 
-        # First use: built in the request
-        keep_fresh('test-cache', lambda: cache['built_at'], 60, rebuild)
-        self.assertEqual(cache['value'], 1)
-        # Fresh: nothing to do
-        keep_fresh('test-cache', lambda: cache['built_at'], 60, rebuild)
-        self.assertEqual(cache['value'], 1)
-        # Too old: the request goes on with the old value, a single rebuild runs in the background
-        cache['built_at'] -= 120
-        keep_fresh('test-cache', lambda: cache['built_at'], 60, rebuild)
-        self.assertTrue(started.wait(5))
-        keep_fresh('test-cache', lambda: cache['built_at'], 60, rebuild)
-        self.assertEqual(cache['value'], 1)
-        release.set()
-        for _ in range(100):
-            if cache['value'] == 2:
-                break
-            time.sleep(0.02)
-        self.assertEqual(cache['value'], 2)
+    def open_library(self):
+        return self.library.Library(self.library_dir.name, self.db_path)
+
+    def test_sync_reads_only_new_modified_and_removed_books(self):
+        library = self.open_library()
+        snapshot = library.snapshot
+        self.assertEqual(sorted(book.title for book in snapshot.books.values()), ['Alpha', 'Beta'])
+        self.assertEqual(snapshot.books[self.path('a.epub')].info()['year'], '2020')
+        # Nothing changed: no EPUB opened, same snapshot
+        with mock.patch.object(self.opds.BookMetadata, 'extract_epub_info', side_effect=AssertionError('read again')):
+            self.assertEqual(library.sync()['total'], 2)
+        self.assertIs(library.snapshot, snapshot)
+        # Added, modified (size or date) and removed books
+        create_epub(self.path('c.epub'), 'Gamma', 'Author One')
+        create_epub(self.path('a.epub'), 'Alpha 2', 'Author One')
+        os.utime(self.path('a.epub'), (1_000_000_000, 1_000_000_000))
+        os.remove(self.path('sub/b.epub'))
+        result = library.sync()
+        self.assertEqual((result['added'], result['updated'], result['removed'], result['total']), (1, 1, 1, 2))
+        self.assertGreater(library.snapshot.version, snapshot.version)
+        self.assertEqual(sorted(book.title for book in library.snapshot.books.values()), ['Alpha 2', 'Gamma'])
+        self.assertEqual(library.snapshot.catalog.authors, {'Author One': [self.path('a.epub'), self.path('c.epub')]})
+
+    def test_restart_reads_the_database_not_the_epubs(self):
+        self.open_library().sync()
+        with mock.patch.object(self.opds.BookMetadata, 'extract_epub_info', side_effect=AssertionError('read again')):
+            library = self.open_library()
+            self.assertEqual(sorted(book.title for book in library.snapshot.books.values()), ['Alpha', 'Beta'])
+            self.assertEqual(library.sync()['added'], 0)
+        # Another library in the same database: its books are read again
+        other = tempfile.TemporaryDirectory()
+        self.addCleanup(other.cleanup)
+        create_epub(os.path.join(other.name, 'z.epub'), 'Zeta', 'Author Z')
+        library = self.library.Library(other.name, self.db_path)
+        self.assertEqual([book.title for book in library.snapshot.books.values()], ['Zeta'])
 
 
 if __name__ == '__main__':

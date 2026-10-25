@@ -1,20 +1,17 @@
-"""Map KOReader document hashes to EPUB files of the library."""
+"""Lookups of library EPUBs (KOReader document hashes, titles, series) and EPUB helpers (document hashes,\ndescriptions, page estimates); the books come from the library snapshot (controllers.library)."""
 import hashlib
 import os
 import posixpath
 import re
-import time
 import zipfile
 from html.parser import HTMLParser
 from urllib.parse import unquote
 
-from controllers.background import CACHE_LIFETIME, keep_fresh, shared_instance
+from controllers.background import shared_instance
 from controllers.genres import genre_key
-from controllers.opds import LIBRARY_DIR, BookMetadata, BookScanner, SecurityUtils, library_relative_path
+from controllers.opds import LIBRARY_DIR, BookMetadata, SecurityUtils, library_relative_path
 
 CHUNK_SIZE = 1024
-# Books whose light metadata (book_meta) stays cached; the oldest entries are dropped beyond it
-META_CACHE_MAX = 4096
 # Characters of text per printed page (~300 words, a typical paperback novel page)
 CHARS_PER_PAGE = 1800
 HTML_EXTENSIONS = ('.xhtml', '.html', '.htm')
@@ -172,7 +169,8 @@ def estimate_print_pages(path: str) -> int | None:
 
 
 class LibraryIndex:
-    """Lazily built index {document hash or file name: EPUB path}, refreshed every few minutes."""
+    """Lookups of library EPUBs (by KOReader document hash, title, series) and their metadata, all read from
+    the library snapshot (controllers.library: metadata stored in library.db)."""
 
     _instance = None
 
@@ -181,43 +179,18 @@ class LibraryIndex:
         """Get or create the singleton index."""
         return shared_instance(cls)
 
-    def __init__(self):
-        self._by_key: dict[str, str] = {}
-        self._hash_cache: dict[str, tuple[float, int, str | None]] = {}
-        self._details_cache: dict[str, tuple[float, dict]] = {}
-        # {path: (mtime, book_meta)}: light OPF metadata of the books shown in the feeds
-        self._meta_cache: dict[str, tuple[float, dict]] = {}
-        self._built_at = 0.0
-        # {path: (mtime, series, series index, title, author)}, {series key: [(series index or None, path)]}
-        # and {title key: [path]}
-        self._series_cache: dict[str, tuple[float, str | None, int | float | None, str | None, str | None]] = {}
-        self._series_index: dict[str, list[tuple[int | float | None, str]]] = {}
-        self._title_index: dict[str, list[str]] = {}
-        self._series_built_at = 0.0
+    @staticmethod
+    def _library():
+        from controllers.library import Library
+        return Library.get_instance()
 
-    def _refresh(self) -> None:
-        """Hash index usable: built on first use, then rebuilt in the background every few minutes."""
-        keep_fresh('library-hashes', lambda: self._built_at, CACHE_LIFETIME, self._rebuild)
-
-    def _rebuild(self) -> None:
-        by_key: dict[str, str] = {}
-        for path in BookScanner.get_instance().collect_all_epub_paths():
-            try:
-                stat = os.stat(path)
-            except OSError:
-                continue
-            cached = self._hash_cache.get(path)
-            if cached and cached[0] == stat.st_mtime and cached[1] == stat.st_size:
-                partial = cached[2]
-            else:
-                partial = koreader_partial_md5(path)
-                self._hash_cache[path] = (stat.st_mtime, stat.st_size, partial)
-            if partial:
-                by_key.setdefault(partial, path)
-            by_key.setdefault(filename_md5(path), path)
-            by_key.setdefault(os.path.basename(path), path)
-        self._by_key = by_key
-        self._built_at = time.time()
+    @classmethod
+    def _present(cls, path: str) -> bool:
+        """Whether a book of the snapshot is still on disk (a sync is started otherwise)."""
+        if os.path.exists(path):
+            return True
+        cls._library().sync_later()
+        return False
 
     @staticmethod
     def resolve_relative(relative_path: str) -> str | None:
@@ -231,10 +204,10 @@ class LibraryIndex:
 
     def find(self, documents: list[str], filename: str | None = None) -> str | None:
         """Return the EPUB path matching one of the hashes, or the device file name."""
-        self._refresh()
+        by_key = self._library().snapshot.by_key
         for key in [*documents, filename]:
-            if key and key in self._by_key and os.path.exists(self._by_key[key]):
-                return self._by_key[key]
+            if key and key in by_key and self._present(by_key[key]):
+                return by_key[key]
         return None
 
     def locate(self, documents: list[str], filename: str | None = None, library_path: str | None = None) -> str | None:
@@ -243,87 +216,22 @@ class LibraryIndex:
         return (library_path and self.resolve_relative(library_path)) or self.find(documents, filename)
 
     def book_meta(self, path: str) -> dict:
-        """Light metadata of a library EPUB, read from its OPF only (no cover, no page estimate).
-
-        Keys: title, author, genres, series, series_index, description (plain text), year and
-        rating (0-5, None when not rated). Cached per file modification time; raises OSError when
-        the file is missing.
-        """
-        mtime = os.path.getmtime(path)
-        cached = self._meta_cache.get(path)
-        if cached and cached[0] == mtime:
-            return cached[1]
-        info = BookMetadata.extract_epub_info(path) or {}
-        rating = info.get('rating')
-        meta = {
-            'title': info.get('title'),
-            'author': info.get('author'),
-            'genres': info.get('genres', []),
-            'series': info.get('series'),
-            'series_index': info.get('series_index'),
-            'description': description_text(info.get('description')),
-            'year': release_year(info.get('date')),
-            # calibre:rating counts half stars (0-10); 0 means "not rated"
-            'rating': min(5.0, rating / 2) if rating and rating > 0 else None,
-        }
-        self._meta_cache.pop(path, None)
-        if len(self._meta_cache) >= META_CACHE_MAX:
-            del self._meta_cache[next(iter(self._meta_cache))]
-        self._meta_cache[path] = (mtime, meta)
-        self._series_cache[path] = (mtime, meta['series'], meta['series_index'], meta['title'], meta['author'])
-        return meta
+        """Light metadata of a library EPUB (no cover, no page estimate): title, author, genres, series,
+        series_index, description (plain text), year and rating (0-5, None when not rated). From the
+        database; a file not synced yet is read (and a sync started). Raises OSError when it is missing."""
+        from controllers.library import Book, read_metadata
+        if not self._present(path):
+            raise FileNotFoundError(path)
+        library = self._library()
+        book = library.book(path)
+        if book is None:
+            library.sync_later()
+            book = Book(path, library_relative_path(path), 0, 0, None, read_metadata(path))
+        return book.book_meta()
 
     def details(self, path: str) -> dict:
-        """Title, author, genres, series, description, year, rating (see `book_meta`), cover presence
-        and estimated print pages, cached per file modification time."""
-        mtime = os.path.getmtime(path)
-        cached = self._details_cache.get(path)
-        if cached and cached[0] == mtime:
-            return cached[1]
-        cover, _ = BookMetadata.extract_epub_cover(path)
-        details = {
-            **self.book_meta(path),
-            'has_cover': cover is not None,
-            'page_count': estimate_print_pages(path),
-            'relative_path': library_relative_path(path),
-        }
-        self._details_cache[path] = (mtime, details)
-        return details
-
-    def _refresh_series(self) -> None:
-        """Series and title indexes usable: built on first use, then rebuilt in the background every few minutes."""
-        keep_fresh('library-series', lambda: self._series_built_at, CACHE_LIFETIME, self._rebuild_series)
-
-    def _rebuild_series(self) -> None:
-        """Build the {series key: books} and {title key: books} indexes, reading only new or changed OPFs."""
-        series_cache: dict[str, tuple[float, str | None, int | float | None, str | None, str | None]] = {}
-        index: dict[str, list[tuple[int | float | None, str]]] = {}
-        titles: dict[str, list[str]] = {}
-        for path in BookScanner.get_instance().collect_all_epub_paths():
-            try:
-                mtime = os.path.getmtime(path)
-            except OSError:
-                continue
-            # Shared with book_meta: an OPF read by a feed is not read again here, and conversely
-            cached = self._series_cache.get(path)
-            if not cached or cached[0] != mtime:
-                info = BookMetadata.extract_epub_info(path) or {}
-                cached = (mtime, info.get('series'), info.get('series_index'), info.get('title'), info.get('author'))
-            series_cache[path] = cached
-            _, series, position, title, _ = cached
-            if series_key(series):
-                index.setdefault(series_key(series), []).append((position, path))
-            if series_key(title):
-                titles.setdefault(series_key(title), []).append(path)
-        self._series_cache = series_cache
-        self._series_index = index
-        self._title_index = titles
-        self._series_built_at = time.time()
-
-    def invalidate(self) -> None:
-        """Rebuild the hash and series indexes on their next use (cached metadata stays, checked by mtime)."""
-        self._built_at = 0.0
-        self._series_built_at = 0.0
+        """`book_meta` plus cover presence and estimated print pages (read once, then stored)."""
+        return {**self.book_meta(path), **self._library().details(path), 'relative_path': library_relative_path(path)}
 
     @staticmethod
     def _series_order(book: tuple[int | float | None, str]) -> tuple:
@@ -336,8 +244,7 @@ class LibraryIndex:
         key = series_key(series)
         if not key:
             return []
-        self._refresh_series()
-        books = [book for book in self._series_index.get(key, []) if os.path.exists(book[1])]
+        books = [book for book in self._library().snapshot.series.get(key, []) if self._present(book[1])]
         return sorted(books, key=self._series_order)
 
     def find_by_title(self, title: str, author: str | None = None) -> str | None:
@@ -346,14 +253,14 @@ class LibraryIndex:
         key = series_key(title)
         if not key:
             return None
-        self._refresh_series()
-        paths = [path for path in self._title_index.get(key, []) if os.path.exists(path)]
+        snapshot = self._library().snapshot
+        paths = [path for path in snapshot.titles.get(key, []) if self._present(path)]
         if len(paths) <= 1:
             return paths[0] if paths else None
         wanted = set(series_key(author).split())
 
         def shared(path: str) -> int:
-            return len(wanted & set(series_key(self._series_cache[path][4]).split()))
+            return len(wanted & set(series_key(snapshot.books[path].meta.get('author')).split()))
 
         return max(paths, key=shared)
 
@@ -363,18 +270,17 @@ class LibraryIndex:
         key = series_key(series)
         if not key:
             return None
-        self._refresh_series()
         excluded = os.path.realpath(exclude) if exclude else None
 
         def same(path: str) -> bool:
             return excluded is not None and os.path.realpath(path) == excluded
 
         later = sorted(
-            (book for book in self._series_index.get(key, [])
+            (book for book in self._library().snapshot.series.get(key, [])
              if book[0] is not None and book[0] > position and not same(book[1])),
             key=self._series_order,
         )
-        later = [book for book in later if os.path.exists(book[1])]
+        later = [book for book in later if self._present(book[1])]
         return next((book for book in later if float(book[0]).is_integer()), later[0] if later else None)
 
 

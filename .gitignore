@@ -3,6 +3,7 @@ docker-compose.override.yml
 .DS_Store
 .venv
 koreader_sync.db
+library.db
 books/
 __pycache__/
 .pytest_cache/

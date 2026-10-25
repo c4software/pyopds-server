@@ -125,13 +125,14 @@ def register_routes(router):
     router.get(r'/opds/by-genre/.*', (OPDSController, 'show_genre_books'), name='opds.genre', auth=opds)
     router.get('/opds/series', (OPDSController, 'show_series_books'), name='opds.series', auth=opds)
     router.get(r'/opds/folder/.*', (OPDSController, 'show_folder_catalog'), name='opds.folder', auth=opds)
-    router.get('/opds/refresh', (OPDSController, 'refresh_cache'), name='opds.refresh', auth=opds)
     router.get('/opds/opensearch.xml', (OPDSController, 'serve_opensearch_description'), name='opds.opensearch', auth=opds)
     router.get('/opds/search', (OPDSController, 'show_search_results'), name='opds.search', auth=opds)
     router.get('/opds_to_html.xslt', (OPDSController, 'serve_xslt'), name='opds.xslt', auth=opds)
     router.get(r'/download/.*', (OPDSController, 'download_book'), name='opds.download', auth=opds)
     # Covers stay public: the CrossPoint Sync app shows them with <img> tags, without credentials
     router.get(r'/cover/.*', (OPDSController, 'download_cover'), name='opds.cover')
+    # Library sync of the header button (signed-in readers; anyone without accounts, checked by the action)
+    router.post('/webui/library/sync', (WebUIController, 'library_sync'), name='webui.library.sync', auth=opds)
 
     # Reader's pages and data, web reader, KOReader notes: not in minimal mode
     with router.full_only():

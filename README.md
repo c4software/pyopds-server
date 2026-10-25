@@ -136,6 +136,8 @@ The following environment variables can be set:
 - **REGISTRATION_DISABLED**: Set to `true` to refuse new accounts, from the readers as well as from the web sign-in page (default: registration open).
 - **OPDS_AUTH**: Set to `true` to make the whole catalog and web UI private (default: public catalog, optional sign-in). See [Accounts and sign-in](#accounts-and-sign-in).
 - **MINIMAL_MODE**: Set to `true` for a minimal server: the OPDS catalog and its web view (XSLT: browsing, search, book sheet, download) only. The sync APIs (KOSync, CrossPoint Sync, Nextcloud Notes), the reading and clippings pages, the web reader, the reader's feeds and tiles (« En cours », « Suite de vos séries », « À lire ensuite », « Masquer les livres lus », « Marquer comme lu ») and the account creation answer 404 or disappear from the web view; the stored data is kept for when the mode is turned off. With `OPDS_AUTH=true` the sign-in stays, with the existing accounts (default: full server).
+- **LIBRARY_DB_PATH**: SQLite file holding the metadata of the library books (default: `library.db` next to the sync database). A disposable cache: deleting it only costs one full read of the library.
+- **LIBRARY_SCAN_INTERVAL**: Seconds between two automatic library syncs (default: `14400`, 4 hours; `0`: only at startup and with the « Recharger » button). See [Library metadata](#library-metadata).
 - **OPDS_SESSION_SECRET**: Key signing the browser sessions (default: a random key written once to `session.secret` next to the sync database).
 - **GENRES_CONFIG_PATH**: Path to a custom genre file completing [`genres.toml`](genres.toml), with the same format: its subject-to-genre aliases and ignored subjects are added to the default ones (and win over them), and its `min_books` overrides the default threshold. Restart the server after editing it. Example (for instance in the mounted `config/` folder):
 
@@ -185,9 +187,20 @@ Check the merged configuration with `docker compose config`.
 2. Browse the book list at the `/opds/books` endpoint.
 3. Download books via the links provided in the OPDS feed.
 
+### Library metadata
+
+The metadata of the library books (title, author, date, genres, series, description, rating, KoReader document hash) are stored in a SQLite file, `library.db` (`LIBRARY_DB_PATH`), the single cache of the catalog. A **library sync** walks `LIBRARY_DIR`, compares each EPUB's date and size with the database, reads only the new or modified ones and drops the missing ones; every list, index (years, authors, genres, series), the recent books, the search and the readers' tiles then come from that state, in memory. A sync runs:
+
+- at startup (a restart reads the database: no EPUB opened);
+- every `LIBRARY_SCAN_INTERVAL` seconds (default 4 hours);
+- with the « Recharger » button of the web UI (`POST /webui/library/sync`, signed-in readers; anyone on a server without accounts), which answers `{added, updated, removed, total, seconds, at}`;
+- in the background when a listed book is missing on disk.
+
+The database is emptied by itself (then read again from the EPUBs) when `LIBRARY_DIR` or the rules of [`genres.toml`](genres.toml) / [`metadata.toml`](metadata.toml) change.
+
 ### Book details in the feeds
 
-Every book entry (all books, recent, folders, years, authors, genres, search, « À lire ensuite », series) carries the metadata of its EPUB, read from the OPF only (no cover, no text) for the books of the current page, and cached per file modification time:
+Every book entry (all books, recent, folders, years, authors, genres, search, « À lire ensuite », series) carries the metadata of its EPUB, read from its OPF once and stored (see [Library metadata](#library-metadata)):
 
 - `<summary type="text">`: the description (`dc:description`, HTML turned into text, paragraphs kept). In « À lire ensuite », the reasons of the suggestion come first, then a blank line and the description.
 - `<category term="…" label="…"/>`: the genres (see « By Genre »).
@@ -204,7 +217,7 @@ Opening the catalog URL in a browser shows it as a web page: the browser turns t
 
 The header holds the search field and these buttons:
 
-- **Home**, **Reading page** (chart icon, see [Reading page](#reading-page-web-ui)) and **Refresh** (rescans the library and clears the caches).
+- **Home**, **Reading page** (chart icon, see [Reading page](#reading-page-web-ui)) and **Recharger** (refresh icon, signed-in readers, or everyone on a server without accounts): syncs the library now (`POST /webui/library/sync`), shows what changed and reloads the page.
 - **Se connecter** / **logout**: optional sign-in (see below), which shows the « À lire ensuite » tile.
 - **Cover mosaic** (image icon): fills the navigation tiles (collections, authors, years, genres, folders) with an animated mosaic of the covers of their books, under a veil that keeps the text readable. It is off by default and remembered per browser. Covers are only requested while it is on; small thumbnails, books without a cover and the covers last shown on each tile are cached in the browser (IndexedDB, 7 days), so tiles fill at once on the next visits.
 - **Theme**: light or dark, remembered per browser.
@@ -226,6 +239,7 @@ A click on a book opens its **book sheet** (a dialog closed with Escape, a click
 | `static/catalog/cover-cache.js` | Browser cache of the mosaic (IndexedDB thumbnails, covers last shown) |
 | `static/catalog/pagination.js` | Numbered pagination, first/last page links |
 | `static/catalog/book-sheet.js` | Book sheet dialog, `#book=` links |
+| `static/catalog/library-sync.js` | « Recharger » button: library sync and its result |
 
 They are plain scripts sharing a small `window.PyOPDS` namespace, loaded in order by `<script src>` tags at the end of the page: this runs the same with native XSLT and with the polyfill (which re-creates the scripts of the result one after the other, then dispatches `DOMContentLoaded`). The server adds `?v=<modification time>` to every `/static/…` URL of the XSLT it serves (as for the other pages): versioned files are cached for a year, and a deployment changes their URLs, so browsers and caching proxies never mix old and new scripts. Files of `static/` and of one level of sub-folder (`static/catalog/`) are served; Tailwind classes used in these scripts are picked up by `python tools/tailwind.py`.
 
@@ -248,7 +262,7 @@ Once signed in, the root catalog shows an **« À lire ensuite »** tile linking
 - each candidate scores for the **same author**, **shared genres** (see « By Genre ») and the **next volume of a series** you started (when the series metadata of the EPUBs is available); recent reads weigh more than old ones;
 - each entry's summary explains why it is suggested.
 
-Results are cached for 5 minutes per user and refreshed as soon as a new sync arrives. With an empty history, the feed is empty with an explanatory subtitle. Browsers without an account see the « Se connecter » button instead of the tile; OPDS clients always see the tile, and opening it asks for their credentials (HTTP Basic).
+Results are cached per user and recomputed as soon as a new reading sync arrives or the library changes. With an empty history, the feed is empty with an explanatory subtitle. Browsers without an account see the « Se connecter » button instead of the tile; OPDS clients always see the tile, and opening it asks for their credentials (HTTP Basic).
 
 ### Personal shelves and « Masquer les livres lus »
 

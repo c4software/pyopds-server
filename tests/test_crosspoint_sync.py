@@ -15,6 +15,7 @@ import time
 import unittest
 import urllib.parse
 import zipfile
+import support  # noqa: F401  (temporary library database, before any library is opened)
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if PROJECT_ROOT not in sys.path:

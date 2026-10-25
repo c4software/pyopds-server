@@ -3,11 +3,8 @@ import datetime
 import email.utils
 import gzip
 import hashlib
-import heapq
-import math
 import os
 import random
-import sys
 import time
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape as xml_escape
@@ -16,7 +13,7 @@ from collections.abc import Collection
 from dataclasses import dataclass, field
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from controllers.background import CACHE_LIFETIME, keep_fresh, shared_instance
+from controllers.background import shared_instance
 from controllers.genres import genre_key, get_genre_config, normalize_genres
 from controllers.http_io import not_modified_since, redirect, send_body
 from controllers.metadata_rules import author_key, normalize_author_name, normalize_series_name
@@ -414,273 +411,86 @@ class ReadFilter:
 
 
 class BookScanner:
-    """Scanner for EPUB files with caching."""
-    
+    """Book lists and indexes of the catalog, read from the library snapshot (controllers.library: the
+    metadata are stored in library.db, kept up to date by its syncs; no EPUB is opened here)."""
+
     _instance = None  # Singleton instance
-    
+
     @classmethod
     def get_instance(cls) -> 'BookScanner':
         """Get or create singleton instance."""
         return shared_instance(cls)
-    
+
     def __init__(self):
         self.metadata_extractor = BookMetadata()
         self.security = SecurityUtils()
-        self._all_paths_cache = None
-        self._all_books_metadata_cache = None
-        # Lightweight index caches: only store path -> year/author mapping
-        self._year_index = None  # {year: [paths...]}
-        self._author_index = None  # {author: [paths...]}
-        self._author_names = {}  # {author key: displayed author}
-        self._genre_index = None  # {genre key: {'name': displayed genre, 'paths': [paths...]}}
-        self._path_index = None  # {path: (author, [genres...])}
-        self._recent_books_cache = None
-        self._recent_books_cache_time = 0
-    
-    def invalidate_caches(self) -> None:
-        """Invalidate all caches. Called when a missing file is detected."""
-        self._all_paths_cache = None
-        self._all_books_metadata_cache = None
-        self._year_index = None
-        self._author_index = None
-        self._genre_index = None
-        self._path_index = None
-        self._recent_books_cache = None
-        self._recent_books_cache_time = 0
-        # Series feeds, reading states and recommendations are derived from the library indexes (modules
-        # loaded on first use: one never loaded caches nothing, e.g. the reader's ones in minimal mode)
-        for module, service in (('controllers.library_index', 'LibraryIndex'), ('controllers.reading_state', 'ReadingStateService'),
-                                ('controllers.recommendations', 'RecommendationService')):
-            if module in sys.modules:
-                getattr(sys.modules[module], service).get_instance().invalidate()
-    
-    def _create_book_info_from_path(self, path: str) -> dict:
-        """Create book info dict from file path. Used to avoid code duplication."""
-        relative_path = os.path.relpath(path, LIBRARY_DIR)
-        title, author, pub_date = self.metadata_extractor.extract_epub_metadata(path)
-        title = title or os.path.basename(path)
-        author = author or 'Unknown'
-        return {
-            'path': path,
-            'relative_path': relative_path,
-            'title': title,
-            'author': author,
-            'publication_date': pub_date,
-            'year': self._extract_year(pub_date),
-            'mtime': self._safe_getmtime(path),
-        }
+
+    @staticmethod
+    def _snapshot():
+        from controllers.library import snapshot
+        return snapshot()
+
+    def _infos(self, paths: list[str]) -> list[dict]:
+        """Book dicts of snapshot paths."""
+        books = self._snapshot().books
+        return [books[path].info() for path in paths if path in books]
+
+    def _page(self, paths: list[str], page: int, size: int, exclude: Collection[str] = ()) -> tuple[list[dict], int]:
+        """Book dicts of one page of `paths` (the `exclude` paths left out) and the total count."""
+        paths = without(paths, exclude)
+        start = (page - 1) * size
+        return self._infos(paths[start:start + size]), len(paths)
 
     def collect_all_epub_paths(self) -> list[str]:
-        paths = []
-        for root, _, files in os.walk(LIBRARY_DIR):
-            for file in files:
-                if file.endswith('.epub'):
-                    paths.append(os.path.join(root, file))
-        return sorted(paths, key=lambda p: os.path.basename(p).lower())
-
-    def scan_directory_single_level(self, directory_path: str, base_path: str | None = None) -> list[dict]:
-        if base_path is None:
-            base_path = directory_path
-
-        file_list = []
-
-        try:
-            for file in os.listdir(directory_path):
-                if file.endswith('.epub'):
-                    file_path = os.path.join(directory_path, file)
-                    if os.path.isfile(file_path):
-                        file_info = self._create_file_info(directory_path, file, base_path)
-                        if file_info:
-                            file_list.append(file_info)
-        except OSError:
-            pass
-
-        return sorted(file_list, key=lambda x: x['title'].lower())
+        """Every EPUB file of the library, listed from the disk (command-line tools; the catalog uses the snapshot)."""
+        from controllers.library import epub_paths
+        return epub_paths(LIBRARY_DIR)
 
     def get_all_books_paginated(self, page: int, size: int, exclude: Collection[str] = ()) -> tuple[list[dict], int]:
         """Page of every library book; `exclude`: EPUB paths left out (e.g. the books the reader finished)."""
-        if self._all_paths_cache is None:
-            self._all_paths_cache = self.collect_all_epub_paths()
-
-        paths = without(self._all_paths_cache, exclude)
-        total_count = len(paths)
-
-        start = (page - 1) * size
-        end = start + size
-        paginated_paths = paths[start:end]
-
-        paginated_books = []
-        for path in paginated_paths:
-            relative_path = os.path.relpath(path, LIBRARY_DIR)
-            if self.security.has_path_traversal(relative_path) or not self.security.is_within_library_dir(path):
-                continue
-            title, author, pub_date = self.metadata_extractor.extract_epub_metadata(path)
-            title = title or os.path.basename(path)
-            author = author or 'Unknown'
-            paginated_books.append(
-                {
-                    'path': path,
-                    'relative_path': relative_path,
-                    'title': title,
-                    'author': author,
-                    'publication_date': pub_date,
-                    'mtime': os.path.getmtime(path),
-                }
-            )
-
-        return paginated_books, total_count
+        return self._page(self._snapshot().paths, page, size, exclude)
 
     def get_folder_content_paginated(self, folder_full_path: str, parent_folder_path: str, page: int, size: int,
-                                     base_path: str | None = None, exclude: Collection[str] = ()) -> tuple[list[dict], int]:
-        """Page of a folder: its subfolders, then its books except the `exclude` paths."""
-        subfolders = []
-        for item in os.listdir(folder_full_path):
-            item_path = os.path.join(folder_full_path, item)
-            if os.path.isdir(item_path) and not item.startswith('.'):
-                subfolders.append(item)
-        subfolders = sorted(subfolders)
-
+                                     exclude: Collection[str] = ()) -> tuple[list[dict], int]:
+        """Page of a folder: its subfolders, then its books (by title) except the `exclude` paths."""
+        subfolders = sorted(
+            item for item in os.listdir(folder_full_path)
+            if os.path.isdir(os.path.join(folder_full_path, item)) and not item.startswith('.')
+        )
         subfolder_entries = []
         for subfolder in subfolders:
             subfolder_relative = os.path.join(parent_folder_path, subfolder)
             subfolder_id = f'urn:folder:{hashlib.md5(subfolder_relative.encode()).hexdigest()}'
             encoded_subfolder = quote(subfolder_relative.replace(os.sep, '/'))
-
             subfolder_entries.append({
                 **navigation_tile(subfolder, subfolder_id, f'/opds/folder/{encoded_subfolder}?page=1', ACQUISITION_FEED,
                                   self.get_folder_paths(subfolder_relative)),
                 'type': 'folder',
             })
 
-        book_list = self.scan_directory_single_level(folder_full_path, base_path=base_path)
-        if exclude:
-            book_list = [info for info in book_list if info['path'] not in exclude]
-
+        folder = os.path.normpath(folder_full_path)
+        books = self._snapshot().books
+        paths = [path for path in books if os.path.dirname(os.path.normpath(path)) == folder and path not in exclude]
         book_entries = []
-        for file_info in book_list:
-            book_id = f'urn:book:{hashlib.md5(file_info["relative_path"].encode()).hexdigest()}'
-            encoded_path = quote(file_info['relative_path'].replace(os.sep, '/'))
-
-            book_entries.append(
-                {
-                    'title': file_info['title'],
-                    'id': book_id,
-                    'type': 'book',
-                    'author': file_info['author'],
-                    'file_info': file_info,
-                    'links': [
-                        (
-                            'http://opds-spec.org/acquisition/open-access',
-                            f'/download/{encoded_path}',
-                            'application/epub+zip',
-                        )
-                    ],
-                }
-            )
+        for info in sorted(self._infos(paths), key=lambda x: x['title'].lower()):
+            book_id = f'urn:book:{hashlib.md5(info["relative_path"].encode()).hexdigest()}'
+            encoded_path = quote(info['relative_path'].replace(os.sep, '/'))
+            book_entries.append({
+                'title': info['title'],
+                'id': book_id,
+                'type': 'book',
+                'author': info['author'],
+                'file_info': info,
+                'links': [('http://opds-spec.org/acquisition/open-access', f'/download/{encoded_path}', 'application/epub+zip')],
+            })
 
         all_entries = subfolder_entries + book_entries
-        total_count = len(all_entries)
-
         start = (page - 1) * size
-        end = start + size
-        paginated_entries = all_entries[start:end]
+        return all_entries[start:start + size], len(all_entries)
 
-        return paginated_entries, total_count
-
-    def scan_recent_books(self, directory_path: str, limit: int = 25, exclude: Collection[str] = ()) -> list[dict]:
-        """The `limit` most recently modified EPUBs; `exclude` paths are skipped (not cached then). The cached
-        list is rescanned in the background every few minutes (controllers.background)."""
-        if exclude:
-            return self._scan_recent_books(directory_path, limit, exclude)
-
-        def rescan() -> None:
-            books = self._scan_recent_books(directory_path, limit)
-            self._recent_books_cache, self._recent_books_cache_time = books, time.time()
-
-        keep_fresh('recent-books', lambda: self._recent_books_cache_time if self._recent_books_cache is not None else 0,
-                   CACHE_LIFETIME, rescan)
-        return self._recent_books_cache[:limit]
-
-    def _scan_recent_books(self, directory_path: str, limit: int, exclude: Collection[str] = ()) -> list[dict]:
-        heap = []
-
-        def scan_for_recent_files(path):
-            try:
-                for entry in os.scandir(path):
-                    if entry.is_file() and entry.name.endswith('.epub') and entry.path not in exclude:
-                        try:
-                            stat_info = entry.stat()
-                            mtime = stat_info.st_mtime
-                            if len(heap) < limit:
-                                heapq.heappush(heap, (mtime, entry.path))
-                            elif mtime > heap[0][0]:
-                                heapq.heapreplace(heap, (mtime, entry.path))
-                        except OSError:
-                            continue
-                    elif entry.is_dir() and not entry.name.startswith('.'):
-                        scan_for_recent_files(entry.path)
-            except OSError:
-                pass
-
-        scan_for_recent_files(directory_path)
-
-        recent_files = sorted(heap, key=lambda x: x[0], reverse=True)
-
-        file_list = []
-        for mtime, file_path in recent_files:
-            relative_path = os.path.relpath(file_path, directory_path)
-            if (
-                not self.security.has_path_traversal(relative_path)
-                and self.security.is_within_library_dir(file_path)
-            ):
-                title, author, pub_date = self.metadata_extractor.extract_epub_metadata(file_path)
-                title = title or os.path.basename(file_path)
-                author = author or 'Unknown'
-
-                file_list.append(
-                    {
-                        'path': file_path,
-                        'relative_path': relative_path,
-                        'title': title,
-                        'author': author,
-                        'publication_date': pub_date,
-                        'mtime': mtime,
-                    }
-                )
-
-        return file_list
-
-    def _create_file_info(self, root, filename, base_path):
-        path = os.path.join(root, filename)
-        relative_path = os.path.relpath(path, base_path)
-
-        if self.security.has_path_traversal(relative_path) or not self.security.is_within_library_dir(path):
-            return None
-
-        title, author, pub_date = self.metadata_extractor.extract_epub_metadata(path)
-        title = title or filename
-        author = author or 'Unknown'
-
-        return {
-            'path': path,
-            'relative_path': relative_path,
-            'title': title,
-            'author': author,
-            'publication_date': pub_date,
-            'mtime': self._safe_getmtime(path),
-        }
-
-    def _safe_getmtime(self, path: str) -> float:
-        """Safely get file modification time.
-        
-        Returns 0 if file doesn't exist or cannot be accessed.
-        Also invalidates caches when a missing file is detected.
-        """
-        try:
-            return os.path.getmtime(path)
-        except (FileNotFoundError, PermissionError, OSError):
-            self.invalidate_caches()
-            return 0
+    def recent_books(self, limit: int = 25, exclude: Collection[str] = ()) -> list[dict]:
+        """The `limit` most recently modified EPUBs; `exclude` paths are skipped."""
+        return self._infos(without(self._snapshot().recent, exclude)[:limit])
 
     @staticmethod
     def _extract_year(publication_date: str | None) -> str:
@@ -697,177 +507,65 @@ class BookScanner:
             return year_str
         return 'Unknown'
 
-    def collect_all_books_with_metadata(self) -> list[dict]:
-        """Collect all books with full metadata.
-        
-        Uses cached metadata if available for better performance.
-        Returns list of book info dicts with metadata.
-        """
-        if self._all_books_metadata_cache is not None:
-            return self._all_books_metadata_cache
-        
-        if self._all_paths_cache is None:
-            self._all_paths_cache = self.collect_all_epub_paths()
-        
-        books = []
-        for path in self._all_paths_cache:
-            relative_path = os.path.relpath(path, LIBRARY_DIR)
-            if self.security.has_path_traversal(relative_path) or not self.security.is_within_library_dir(path):
-                continue
-            title, author, pub_date = self.metadata_extractor.extract_epub_metadata(path)
-            title = title or os.path.basename(path)
-            author = author or 'Unknown'
-            books.append({
-                'path': path,
-                'relative_path': relative_path,
-                'title': title,
-                'author': author,
-                'publication_date': pub_date,
-                'year': self._extract_year(pub_date),
-                'mtime': self._safe_getmtime(path),
-            })
-        
-        self._all_books_metadata_cache = books
-        return books
-
-    def _build_year_author_indexes(self) -> None:
-        """Build lightweight indexes for year, author and genre lookups, once (until invalidate_caches;
-        one build at a time, warmed up at startup by server.py).
-
-        Only extracts minimal metadata (year, author, subjects) without full book info.
-        Much faster than collect_all_books_with_metadata.
-        """
-        def built() -> float:
-            indexes = (self._year_index, self._author_index, self._genre_index, self._path_index)
-            return float(all(index is not None for index in indexes))
-
-        keep_fresh('catalog-indexes', built, math.inf, self._rebuild_year_author_indexes)
-
-    def _rebuild_year_author_indexes(self) -> None:
-        if self._all_paths_cache is None:
-            self._all_paths_cache = self.collect_all_epub_paths()
-        
-        year_index = {}  # {year: [paths...]}
-        author_index = {}  # {author: [paths...]}
-        author_groups = {}  # {author key: {'paths': [...], 'names': {spelling: count}}}
-        genre_index = {}  # {genre key: {'name': ..., 'paths': [...]}}
-        path_index = {}  # {path: (author, [genres...])}
-        
-        for path in self._all_paths_cache:
-            relative_path = os.path.relpath(path, LIBRARY_DIR)
-            if self.security.has_path_traversal(relative_path) or not self.security.is_within_library_dir(path):
-                continue
-            
-            _, author, pub_date, genres = self.metadata_extractor.extract_epub_details(path)
-            author = author or 'Unknown'
-            year = self._extract_year(pub_date)
-            path_index[path] = (author, list(genres))
-
-            for name in genres:
-                genre_index.setdefault(genre_key(name), {'name': name, 'paths': []})['paths'].append(path)
-            
-            if year not in year_index:
-                year_index[year] = []
-            year_index[year].append(path)
-            
-            # Variants differing only by case, accents, punctuation or word order are one author
-            group = author_groups.setdefault(author_key(author) or author, {'paths': [], 'names': {}})
-            group['paths'].append(path)
-            group['names'][author] = group['names'].get(author, 0) + 1
-
-        # Each author is displayed under its most common spelling
-        author_names = {}
-        for key, group in author_groups.items():
-            author_names[key] = max(group['names'], key=lambda name: (group['names'][name], name))
-            author_index[author_names[key]] = group['paths']
-
-        # Sort paths within each group by filename for consistent ordering
-        for paths in year_index.values():
-            paths.sort(key=lambda p: os.path.basename(p).lower())
-        for paths in author_index.values():
-            paths.sort(key=lambda p: os.path.basename(p).lower())
-        for genre in genre_index.values():
-            genre['paths'].sort(key=lambda p: os.path.basename(p).lower())
-        
-        self._year_index = year_index
-        self._author_index = author_index
-        self._author_names = author_names
-        self._genre_index = genre_index
-        self._path_index = path_index
+    def _indexes(self):
+        return self._snapshot().catalog
 
     def _author_display(self, author: str) -> str:
         """Displayed name of the author index entry matching `author` (any spelling variant)."""
-        return self._author_names.get(author_key(author) or author, author)
+        return self._indexes().author_names.get(author_key(author) or author, author)
 
     def get_path_metadata_index(self) -> dict[str, tuple[str, list[str]]]:
-        """Author and genres of every library EPUB {path: (author, [genres])}, from the cached indexes."""
-        self._build_year_author_indexes()
-        return self._path_index
+        """Author and genres of every library EPUB {path: (author, [genres])}."""
+        return self._indexes().paths
 
     def book_info(self, path: str) -> dict:
-        """Title, author, relative path… of one EPUB (opens it: use for a handful of books only)."""
-        return self._create_book_info_from_path(path)
+        """Title, author, relative path… of one EPUB (from the snapshot, else read from the file)."""
+        from controllers.library import Library
+        book = Library.get_instance().book(path)
+        if book is not None:
+            return book.info()
+        title, author, pub_date = self.metadata_extractor.extract_epub_metadata(path)
+        return {
+            'path': path, 'relative_path': os.path.relpath(path, LIBRARY_DIR), 'title': title or os.path.basename(path),
+            'author': author or 'Unknown', 'publication_date': pub_date, 'year': self._extract_year(pub_date),
+            'mtime': os.path.getmtime(path) if os.path.exists(path) else 0,
+        }
 
     def get_folder_paths(self, folder_relative: str) -> list[str]:
         """Get the paths of all EPUB files under a library folder, subfolders included."""
-        if self._all_paths_cache is None:
-            self._all_paths_cache = self.collect_all_epub_paths()
         prefix = os.path.normpath(os.path.join(LIBRARY_DIR, folder_relative)) + os.sep
-        return [path for path in self._all_paths_cache if os.path.normpath(path).startswith(prefix)]
+        return [path for path in self._snapshot().paths if os.path.normpath(path).startswith(prefix)]
 
     def get_indexed_paths(self, kind: str, key: str) -> list[str]:
         """Get the paths of the books of a year, an author or a genre key (kind: 'year', 'author' or 'genre')."""
-        self._build_year_author_indexes()
+        indexes = self._indexes()
         if kind == 'genre':
-            entry = self._genre_index.get(key)
+            entry = indexes.genres.get(key)
             return entry['paths'] if entry else []
         if kind == 'author':
-            return self._author_index.get(self._author_display(key), [])
-        return self._year_index.get(key, [])
+            return indexes.authors.get(self._author_display(key), [])
+        return indexes.years.get(key, [])
 
     def get_years_with_counts(self) -> list[tuple[str, int]]:
-        """Get all publication years with book counts.
-        
-        Returns list of (year, count) tuples sorted by year descending.
-        """
-        self._build_year_author_indexes()
-        
-        year_counts = [(year, len(paths)) for year, paths in self._year_index.items()]
-        
-        # Sort years: known years descending, 'Unknown' at the end
-        sorted_years = sorted(
-            year_counts,
-            key=lambda x: (x[0] == 'Unknown', -int(x[0]) if x[0] != 'Unknown' else 0)
-        )
-        return sorted_years
+        """(year, count) of every publication year: known years descending, 'Unknown' last."""
+        year_counts = [(year, len(paths)) for year, paths in self._indexes().years.items()]
+        return sorted(year_counts, key=lambda x: (x[0] == 'Unknown', -int(x[0]) if x[0] != 'Unknown' else 0))
 
     def get_authors_with_counts(self) -> list[tuple[str, int]]:
-        """Get all authors with book counts.
-        
-        Returns list of (author, count) tuples sorted alphabetically.
-        """
-        self._build_year_author_indexes()
-        
-        author_counts = [(author, len(paths)) for author, paths in self._author_index.items()]
-        
-        # Sort authors alphabetically, 'Unknown' at the end
-        sorted_authors = sorted(
-            author_counts,
-            key=lambda x: (x[0] == 'Unknown', x[0].lower())
-        )
-        return sorted_authors
+        """(author, count) of every author, alphabetically, 'Unknown' last."""
+        author_counts = [(author, len(paths)) for author, paths in self._indexes().authors.items()]
+        return sorted(author_counts, key=lambda x: (x[0] == 'Unknown', x[0].lower()))
 
     def get_genres_with_counts(self, min_books: int | None = None) -> list[tuple[str, str, int]]:
         """Get genres having at least `min_books` books (default: `min_books` of the genre configuration).
 
         Returns list of (genre key, displayed genre, count) tuples sorted alphabetically.
         """
-        self._build_year_author_indexes()
         if min_books is None:
             min_books = get_genre_config().min_books
         genres = [
             (key, genre['name'], len(genre['paths']))
-            for key, genre in self._genre_index.items()
+            for key, genre in self._indexes().genres.items()
             if len(genre['paths']) >= min_books
         ]
         return sorted(genres, key=lambda g: g[0])
@@ -879,213 +577,49 @@ class BookScanner:
         Returns:
             tuple: (displayed genre or None when unknown, list of book dicts, total count)
         """
-        self._build_year_author_indexes()
         normalized = normalize_genres([genre])
-        entry = self._genre_index.get(normalized[0][0] if normalized else genre_key(genre))
+        entry = self._indexes().genres.get(normalized[0][0] if normalized else genre_key(genre))
         if entry is None:
             return None, [], 0
-        paths = without(entry['paths'], exclude)
-        start = (page - 1) * size
-        books = [self._create_book_info_from_path(path) for path in paths[start:start + size]]
-        return entry['name'], books, len(paths)
+        books, total = self._page(entry['paths'], page, size, exclude)
+        return entry['name'], books, total
 
     def get_letters_with_author_counts(self) -> list[str]:
-        """Get all letters A-Z plus '#' for navigation.
-        
-        Returns list of letters for A-Z and '#' for special chars.
-        No counting for performance.
-        """
-        # Return all letters A-Z + '#' without counting
-        letters = [chr(i) for i in range(ord('A'), ord('Z') + 1)]
-        letters.append('#')
-        return letters
+        """Letters of the author navigation: A-Z, then '#' for the other names."""
+        return [*(chr(i) for i in range(ord('A'), ord('Z') + 1)), '#']
 
     def get_authors_by_letter(self, letter: str, page: int, size: int) -> tuple[list[tuple[str, int]], int]:
-        """Get paginated authors starting with a specific letter.
-        
-        Args:
-            letter: Single letter (A-Z) or '#' for special chars
-            page: Page number (1-indexed)
-            size: Number of authors per page
-        
-        Returns:
-            tuple: (list of (author, count) tuples, total count)
-        """
-        all_authors = self.get_authors_with_counts()
-        
+        """Page of the (author, count) starting with `letter` (A-Z, or '#' for the others and 'Unknown')."""
         def matches_letter(author_name, target_letter):
             if target_letter == '#':
-                if author_name == 'Unknown':
-                    return True
-                if not author_name:
-                    return True
-                return not author_name[0].upper().isalpha()
-            else:
-                if not author_name or author_name == 'Unknown':
-                    return False
-                return author_name[0].upper() == target_letter.upper()
-        
-        filtered_authors = [
-            (author, count) for author, count in all_authors
-            if matches_letter(author, letter)
-        ]
-        
-        total_count = len(filtered_authors)
+                return not author_name or author_name == 'Unknown' or not author_name[0].upper().isalpha()
+            return bool(author_name) and author_name != 'Unknown' and author_name[0].upper() == target_letter.upper()
+
+        filtered_authors = [(author, count) for author, count in self.get_authors_with_counts() if matches_letter(author, letter)]
         start = (page - 1) * size
-        end = start + size
-        
-        return filtered_authors[start:end], total_count
+        return filtered_authors[start:start + size], len(filtered_authors)
 
     def get_books_for_year(self, year: str, page: int, size: int, exclude: Collection[str] = ()) -> tuple[list[dict], int]:
-        """Get paginated books for a specific year.
-        
-        Uses the same pattern as get_all_books_paginated: 
-        only extracts full metadata for the current page's books.
-        
-        Args:
-            year: Publication year string
-            page: Page number (1-indexed)
-            size: Number of books per page
-        
-        Returns:
-            tuple: (list of book dicts, total count)
-        """
-        self._build_year_author_indexes()
-        
-        paths = without(self._year_index.get(year, []), exclude)
-        total_count = len(paths)
-        
-        start = (page - 1) * size
-        end = start + size
-        paginated_paths = paths[start:end]
-        
-        # Only extract full metadata for current page (like get_all_books_paginated)
-        paginated_books = []
-        for path in paginated_paths:
-            relative_path = os.path.relpath(path, LIBRARY_DIR)
-            title, author, pub_date = self.metadata_extractor.extract_epub_metadata(path)
-            title = title or os.path.basename(path)
-            author = author or 'Unknown'
-            paginated_books.append({
-                'path': path,
-                'relative_path': relative_path,
-                'title': title,
-                'author': author,
-                'publication_date': pub_date,
-                'year': self._extract_year(pub_date),
-                'mtime': self._safe_getmtime(path),
-            })
-        
-        return paginated_books, total_count
+        """Page of the books of a publication year and the total count."""
+        return self._page(self._indexes().years.get(year, []), page, size, exclude)
 
     def get_books_for_author(self, author: str, page: int, size: int, exclude: Collection[str] = ()) -> tuple[list[dict], int]:
-        """Get paginated books for a specific author.
-        
-        Uses the same pattern as get_all_books_paginated: 
-        only extracts full metadata for the current page's books.
-        
-        Args:
-            author: Author name
-            page: Page number (1-indexed)
-            size: Number of books per page
-        
-        Returns:
-            tuple: (list of book dicts, total count)
-        """
-        self._build_year_author_indexes()
-        
-        paths = without(self._author_index.get(self._author_display(author), []), exclude)
-        total_count = len(paths)
-        
-        start = (page - 1) * size
-        end = start + size
-        paginated_paths = paths[start:end]
-        
-        # Only extract full metadata for current page (like get_all_books_paginated)
-        paginated_books = []
-        for path in paginated_paths:
-            relative_path = os.path.relpath(path, LIBRARY_DIR)
-            title, book_author, pub_date = self.metadata_extractor.extract_epub_metadata(path)
-            title = title or os.path.basename(path)
-            book_author = book_author or 'Unknown'
-            paginated_books.append({
-                'path': path,
-                'relative_path': relative_path,
-                'title': title,
-                'author': book_author,
-                'publication_date': pub_date,
-                'year': self._extract_year(pub_date),
-                'mtime': self._safe_getmtime(path),
-            })
-        
-        return paginated_books, total_count
+        """Page of the books of an author (any spelling variant) and the total count."""
+        return self._page(self._indexes().authors.get(self._author_display(author), []), page, size, exclude)
 
     def search_books(self, query: str, page: int, size: int, exclude: Collection[str] = ()) -> tuple[list[dict], int]:
-        """Search books by title, author or series.
-        
-        Performs case-insensitive search across the title, author and series fields.
-        Uses the same pattern as get_all_books_paginated: 
-        only extracts full metadata for the current page's books.
-        
-        Args:
-            query: Search query string
-            page: Page number (1-indexed)
-            size: Number of books per page
-        
-        Returns:
-            tuple: (list of book dicts, total count)
-        """
-        # Normalize query for case-insensitive search
+        """Page of the books whose title, author or series contains `query` (case-insensitive), and the total."""
         query_lower = query.lower().strip()
-        
         if not query_lower:
-            # Empty query returns all books
             return self.get_all_books_paginated(page, size, exclude)
-        
-        if self._all_paths_cache is None:
-            self._all_paths_cache = self.collect_all_epub_paths()
-        
-        # First pass: find all matching paths
-        matching_paths = []
-        for path in without(self._all_paths_cache, exclude):
-            relative_path = os.path.relpath(path, LIBRARY_DIR)
-            if self.security.has_path_traversal(relative_path) or not self.security.is_within_library_dir(path):
-                continue
-            
-            # Extract metadata to check if it matches (one OPF read)
-            info = self.metadata_extractor.extract_epub_info(path) or {}
-            title = info.get('title') or os.path.basename(path)
-            author = info.get('author') or 'Unknown'
-            series = info.get('series') or ''
+        snapshot = self._snapshot()
 
-            # Case-insensitive partial match in title, author or series
-            if query_lower in title.lower() or query_lower in author.lower() or query_lower in series.lower():
-                matching_paths.append(path)
-        
-        total_count = len(matching_paths)
-        
-        # Paginate the results
-        start = (page - 1) * size
-        end = start + size
-        paginated_paths = matching_paths[start:end]
-        
-        # Extract full metadata for paginated results only
-        paginated_books = []
-        for path in paginated_paths:
-            relative_path = os.path.relpath(path, LIBRARY_DIR)
-            title, author, pub_date = self.metadata_extractor.extract_epub_metadata(path)
-            title = title or os.path.basename(path)
-            author = author or 'Unknown'
-            paginated_books.append({
-                'path': path,
-                'relative_path': relative_path,
-                'title': title,
-                'author': author,
-                'publication_date': pub_date,
-                'mtime': self._safe_getmtime(path),
-            })
-        
-        return paginated_books, total_count
+        def matches(path: str) -> bool:
+            book = snapshot.books[path]
+            fields = (book.title, book.author, book.meta.get('series') or '')
+            return any(query_lower in value.lower() for value in fields)
+
+        return self._page([path for path in snapshot.paths if matches(path)], page, size, exclude)
 
 
 class OPDSController:
@@ -1204,11 +738,6 @@ class OPDSController:
         """Display search results."""
         self._handle_search_results()
 
-    def refresh_cache(self):
-        """Invalidate all caches and redirect to root catalog."""
-        self.book_scanner.invalidate_caches()
-        redirect(self.request, '/opds')
-
     def _handle_root_catalog(self):
         links = [
             (
@@ -1231,7 +760,7 @@ class OPDSController:
 
     def _get_root_entries(self):
         all_paths = self.book_scanner.get_folder_paths('')
-        recent_paths = [book['path'] for book in self.book_scanner.scan_recent_books(LIBRARY_DIR, limit=25)]
+        recent_paths = [book['path'] for book in self.book_scanner.recent_books(25)]
         entries = [
             *self._personal_root_entries(),
             navigation_tile('All Books', 'urn:all-books', '/opds/books?page=1', ACQUISITION_FEED, all_paths),
@@ -1279,7 +808,7 @@ class OPDSController:
 
         read = self._read_filter()
         links.extend(read.links)
-        file_list = self.book_scanner.scan_recent_books(LIBRARY_DIR, limit=25, exclude=read.exclude)
+        file_list = self.book_scanner.recent_books(25, read.exclude)
         entries = self._create_book_entries(file_list)
         xml = self.feed_generator.generate_feed('Recent Books', 'urn:recent-books', links, entries)
 
@@ -1410,7 +939,6 @@ class OPDSController:
             folder_path,
             page,
             size,
-            base_path=LIBRARY_DIR,
             exclude=read.exclude,
         )
 
@@ -1807,7 +1335,13 @@ class OPDSController:
         if self._is_valid_epub_file(filename, file_path):
             self._serve_file(file_path, filename)
         else:
-            self._send_error(404, 'File not found')
+            self._book_not_found()
+
+    def _book_not_found(self):
+        """404 for a missing EPUB; the catalog may still list it: the library is synced in the background."""
+        from controllers.library import Library
+        Library.get_instance().sync_later()
+        self._send_error(404, 'File not found')
 
     def _is_valid_epub_file(self, filename, file_path):
         return filename.endswith('.epub') and os.path.exists(file_path)
@@ -1860,7 +1394,7 @@ class OPDSController:
             return
 
         if not filename.endswith('.epub') or not os.path.exists(file_path):
-            self._send_error(404, 'File not found')
+            self._book_not_found()
             return
 
         # A cover changes with its EPUB: kept a week, then revalidated (304 while the EPUB is unchanged)

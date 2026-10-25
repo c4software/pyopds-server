@@ -1,61 +1,34 @@
-"""Freshness of the in-memory caches (library indexes, recent books, reading states, recommendations).
+"""Shared services and background work: the server answers each request in its own thread.
 
-A cache is built once in the request that first needs it; past its lifetime it keeps answering while a
-daemon thread rebuilds it (stale-while-revalidate): a reader coming back after a pause never waits for a
-rebuild of the library indexes. One build at a time per cache. `warm_up` builds the catalog indexes at
-startup, in the background, so the first visitor does not pay for them either.
+`shared_instance` creates a service (library, indexes, reader caches) once even under concurrent requests;
+`refresh_in_background` runs a task (a library sync) in a daemon thread, one at a time per key.
 """
 import threading
-import time
 from collections.abc import Callable
 
-# Lifetime of the library caches (indexes, recent books, reading states, recommendations): past it, they are
-# rebuilt in the background. A synced reading refreshes its reader's caches at once, « Rafraîchir » all of them
-CACHE_LIFETIME = 3600
-
-_locks: dict[str, threading.Lock] = {}
-_locks_guard = threading.Lock()
 _running: set[str] = set()
-# Creation of the shared services (the server answers each request in its own thread)
+_running_lock = threading.Lock()
+# Creation of the shared services
 _instances_lock = threading.RLock()
 
 
-def _lock(key: str) -> threading.Lock:
-    with _locks_guard:
-        return _locks.setdefault(key, threading.Lock())
-
-
-def refresh_in_background(key: str, rebuild: Callable[[], None]) -> None:
-    """Run `rebuild` in a daemon thread, unless the cache `key` is already being rebuilt."""
-    with _locks_guard:
+def refresh_in_background(key: str, task: Callable[[], object]) -> None:
+    """Run `task` in a daemon thread, unless the task `key` is already running."""
+    with _running_lock:
         if key in _running:
             return
         _running.add(key)
 
     def run() -> None:
         try:
-            with _lock(key):
-                rebuild()
+            task()
         except Exception as exc:
-            # The stale cache keeps answering; the next request past its lifetime tries again
-            print(f'Background refresh of {key} failed: {exc}')
+            print(f'Background task {key} failed: {exc}')
         finally:
-            with _locks_guard:
+            with _running_lock:
                 _running.discard(key)
 
-    threading.Thread(target=run, name=f'refresh-{key}', daemon=True).start()
-
-
-def keep_fresh(key: str, built_at: Callable[[], float], ttl: float, rebuild: Callable[[], None]) -> None:
-    """Make the cache `key` usable: built now when it never was (one build at a time, the other requests
-    wait for it), rebuilt in the background once older than `ttl` seconds. `built_at` gives the time of
-    its last build (0 when never built)."""
-    if not built_at():
-        with _lock(key):
-            if not built_at():
-                rebuild()
-    elif time.time() - built_at() >= ttl:
-        refresh_in_background(key, rebuild)
+    threading.Thread(target=run, name=key, daemon=True).start()
 
 
 def shared_instance(cls):
@@ -67,16 +40,4 @@ def shared_instance(cls):
     return cls._instance
 
 
-def warm_up(tasks: list[Callable[[], None]]) -> None:
-    """Build caches at startup in a daemon thread, one after the other (failures only logged)."""
-    def run() -> None:
-        for task in tasks:
-            try:
-                task()
-            except Exception as exc:
-                print(f'Cache warm-up failed: {exc}')
-
-    threading.Thread(target=run, name='warm-up', daemon=True).start()
-
-
-__all__ = ['CACHE_LIFETIME', 'keep_fresh', 'refresh_in_background', 'shared_instance', 'warm_up']
+__all__ = ['refresh_in_background', 'shared_instance']
