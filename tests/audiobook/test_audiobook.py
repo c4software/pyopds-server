@@ -207,6 +207,11 @@ class TestAudiobook(unittest.TestCase):
         self.assertEqual(status, 200, body)
         self.assertEqual(json.loads(self._request('GET', url, headers=self._auth())[2])['voice'], 'ryan')
         self.assertEqual(json.loads(self._request('GET', url, headers=self._auth())[2])['instructions'], 'Voix grave, ton de conteur')
+        # A voice no longer offered (removed from the settings or the server): the default voice, the tone kept
+        self._request('PUT', '/webui/audiobook', dict(settings, voice='supprimee'), self._auth())
+        self.assertEqual(json.loads(self._request('GET', url, headers=self._auth())[2])['voice'], '')
+        self._request('PUT', '/webui/audiobook', dict(settings, voice='narrateur'), self._auth())
+        self.assertEqual(json.loads(self._request('GET', url, headers=self._auth())[2])['voice'], 'narrateur')
         # Invalid fields, books outside the library
         too_long = dict(settings, instructions='x' * 1001)
         self.assertEqual(self._request('PUT', '/webui/audiobook', too_long, self._auth())[0], 400)

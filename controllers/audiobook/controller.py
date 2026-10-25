@@ -48,14 +48,18 @@ class AudiobookController(WebUIController):
 
     def settings(self) -> None:
         """GET /webui/audiobook?path=<EPUB relative to LIBRARY_DIR>: {voice, instructions} of the book for the
-        signed-in reader ('' when it uses the defaults), the `defaults` of the server and the largest text
-        of one request (`max_chars`); 404 when the audiobook is not configured."""
+        signed-in reader ('' when it uses the defaults, or when its voice is no longer offered: removed from
+        the settings), the `defaults` of the server and the largest text of one request (`max_chars`); 404
+        when the audiobook is not configured."""
         if not self._enabled():
             return
         book = self._book(self._query('path'))
         if book:
             storage, key = book
-            self._send_json(self._settings_body(book_voice(storage.get_preference(self.request.opds_user, key))))
+            fields = book_voice(storage.get_preference(self.request.opds_user, key))
+            if fields['voice'] and not self._offered(fields['voice']):
+                fields['voice'] = ''
+            self._send_json(self._settings_body(fields))
 
     def settings_update(self) -> None:
         """PUT /webui/audiobook {path, voice, instructions}: voice and reading tone of the book for the
@@ -105,6 +109,16 @@ class AudiobookController(WebUIController):
             self._send_json({'message': e.message}, e.status)
             return
         self._send_body(audio, content_type, 200, {'Cache-Control': 'private, no-store'})
+
+    @staticmethod
+    def _offered(voice: str) -> bool:
+        """Whether a voice is still offered to the readers (True when the server lists none: it may be busy)."""
+        from controllers.audiobook.speech_client import get_speech_client
+
+        if voice in get_audiobook_config().clones:
+            return True
+        voices = get_speech_client().voices()
+        return not voices or voice in voices
 
     def _enabled(self) -> bool:
         """Whether a speech server is configured; answers 404 otherwise."""

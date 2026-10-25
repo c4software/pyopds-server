@@ -122,7 +122,7 @@
 
     /**
      * Offer the audiobook for an opened book (book.js), `path` relative to the library; `hooks`:
-     * {location() → place shown ({cfi}), notice(text)}. Nothing is shown when the server has no speech server.
+     * {location() → place shown ({cfi}), notice(text, action {label, run()})}. Nothing is shown when the server has no speech server.
      */
     async function attach(reader, path, hooks) {
         let settings;
@@ -145,7 +145,10 @@
                 audiobook.state = state;
                 refreshIcons();
             },
-            onError: function (message) { hooks.notice('Lecture audio interrompue : ' + message); },
+            // The player closes: « Voix et ton » stays at hand (a voice removed from the server, a wrong tone…)
+            onError: function (message) {
+                hooks.notice('Lecture audio interrompue : ' + message, { label: 'Voix et ton', run: function () { audiobook.openPanel(); } });
+            },
         });
         narration.setRate(audiobook.rate);
         audiobook.available = true;

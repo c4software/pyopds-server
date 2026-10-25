@@ -141,7 +141,7 @@
                     }
                     // Audiobook: offered only when the server has a speech server (audiobook.js)
                     if (this.signedIn) {
-                        PyReader.audiobook.attach(reader, this.path, { location: () => current, notice: (text) => this.showNotice(text) });
+                        PyReader.audiobook.attach(reader, this.path, { location: () => current, notice: (text, action) => this.showNotice(text, action) });
                     }
                     await this.openAtLastPosition();
                     this.loading = false;
@@ -510,17 +510,20 @@
 
                 // ------------------------------------------------------------ notices
 
+                /** Show a notice; `action`: {label, cfi} (go to that place) or {label, run()} (call it). */
                 showNotice(text, action) {
                     clearTimeout(noticeTimer);
                     this.notice = { text: text, action: action ? action.label : '' };
-                    this.noticeTarget = action ? action.cfi : null;
+                    this.noticeTarget = action || null;
                     noticeTimer = setTimeout(() => { this.notice = null; }, NOTICE_MS);
                 },
 
                 noticeAction() {
                     const target = this.noticeTarget;
                     this.notice = null;
-                    if (target !== null && target !== undefined) this.go(target);
+                    if (!target) return;
+                    if (target.run) target.run();
+                    else if (target.cfi !== null && target.cfi !== undefined) this.go(target.cfi);
                 },
 
                 // ------------------------------------------------------------ settings
