@@ -1427,5 +1427,40 @@ class TestWebReader(unittest.TestCase):
         self.assertEqual((book['start_date'], book['completed'], book['avg_fwd']), (1792800000, False, 30))
 
 
+class TestBackgroundRefresh(unittest.TestCase):
+    """Caches built once, then refreshed in the background while the old value keeps answering."""
+
+    def test_keep_fresh_never_makes_a_request_wait_for_a_refresh(self):
+        from controllers.background import keep_fresh
+        cache = {'built_at': 0.0, 'value': None}
+        started, release = threading.Event(), threading.Event()
+
+        def rebuild():
+            if cache['built_at']:
+                started.set()
+                release.wait(5)
+            cache['value'] = (cache['value'] or 0) + 1
+            cache['built_at'] = time.time()
+
+        # First use: built in the request
+        keep_fresh('test-cache', lambda: cache['built_at'], 60, rebuild)
+        self.assertEqual(cache['value'], 1)
+        # Fresh: nothing to do
+        keep_fresh('test-cache', lambda: cache['built_at'], 60, rebuild)
+        self.assertEqual(cache['value'], 1)
+        # Too old: the request goes on with the old value, a single rebuild runs in the background
+        cache['built_at'] -= 120
+        keep_fresh('test-cache', lambda: cache['built_at'], 60, rebuild)
+        self.assertTrue(started.wait(5))
+        keep_fresh('test-cache', lambda: cache['built_at'], 60, rebuild)
+        self.assertEqual(cache['value'], 1)
+        release.set()
+        for _ in range(100):
+            if cache['value'] == 2:
+                break
+            time.sleep(0.02)
+        self.assertEqual(cache['value'], 2)
+
+
 if __name__ == '__main__':
     unittest.main()

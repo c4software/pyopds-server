@@ -8,6 +8,7 @@ import zipfile
 from html.parser import HTMLParser
 from urllib.parse import unquote
 
+from controllers.background import keep_fresh, shared_instance
 from controllers.genres import genre_key
 from controllers.opds import LIBRARY_DIR, BookMetadata, BookScanner, SecurityUtils, library_relative_path
 
@@ -179,9 +180,7 @@ class LibraryIndex:
     @classmethod
     def get_instance(cls) -> 'LibraryIndex':
         """Get or create the singleton index."""
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
+        return shared_instance(cls)
 
     def __init__(self):
         self._by_key: dict[str, str] = {}
@@ -198,8 +197,10 @@ class LibraryIndex:
         self._series_built_at = 0.0
 
     def _refresh(self) -> None:
-        if time.time() - self._built_at < INDEX_TTL:
-            return
+        """Hash index usable: built on first use, then rebuilt in the background every few minutes."""
+        keep_fresh('library-hashes', lambda: self._built_at, INDEX_TTL, self._rebuild)
+
+    def _rebuild(self) -> None:
         by_key: dict[str, str] = {}
         for path in BookScanner.get_instance().collect_all_epub_paths():
             try:
@@ -291,10 +292,11 @@ class LibraryIndex:
         return details
 
     def _refresh_series(self) -> None:
-        """Rebuild the {series key: books} and {title key: books} indexes every few minutes, reading only
-        new or changed OPFs."""
-        if time.time() - self._series_built_at < INDEX_TTL:
-            return
+        """Series and title indexes usable: built on first use, then rebuilt in the background every few minutes."""
+        keep_fresh('library-series', lambda: self._series_built_at, INDEX_TTL, self._rebuild_series)
+
+    def _rebuild_series(self) -> None:
+        """Build the {series key: books} and {title key: books} indexes, reading only new or changed OPFs."""
         series_cache: dict[str, tuple[float, str | None, int | float | None, str | None, str | None]] = {}
         index: dict[str, list[tuple[int | float | None, str]]] = {}
         titles: dict[str, list[str]] = {}

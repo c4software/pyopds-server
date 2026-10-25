@@ -3,11 +3,14 @@ import json
 import math
 import os
 import re
+import threading
 from urllib.parse import parse_qs, unquote, urlparse
 
 from controllers.http_io import read_json, send_body
 from controllers.sync_storage import KOREADER_SYNC_DB_PATH, SyncStorage, md5_hex
 
+# One SyncStorage for every request thread (get_sync_storage)
+_storage_lock = threading.Lock()
 REGISTRATION_DISABLED = os.environ.get('REGISTRATION_DISABLED', '').lower() in ('1', 'true', 'yes')
 SERVER_VERSION = '1.0.0'
 
@@ -208,7 +211,10 @@ class SyncControllerBase:
 def get_sync_storage() -> SyncStorage:
     """Shared SyncStorage (created on first use), also used by the OPDS authentication and recommendations."""
     if SyncControllerBase._sync_storage_instance is None:
-        SyncControllerBase._sync_storage_instance = SyncStorage(KOREADER_SYNC_DB_PATH)
+        # Requests run in parallel threads: the database schema is set up once
+        with _storage_lock:
+            if SyncControllerBase._sync_storage_instance is None:
+                SyncControllerBase._sync_storage_instance = SyncStorage(KOREADER_SYNC_DB_PATH)
     return SyncControllerBase._sync_storage_instance
 
 

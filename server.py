@@ -84,6 +84,31 @@ class UnifiedHandler(http.server.BaseHTTPRequestHandler):
         self._handle_request('DELETE')
 
 
+class ThreadedServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    """One thread per request: a slow one (cover extraction, cache build) never holds the others."""
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+def warm_up_caches() -> None:
+    """Build the library indexes in the background at startup: the first visitor does not wait for them."""
+    from controllers.background import warm_up
+    from controllers.library_index import LibraryIndex
+    from controllers.opds import BookScanner
+
+    scanner = BookScanner.get_instance()
+    library = LibraryIndex.get_instance()
+    tasks = [
+        scanner._build_year_author_indexes,
+        lambda: scanner.scan_recent_books(LIBRARY_DIR),
+        library._refresh_series,
+    ]
+    # Hashes of the EPUBs: matching of the synced documents only
+    if not features.minimal_mode():
+        tasks.append(library._refresh)
+    warm_up(tasks)
+
+
 def main():
     """Start the OPDS server with KoReader sync support."""
     if not os.path.exists(LIBRARY_DIR):
@@ -92,7 +117,8 @@ def main():
     print(f"\nAccess the root catalog at http://127.0.0.1:{PORT}/opds")
     print(f"KoReader sync available at http://127.0.0.1:{PORT}/koreader/sync\n")
 
-    with socketserver.TCPServer(("", PORT), UnifiedHandler) as httpd:
+    warm_up_caches()
+    with ThreadedServer(("", PORT), UnifiedHandler) as httpd:
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:

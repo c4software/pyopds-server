@@ -9,6 +9,8 @@ import threading
 import time
 from dataclasses import dataclass, field
 
+from controllers.background import refresh_in_background, shared_instance
+
 FINISHED_RATIO = 0.9
 CACHE_TTL = 300
 HISTORY_LIMIT = 100_000
@@ -56,8 +58,8 @@ class ReadingState:
 class ReadingStateService:
     """Compute and cache the reading state of a sync user.
 
-    The cache entry lives CACHE_TTL seconds and is dropped as soon as the sync history changes
-    (fingerprint of the progress rows, a single SQL query).
+    The cache entry is dropped as soon as the sync history changes (fingerprint of the progress rows, a
+    single SQL query); older than CACHE_TTL seconds, it keeps answering while recomputed in the background.
     """
 
     _instance: 'ReadingStateService | None' = None
@@ -65,9 +67,7 @@ class ReadingStateService:
     @classmethod
     def get_instance(cls) -> 'ReadingStateService':
         """Get or create the singleton service."""
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
+        return shared_instance(cls)
 
     def __init__(self):
         self._cache: dict[str, tuple[float, ReadingState]] = {}
@@ -91,14 +91,20 @@ class ReadingStateService:
             (row['document'], row.get('status'), row.get('percentage'), row.get('updated_at'), row.get('library_path'))
             for row in rows
         ))
+        def compute() -> ReadingState:
+            state = ReadingState(self._match(rows, aliases), fingerprint)
+            with self._lock:
+                self._cache[user] = (time.time(), state)
+            return state
+
         with self._lock:
             cached = self._cache.get(user)
-            if cached and cached[1].fingerprint == fingerprint and time.time() - cached[0] < CACHE_TTL:
-                return cached[1]
-        state = ReadingState(self._match(rows, aliases), fingerprint)
-        with self._lock:
-            self._cache[user] = (time.time(), state)
-        return state
+        if cached and cached[1].fingerprint == fingerprint:
+            # Same history, only old: kept while it is matched again in the background (library changes)
+            if time.time() - cached[0] >= CACHE_TTL:
+                refresh_in_background(f'reading-state:{user}', compute)
+            return cached[1]
+        return compute()
 
     @staticmethod
     def _match(rows: list[dict], aliases: dict[str, list[str]]) -> list[dict]:

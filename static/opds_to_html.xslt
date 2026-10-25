@@ -23,7 +23,7 @@
                 <link rel="stylesheet" href="/static/tailwind.css"/>
                 <!-- Catalog styles that Tailwind utilities cannot express (after tailwind.css: wins at equal specificity) -->
                 <link rel="stylesheet" href="/static/catalog/catalog.css"/>
-                <script src="https://unpkg.com/lucide@1.61.0"></script>
+                <script src="/static/lucide.min.js"></script>
                 <!-- Dark theme before the first paint (no flash); the theme button is static/catalog/theme.js -->
                 <script>
                     (function () {

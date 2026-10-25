@@ -13,6 +13,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 
+from controllers.background import refresh_in_background, shared_instance
 from controllers.genres import genre_key
 from controllers.metadata_rules import author_key, normalize_author_name
 from controllers.reading_state import ReadingStateService, reading_signal
@@ -177,8 +178,9 @@ class Recommendations:
 class RecommendationService:
     """Compute and cache the recommendations of a sync user.
 
-    The cache entry lives CACHE_TTL seconds and is dropped as soon as the user's reading state changes
-    (ReadingStateService fingerprint), so a new sync is reflected immediately.
+    The cache entry is dropped as soon as the user's reading state changes (ReadingStateService fingerprint),
+    so a new sync is reflected immediately; older than CACHE_TTL seconds, it keeps answering while scored
+    again in the background.
     """
 
     _instance: 'RecommendationService | None' = None
@@ -186,9 +188,7 @@ class RecommendationService:
     @classmethod
     def get_instance(cls) -> 'RecommendationService':
         """Get or create the singleton service."""
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
+        return shared_instance(cls)
 
     def __init__(self):
         self._cache: dict[str, tuple[float, int, Recommendations]] = {}
@@ -205,14 +205,21 @@ class RecommendationService:
     def for_user(self, user: str) -> Recommendations:
         """Recommendations of a user, cached while fresh (CACHE_TTL) and while the reading state is unchanged."""
         state = ReadingStateService.get_instance().for_user(user)
+
+        def compute() -> Recommendations:
+            result = self._compute(state.books)
+            with self._lock:
+                self._cache[user] = (time.time(), state.fingerprint, result)
+            return result
+
         with self._lock:
             cached = self._cache.get(user)
-            if cached and cached[1] == state.fingerprint and time.time() - cached[0] < CACHE_TTL:
-                return cached[2]
-        result = self._compute(state.books)
-        with self._lock:
-            self._cache[user] = (time.time(), state.fingerprint, result)
-        return result
+        if cached and cached[1] == state.fingerprint:
+            # Same reading state, only old: kept while scored again in the background (library changes)
+            if time.time() - cached[0] >= CACHE_TTL:
+                refresh_in_background(f'recommendations:{user}', compute)
+            return cached[2]
+        return compute()
 
     @staticmethod
     def _compute(history: list[dict]) -> Recommendations:

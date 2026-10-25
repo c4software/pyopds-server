@@ -4,6 +4,7 @@ import email.utils
 import gzip
 import hashlib
 import heapq
+import math
 import os
 import random
 import sys
@@ -15,6 +16,7 @@ from collections.abc import Collection
 from dataclasses import dataclass, field
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
+from controllers.background import keep_fresh, shared_instance
 from controllers.genres import genre_key, get_genre_config, normalize_genres
 from controllers.http_io import not_modified_since, redirect, send_body
 from controllers.metadata_rules import author_key, normalize_author_name, normalize_series_name
@@ -419,9 +421,7 @@ class BookScanner:
     @classmethod
     def get_instance(cls) -> 'BookScanner':
         """Get or create singleton instance."""
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
+        return shared_instance(cls)
     
     def __init__(self):
         self.metadata_extractor = BookMetadata()
@@ -589,15 +589,20 @@ class BookScanner:
         return paginated_entries, total_count
 
     def scan_recent_books(self, directory_path: str, limit: int = 25, exclude: Collection[str] = ()) -> list[dict]:
-        """The `limit` most recently modified EPUBs; `exclude` paths are skipped (not cached then)."""
-        current_time = time.time()
-        if (
-            not exclude
-            and self._recent_books_cache is not None
-            and current_time - self._recent_books_cache_time < self.RECENT_CACHE_TTL
-        ):
-            return self._recent_books_cache[:limit]
+        """The `limit` most recently modified EPUBs; `exclude` paths are skipped (not cached then). The cached
+        list is rescanned in the background every few minutes (controllers.background)."""
+        if exclude:
+            return self._scan_recent_books(directory_path, limit, exclude)
 
+        def rescan() -> None:
+            books = self._scan_recent_books(directory_path, limit)
+            self._recent_books_cache, self._recent_books_cache_time = books, time.time()
+
+        keep_fresh('recent-books', lambda: self._recent_books_cache_time if self._recent_books_cache is not None else 0,
+                   self.RECENT_CACHE_TTL, rescan)
+        return self._recent_books_cache[:limit]
+
+    def _scan_recent_books(self, directory_path: str, limit: int, exclude: Collection[str] = ()) -> list[dict]:
         heap = []
 
         def scan_for_recent_files(path):
@@ -643,10 +648,6 @@ class BookScanner:
                         'mtime': mtime,
                     }
                 )
-
-        if not exclude:
-            self._recent_books_cache = file_list
-            self._recent_books_cache_time = current_time
 
         return file_list
 
@@ -731,15 +732,19 @@ class BookScanner:
         return books
 
     def _build_year_author_indexes(self) -> None:
-        """Build lightweight indexes for year, author and genre lookups.
-        
+        """Build lightweight indexes for year, author and genre lookups, once (until invalidate_caches;
+        one build at a time, warmed up at startup by server.py).
+
         Only extracts minimal metadata (year, author, subjects) without full book info.
         Much faster than collect_all_books_with_metadata.
         """
-        if (self._year_index is not None and self._author_index is not None and self._genre_index is not None
-                and self._path_index is not None):
-            return
-        
+        def built() -> float:
+            indexes = (self._year_index, self._author_index, self._genre_index, self._path_index)
+            return float(all(index is not None for index in indexes))
+
+        keep_fresh('catalog-indexes', built, math.inf, self._rebuild_year_author_indexes)
+
+    def _rebuild_year_author_indexes(self) -> None:
         if self._all_paths_cache is None:
             self._all_paths_cache = self.collect_all_epub_paths()
         

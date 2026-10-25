@@ -14,8 +14,10 @@ from pathlib import Path
 DEFAULT_GENRES_CONFIG_PATH = Path(__file__).resolve().parent.parent / 'genres.toml'
 
 
+@functools.lru_cache(maxsize=65536)
 def genre_key(value: str) -> str:
-    """Comparison key of a genre: lowercase, no accents, words separated by single spaces."""
+    """Comparison key of a genre: lowercase, no accents, words separated by single spaces (cached: also the
+    key of every author and series name, computed for each library book by the indexes and recommendations)."""
     without_accents = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode('ascii')
     return ' '.join(re.sub(r'[^a-z0-9]+', ' ', without_accents.lower()).split())
 
