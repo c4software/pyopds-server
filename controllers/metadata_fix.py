@@ -419,6 +419,7 @@ def main(argv: list[str] | None = None) -> int:
     for warning in warnings:
         print(f'attention : {warning}', file=sys.stderr)
     errors = 0
+    written = []
     for change in changes:
         if args.write:
             try:
@@ -427,8 +428,12 @@ def main(argv: list[str] | None = None) -> int:
                 errors += 1
                 print(f'erreur : {change.book.relative} : {exc}', file=sys.stderr)
                 continue
+            written.append(change.book.relative)
         print(describe(change))
     if args.write:
+        # Their modification time is kept: the server's database must read them again (controllers/library.py)
+        from controllers.library import forget
+        forget(written)
         print(f'{len(changes) - errors} EPUB modifié(s), {errors} erreur(s). Redémarrez le serveur pour relire les métadonnées.')
     else:
         print(f'{len(changes)} EPUB à modifier (simulation : relancer avec --write pour écrire)')

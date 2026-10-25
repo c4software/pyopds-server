@@ -375,10 +375,20 @@ class Library:
         threading.Thread(target=run, name='library-sync', daemon=True).start()
 
 
+def forget(relative_paths: list[str]) -> None:
+    """Drop books from the database (paths relative to LIBRARY_DIR), read again at the next start: EPUBs
+    rewritten with their modification time kept (python -m controllers.metadata_fix apply --write)."""
+    path = database_path()
+    if not relative_paths or not os.path.exists(path):
+        return
+    with sqlite3.connect(path, timeout=30) as conn:
+        conn.executemany('DELETE FROM books WHERE path = ?', [(relative,) for relative in relative_paths])
+
+
 def snapshot() -> Snapshot:
     """Current snapshot of the library."""
     return Library.get_instance().snapshot
 
 
-__all__ = ['Book', 'CatalogIndexes', 'Library', 'Snapshot', 'database_path', 'epub_paths', 'read_metadata',
+__all__ = ['Book', 'CatalogIndexes', 'Library', 'Snapshot', 'database_path', 'epub_paths', 'forget', 'read_metadata',
            'scan_interval', 'snapshot']
