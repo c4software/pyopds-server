@@ -16,6 +16,8 @@
     const WHEEL_GAP_MS = 350;
     // Side areas of a tap that turn the page (fraction of the width); the middle shows the bars
     const TAP_SIDE = 0.3;
+    // Top and bottom bands (fraction of the height): a tap there always shows / hides the bars, even on a link
+    const TAP_BARS = 0.15;
     // A touch counts as a tap below this move (px) and duration (ms); the click that may follow is then ignored
     const TAP_MOVE = 12;
     const TAP_MS = 600;
@@ -53,6 +55,9 @@
         }, { passive: true });
     }
 
+    // Phones and tablets: the bars hide when a page is turned by a tap
+    const touchScreen = window.matchMedia('(pointer: coarse)').matches;
+
     function editable(target) {
         return target && target.closest && target.closest('input, textarea, select, [contenteditable="true"]');
     }
@@ -73,7 +78,6 @@
             let lastFraction = null;
             let lastScroll = null;
             let lastWheel = 0;
-            let fullscreenAsked = false;
             let lastTouchTap = 0;
             let syntheticClick = false;
             // Until the opening position is laid out, foliate may report transient places (even the end of the book)
@@ -101,8 +105,7 @@
                 notice: null,
                 noticeTarget: null,
                 // Phones and tablets only: on a computer the book keeps a reading width (reader.css)
-                fullscreenAvailable: Boolean(document.fullscreenEnabled && document.documentElement.requestFullscreen)
-                    && window.matchMedia('(pointer: coarse)').matches,
+                fullscreenAvailable: Boolean(document.fullscreenEnabled && document.documentElement.requestFullscreen) && touchScreen,
                 fullscreen: false,
 
                 async init() {
@@ -135,7 +138,6 @@
                     }
                     await this.openAtLastPosition();
                     this.loading = false;
-                    if (window.matchMedia('(pointer: coarse)').matches) this.chrome = false;
                     window.PageKit.icons(this);
                 },
 
@@ -161,7 +163,7 @@
                         // Inside a chapter: handled by its own listeners (chapterLoaded)
                         if (event.target === this.$refs.book || this.$refs.book.contains(event.target)) {
                             lastTouchTap = Date.now();
-                            this.tapAt(touch.clientX);
+                            this.tapAt(touch.clientX, touch.clientY);
                         }
                     });
                     let resizeTimer = null;
@@ -368,8 +370,8 @@
                 tap(event, doc) {
                     const selected = doc.getSelection();
                     if (event.defaultPrevented || (selected && !selected.isCollapsed) || (event.target.closest && event.target.closest('a[href]'))) return;
-                    const frame = doc.defaultView.frameElement;
-                    this.tapAt((frame ? frame.getBoundingClientRect().left : 0) + event.clientX);
+                    const frame = doc.defaultView.frameElement.getBoundingClientRect();
+                    this.tapAt(frame.left + event.clientX, frame.top + event.clientY);
                 },
 
                 /** Touch tap in a chapter: a link is followed, a highlight opened, else like a tap (tapAt). */
@@ -377,6 +379,13 @@
                     const selected = doc.getSelection();
                     if (selected && !selected.isCollapsed) return;
                     lastTouchTap = Date.now();
+                    const frame = doc.defaultView.frameElement.getBoundingClientRect();
+                    const x = frame.left + touch.clientX;
+                    const y = frame.top + touch.clientY;
+                    if (this.inBarsBand(y)) {
+                        this.tapAt(x, y);
+                        return;
+                    }
                     const link = event.target.closest ? event.target.closest('a[href]') : null;
                     if (link) {
                         syntheticClick = true;
@@ -390,35 +399,41 @@
                         this.edit(clip.id);
                         return;
                     }
-                    const frame = doc.defaultView.frameElement;
-                    this.tapAt((frame ? frame.getBoundingClientRect().left : 0) + touch.clientX);
+                    this.tapAt(x, y);
                 },
 
                 /** Tap in the margins of the book, outside the chapter's frame. */
                 tapOutside(event) {
                     if (Date.now() - lastTouchTap < CLICK_AFTER_TAP_MS) return;
-                    if (event.target === this.$refs.book || this.$refs.book.contains(event.target)) this.tapAt(event.clientX);
+                    if (event.target === this.$refs.book || this.$refs.book.contains(event.target)) this.tapAt(event.clientX, event.clientY);
                 },
 
-                /** Tap at `x` (page coordinates): the sides of the book turn the page, the middle shows / hides the bars. */
-                tapAt(x) {
+                /** Whether `y` (page coordinates) is in the top or bottom band of the book, which toggles the bars. */
+                inBarsBand(y) {
+                    const box = this.$refs.book.getBoundingClientRect();
+                    const height = (y - box.top) / (box.height || 1);
+                    return height < TAP_BARS || height > 1 - TAP_BARS;
+                },
+
+                /**
+                 * Tap at `x`, `y` (page coordinates): the top and bottom bands and the middle show / hide the bars,
+                 * the sides turn the page (and hide the bars).
+                 */
+                tapAt(x, y) {
                     if (!reader) return;
                     if (tracker) tracker.activity();
                     const box = this.$refs.book.getBoundingClientRect();
-                    const side = (x - box.left) / (box.width || 1);
-                    // A phone reads full screen: entered on the first tap (a user gesture is required)
-                    if (this.fullscreenAvailable && !fullscreenAsked) {
-                        fullscreenAsked = true;
-                        this.enterFullscreen();
-                    }
+                    const side = this.inBarsBand(y) ? 0.5 : (x - box.left) / (box.width || 1);
                     // After the highlight hit test of foliate (same click), which opens the clipping instead
                     setTimeout(() => {
                         if (this.editor) return;
                         if (this.panel) {
                             this.panel = null;
                         } else if (!reader.view.renderer.scrolled && side < TAP_SIDE) {
+                            if (touchScreen) this.chrome = false;
                             this.prev();
                         } else if (!reader.view.renderer.scrolled && side > 1 - TAP_SIDE) {
+                            if (touchScreen) this.chrome = false;
                             this.next();
                         } else {
                             this.chrome = !this.chrome;
