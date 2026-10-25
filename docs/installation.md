@@ -102,17 +102,22 @@ The following environment variables can be set:
 
   ```toml
   url = "http://llm-proxy:8000"
-  model = "bigchuck/qwen3-tts-customvoice"
+  # Qwen3-TTS "CustomVoice": ready-made voices and a reading tone (not "base", voice cloning, nor
+  # "voice-design", which need a reference); not the ASR model (speech recognition)
+  model = "silentchuck/qwen3-tts-12hz-1.7b-customvoice"
   api_key = "${TTS_API_KEY}"
-  voice = "vivian"
-  instructions = "Lecture posée et chaleureuse, comme un livre audio"
+  # Required by CustomVoice models: aiden, dylan, eric, ono_anna, ryan, serena, sohee, uncle_fu, vivian
+  voice = "uncle_fu"
+  instructions = "Narrateur professionnel de livre audio : voix masculine grave, chaleureuse et posée. Diction claire et soignée, rythme calme et régulier, intonation naturelle et nuancée qui suit le sens du texte. Courtes pauses aux virgules, pauses plus marquées entre les phrases et les paragraphes. Dialogues interprétés avec sobriété, sans emphase théâtrale."
   response_format = "wav"   # wav, mp3, opus, aac or flac: what the server produces
   max_chars = 500           # characters per request
   concurrency = 2           # requests sent to the server at the same time, for all readers
 
   [extra]                   # extra fields of every request (model options)
-  language = "French"
+  language = "French"       # otherwise the model guesses the language of each request
   ```
+
+  Each reader can give a book another voice and tone (« Voix et ton » in the web reader); these are the defaults. A sentence of about 6 seconds is synthesized in about 3 seconds by Qwen3-TTS 1.7B on a local GPU, so the sentences follow each other without waiting.
 - **ONLINE_METADATA**: Set to `true` to look up, without any API key, the cover ([iTunes Search](https://performance-partners.apple.com/search-api), then [Open Library](https://openlibrary.org/developers/api)), print page count and description (Open Library) of synced books the library does not provide (default: disabled).
 - **HARDCOVER_API_KEY**: [Hardcover](https://hardcover.app/account/api) API key (`read:catalog` is enough) to add moods, genres, content warnings, community rating, series and position, release year and description to synced books, and the next book of a series (`GET /api/v1/documents/{document}/next`) (default: disabled). Requests are throttled (1.1 s apart, 4,000 a day, 10 min pause after a 429).
 

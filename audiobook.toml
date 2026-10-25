@@ -9,6 +9,17 @@
 # Restart the server to apply changes.
 #
 # String values may read the environment: "${TTS_API_KEY}" is replaced by that variable.
+#
+# Example (Qwen3-TTS behind an llm-proxy, classic male narrator):
+#
+#   url = "http://llm-proxy:8000"
+#   model = "silentchuck/qwen3-tts-12hz-1.7b-customvoice"
+#   api_key = "${TTS_API_KEY}"
+#   voice = "uncle_fu"
+#   instructions = "Narrateur professionnel de livre audio : voix masculine grave, chaleureuse et posée. Diction claire et soignée, rythme calme et régulier, intonation naturelle et nuancée qui suit le sens du texte. Courtes pauses aux virgules, pauses plus marquées entre les phrases et les paragraphes. Dialogues interprétés avec sobriété, sans emphase théâtrale."
+#
+#   [extra]
+#   language = "French"
 
 # Base URL of the server (/v1/audio/speech and /v1/audio/voices are appended)
 url = ""
@@ -16,7 +27,7 @@ url = ""
 model = ""
 # Bearer token sent to the server; empty: no Authorization header
 api_key = ""
-# Voice and reading tone used for a book the reader did not configure
+# Voice and reading tone used for a book the reader did not configure (some models require a voice)
 voice = ""
 instructions = ""
 # Audio format asked for (wav, mp3, opus, aac, flac: what the server supports, played by the browser)
@@ -34,4 +45,4 @@ concurrency = 2
 
 # Extra fields added to every request (options of a given model)
 [extra]
-# language = "French"
+# language = "French"   (Qwen3-TTS: otherwise the language is guessed for each request)
