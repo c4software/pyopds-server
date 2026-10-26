@@ -24,17 +24,6 @@
     const CLICK_AFTER_TAP_MS = 800;
 
     const percentFormat = new Intl.NumberFormat('fr-FR', { style: 'percent', maximumFractionDigits: 0 });
-    const relativeFormat = new Intl.RelativeTimeFormat('fr', { numeric: 'auto' });
-
-    function relativeTime(seconds) {
-        const diff = seconds - Date.now() / 1000;
-        const units = [['day', 86400], ['hour', 3600], ['minute', 60]];
-        for (const [unit, size] of units) {
-            if (Math.abs(diff) >= size) return relativeFormat.format(Math.round(diff / size), unit);
-        }
-        return "à l'instant";
-    }
-
     /**
      * Taps on a touch screen, seen from touchstart / touchend: foliate's paginator cancels every touchmove
      * (page swipes), so a real finger, which always moves a little, never gets a click.
@@ -224,7 +213,7 @@
                         target = found ? (found.cfi || found.index) : { fraction: newest.percentage };
                         if (newest.device_id !== sync.thisDevice().id) {
                             this.showNotice('Reprise à ' + percentFormat.format(newest.percentage) + ', position de ' + (newest.device || 'un autre appareil')
-                                + ' (' + relativeTime(newest.timestamp) + ').', local ? { label: 'Revenir', cfi: local.cfi } : null);
+                                + ' (' + window.PageKit.relativeTime(newest.timestamp) + ').', local ? { label: 'Revenir', cfi: local.cfi } : null);
                         }
                         lastPushAt = newest.timestamp;
                     }
@@ -330,7 +319,7 @@
                     lastPushAt = newest.timestamp;
                     const found = await PyReader.sync.remoteTarget(reader, newest).catch(() => null);
                     this.showNotice((newest.device || 'Un autre appareil') + ' est plus loin : ' + percentFormat.format(newest.percentage)
-                        + ' (' + relativeTime(newest.timestamp) + ').', { label: 'Y aller', cfi: found ? (found.cfi || found.index) : { fraction: newest.percentage } });
+                        + ' (' + window.PageKit.relativeTime(newest.timestamp) + ').', { label: 'Y aller', cfi: found ? (found.cfi || found.index) : { fraction: newest.percentage } });
                 },
 
                 // ------------------------------------------------------------ navigation
@@ -550,7 +539,7 @@
                             id: clip.id,
                             text: clip.text,
                             note: clip.note || '',
-                            caption: [clip.chapter, window.PageKit.formatDate(clip.created_at)].filter(Boolean).join(' · '),
+                            caption: window.PageKit.clippingCaption(clip),
                             color: PyReader.highlights.COLORS[clip.color] || PyReader.highlights.COLORS.yellow,
                         };
                     });

@@ -18,7 +18,7 @@
 
     // ----------------------------------------------------------------- helpers
 
-    const { formatDate } = window.PageKit;
+    const { formatDate, relativeTime, clippingCaption } = window.PageKit;
 
     function dayKey(date) {
         return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
@@ -37,18 +37,6 @@
 
     const dayFormat = new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
     const monthFormat = new Intl.DateTimeFormat('fr-FR', { month: 'short' });
-    const relativeFormat = new Intl.RelativeTimeFormat('fr', { numeric: 'auto' });
-
-    function relativeTime(seconds) {
-        if (!seconds) return '';
-        const diff = seconds - Date.now() / 1000;
-        const units = [['year', 31536000], ['month', 2592000], ['week', 604800], ['day', 86400], ['hour', 3600], ['minute', 60]];
-        for (const [unit, size] of units) {
-            if (Math.abs(diff) >= size) return relativeFormat.format(Math.round(diff / size), unit);
-        }
-        return "à l'instant";
-    }
-
     function formatDuration(seconds) {
         const minutes = Math.round(seconds / 60);
         if (minutes < 60) return minutes + ' min';
@@ -292,7 +280,7 @@
                 key: c.document + ':' + (c.id || i),
                 text: c.text,
                 note: c.note || '',
-                caption: [titles[c.document] || c.document, c.chapter, formatDate(c.created_at)].filter(Boolean).join(' · '),
+                caption: clippingCaption(c, titles[c.document] || c.document),
             };
         });
     }

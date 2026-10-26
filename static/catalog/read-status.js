@@ -13,8 +13,8 @@
     let label = null;
     let dateBlock = null;
     let dateInput = null;
-    // Book shown by the sheet: answers for an earlier book are ignored
-    let current = null;
+    // Book shown by the sheet (PyOPDS.bookSheet.follow)
+    let shownPath = null;
 
     /** Status of a book (GET), or the new one after a change (PUT with a body). */
     function call(method, path, body) {
@@ -37,15 +37,14 @@
         dateInput.max = today();
     }
 
-    /** Show the button of the opened book once its status is known. */
+    /** Show the button of the opened book once its status is known (none when signed out). */
     async function show(path) {
         button.hidden = true;
         dateBlock.hidden = true;
-        current = window.SyncAccount.sessionUser() ? path : null;
-        if (!current) return;
+        if (!path) return;
         try {
             const state = await call('GET', path);
-            if (path !== current) return;
+            if (path !== shownPath()) return;
             render(state);
             button.disabled = false;
             button.hidden = false;
@@ -55,15 +54,15 @@
     }
 
     async function toggle() {
-        const path = current;
+        const path = shownPath();
         if (!path) return;
         const read = button.getAttribute('aria-pressed') !== 'true';
         button.disabled = true;
         try {
             const state = await call('PUT', path, { path: path, read: read });
-            if (path === current) render(state);
+            if (path === shownPath()) render(state);
         } catch (e) {
-            if (path === current) button.title = 'Échec de la mise à jour, réessayer';
+            if (path === shownPath()) button.title = 'Échec de la mise à jour, réessayer';
         } finally {
             button.disabled = false;
         }
@@ -71,14 +70,14 @@
 
     /** Save the day the book was read (an empty field clears it). */
     async function saveDate() {
-        const path = current;
+        const path = shownPath();
         if (!path || (dateInput.value && !dateInput.checkValidity())) return;
         dateInput.disabled = true;
         try {
             const state = await call('PUT', path, { path: path, read: true, finished_date: dateInput.value || null });
-            if (path === current) render(state);
+            if (path === shownPath()) render(state);
         } catch (e) {
-            if (path === current) dateInput.title = 'Échec de la mise à jour, réessayer';
+            if (path === shownPath()) dateInput.title = 'Échec de la mise à jour, réessayer';
         } finally {
             dateInput.disabled = false;
         }
@@ -90,13 +89,11 @@
         label = document.getElementById('book-dialog-read-label');
         dateBlock = document.getElementById('book-dialog-read-date-block');
         dateInput = document.getElementById('book-dialog-read-date');
-        const dialog = document.getElementById('book-dialog');
-        if (!button || !label || !dateBlock || !dateInput || !dialog) return;
+        if (!button || !label || !dateBlock || !dateInput) return;
+        shownPath = PyOPDS.bookSheet.follow(show);
+        if (!shownPath) return;
         button.addEventListener('click', toggle);
         dateInput.addEventListener('change', saveDate);
-        dialog.addEventListener('book-sheet:open', function (event) {
-            show(event.detail.path);
-        });
     }
 
     PyOPDS.readStatus = { init: init };

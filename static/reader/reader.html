@@ -4,16 +4,9 @@
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
     <title>Lecture</title>
-    <!--#include app -->
-    <script src="/static/shared/theme.js"></script>
-    <link rel="stylesheet" href="/static/tailwind.css"/>
-    <script src="/static/vendor/lucide.min.js"></script>
+    <!--#include page-head -->
     <link rel="stylesheet" href="/static/reader/reader.css"/>
-    <!-- Components registered on alpine:init, so before Alpine (deferred scripts run in order);
-         foliate-js (static/vendor/foliate/) is loaded by static/reader/book.js with import() -->
-    <script src="/static/shared/account.js" defer></script>
-    <script src="/static/shared/page-kit.js" defer></script>
-    <script src="/static/shared/nav.js" defer></script>
+    <!-- foliate-js (static/vendor/foliate/) is loaded by static/reader/book.js with import() -->
     <script src="/static/reader/positions.js" defer></script>
     <script src="/static/reader/book.js" defer></script>
     <script src="/static/reader/settings.js" defer></script>
@@ -24,7 +17,7 @@
     <script src="/static/reader/narration.js" defer></script>
     <script src="/static/reader/audiobook.js" defer></script>
     <script src="/static/reader/reader.js" defer></script>
-    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.17.4/dist/cdn.min.js" defer></script>
+    <!--#include alpine -->
 </head>
 <!-- Templates of the `reader` component (static/reader/reader.js). Icons: <i data-lucide> placeholders, replaced by
      lucide.createIcons() after each render; never put an Alpine directive on them except a static :data-lucide. -->

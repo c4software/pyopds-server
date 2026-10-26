@@ -307,88 +307,7 @@
 
     <xsl:template match="atom:entry">
         <xsl:choose>
-            <xsl:when test="atom:link[@rel='subsection'] and contains($system-tiles, concat(' ', atom:id, ' '))">
-                <a class="block group rounded-lg overflow-hidden transition-all duration-300 transform hover:-translate-y-1 hover:shadow-xl aspect-[2/3]">
-                    <xsl:attribute name="href">
-                        <xsl:value-of select="atom:link[@rel='subsection']/@href"/>
-                    </xsl:attribute>
-                    <div class="h-full relative bg-slate-100 flex flex-col items-center justify-center p-4 text-center border border-slate-200 dark:bg-slate-800 dark:border-slate-700">
-                        <xsl:call-template name="tile-mosaic"/>
-                        <xsl:choose>
-                            <xsl:when test="atom:id = 'urn:all-books'">
-                                <i data-lucide="library" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
-                            </xsl:when>
-                            <xsl:when test="atom:id = 'urn:recent-books'">
-                                <i data-lucide="clock" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
-                            </xsl:when>
-                            <xsl:when test="atom:id = 'urn:by-year'">
-                                <i data-lucide="calendar" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
-                            </xsl:when>
-                            <xsl:when test="atom:id = 'urn:by-author'">
-                                <i data-lucide="users" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
-                            </xsl:when>
-                            <xsl:when test="atom:id = 'urn:by-genre'">
-                                <i data-lucide="tags" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
-                            </xsl:when>
-                            <xsl:when test="atom:id = 'urn:recommendations'">
-                                <i data-lucide="sparkles" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
-                            </xsl:when>
-                            <xsl:when test="atom:id = 'urn:reading'">
-                                <i data-lucide="book-open" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
-                            </xsl:when>
-                            <xsl:when test="atom:id = 'urn:series-next'">
-                                <i data-lucide="list-ordered" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
-                            </xsl:when>
-                        </xsl:choose>
-                        <div class="font-semibold text-slate-700 transition-colors dark:text-slate-300"><xsl:value-of select="atom:title"/></div>
-                        <div class="text-sm text-slate-500 mt-1 dark:text-slate-400">System collection</div>
-                    </div>
-                </a>
-            </xsl:when>
-            <!-- Letter entries for author navigation -->
-            <xsl:when test="atom:link[@rel='subsection'] and starts-with(atom:id, 'urn:author-letter:')">
-                <a class="block group rounded-lg overflow-hidden transition-all duration-300 transform hover:-translate-y-1 hover:shadow-xl aspect-[2/3]">
-                    <xsl:attribute name="href">
-                        <xsl:value-of select="atom:link[@rel='subsection']/@href"/>
-                    </xsl:attribute>
-                    <div class="h-full relative bg-slate-100 flex flex-col items-center justify-center p-4 text-center border border-slate-200 dark:bg-slate-800 dark:border-slate-700">
-                        <xsl:call-template name="tile-mosaic"/>
-                        <xsl:variable name="letter" select="substring-after(atom:id, 'urn:author-letter:')"/>
-                        <div class="text-4xl font-bold text-slate-600 dark:text-slate-300 mb-2">
-                            <xsl:value-of select="$letter"/>
-                        </div>
-                        <div class="text-sm text-slate-500 mt-1 dark:text-slate-400">Auteurs</div>
-                    </div>
-                </a>
-            </xsl:when>
-            <!-- Genre entries (with book count) -->
-            <xsl:when test="atom:link[@rel='subsection'] and starts-with(atom:id, 'urn:genre:')">
-                <a class="block group rounded-lg overflow-hidden transition-all duration-300 transform hover:-translate-y-1 hover:shadow-xl aspect-[2/3]">
-                    <xsl:attribute name="href">
-                        <xsl:value-of select="atom:link[@rel='subsection']/@href"/>
-                    </xsl:attribute>
-                    <div class="h-full relative bg-slate-100 flex flex-col items-center justify-center p-4 text-center border border-slate-200 dark:bg-slate-800 dark:border-slate-700">
-                        <xsl:call-template name="tile-mosaic"/>
-                        <i data-lucide="tag" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
-                        <div class="font-semibold text-slate-700 transition-colors dark:text-slate-300"><xsl:value-of select="atom:title"/></div>
-                        <div class="text-sm text-slate-500 mt-1 dark:text-slate-400">Genre</div>
-                    </div>
-                </a>
-            </xsl:when>
-            <!-- Author entries (with book count) -->
-            <xsl:when test="atom:link[@rel='subsection'] and starts-with(atom:id, 'urn:author:')">
-                <a class="block group rounded-lg overflow-hidden transition-all duration-300 transform hover:-translate-y-1 hover:shadow-xl aspect-[2/3]">
-                    <xsl:attribute name="href">
-                        <xsl:value-of select="atom:link[@rel='subsection']/@href"/>
-                    </xsl:attribute>
-                    <div class="h-full relative bg-slate-100 flex flex-col items-center justify-center p-4 text-center border border-slate-200 dark:bg-slate-800 dark:border-slate-700">
-                        <xsl:call-template name="tile-mosaic"/>
-                        <i data-lucide="user" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
-                        <div class="font-semibold text-slate-700 transition-colors dark:text-slate-300"><xsl:value-of select="atom:title"/></div>
-                        <div class="text-sm text-slate-500 mt-1 dark:text-slate-400">Auteur</div>
-                    </div>
-                </a>
-            </xsl:when>
+            <!-- Navigation tiles: system collections, author letters, genres, authors, folders -->
             <xsl:when test="atom:link[@rel='subsection']">
                 <a class="block group rounded-lg overflow-hidden transition-all duration-300 transform hover:-translate-y-1 hover:shadow-xl aspect-[2/3]">
                     <xsl:attribute name="href">
@@ -396,9 +315,21 @@
                     </xsl:attribute>
                     <div class="h-full relative bg-slate-100 flex flex-col items-center justify-center p-4 text-center border border-slate-200 dark:bg-slate-800 dark:border-slate-700">
                         <xsl:call-template name="tile-mosaic"/>
-                        <i data-lucide="folder" class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500"></i>
-                        <div class="font-semibold text-slate-700 transition-colors dark:text-slate-300 "><xsl:value-of select="atom:title"/></div>
-                        <div class="text-sm text-slate-500 mt-1 dark:text-slate-400">Collection</div>
+                        <xsl:choose>
+                            <xsl:when test="starts-with(atom:id, 'urn:author-letter:')">
+                                <div class="text-4xl font-bold text-slate-600 dark:text-slate-300 mb-2">
+                                    <xsl:value-of select="substring-after(atom:id, 'urn:author-letter:')"/>
+                                </div>
+                                <div class="text-sm text-slate-500 mt-1 dark:text-slate-400">Auteurs</div>
+                            </xsl:when>
+                            <xsl:otherwise>
+                                <i class="w-12 h-12 text-slate-400 mb-3 transition-colors dark:text-slate-500">
+                                    <xsl:attribute name="data-lucide"><xsl:call-template name="tile-icon"/></xsl:attribute>
+                                </i>
+                                <div class="font-semibold text-slate-700 transition-colors dark:text-slate-300"><xsl:value-of select="atom:title"/></div>
+                                <div class="text-sm text-slate-500 mt-1 dark:text-slate-400"><xsl:call-template name="tile-kind"/></div>
+                            </xsl:otherwise>
+                        </xsl:choose>
                     </div>
                 </a>
             </xsl:when>
@@ -485,6 +416,33 @@
     </xsl:template>
 
     <!-- Background of a navigation tile: covers listed by the feed, animated by setupTileMosaics -->
+    <!-- Lucide icon of a navigation tile (atom:entry with a subsection link) -->
+    <xsl:template name="tile-icon">
+        <xsl:choose>
+            <xsl:when test="atom:id = 'urn:all-books'">library</xsl:when>
+            <xsl:when test="atom:id = 'urn:recent-books'">clock</xsl:when>
+            <xsl:when test="atom:id = 'urn:by-year'">calendar</xsl:when>
+            <xsl:when test="atom:id = 'urn:by-author'">users</xsl:when>
+            <xsl:when test="atom:id = 'urn:by-genre'">tags</xsl:when>
+            <xsl:when test="atom:id = 'urn:recommendations'">sparkles</xsl:when>
+            <xsl:when test="atom:id = 'urn:reading'">book-open</xsl:when>
+            <xsl:when test="atom:id = 'urn:series-next'">list-ordered</xsl:when>
+            <xsl:when test="starts-with(atom:id, 'urn:genre:')">tag</xsl:when>
+            <xsl:when test="starts-with(atom:id, 'urn:author:')">user</xsl:when>
+            <xsl:otherwise>folder</xsl:otherwise>
+        </xsl:choose>
+    </xsl:template>
+
+    <!-- Kind of a navigation tile, under its title -->
+    <xsl:template name="tile-kind">
+        <xsl:choose>
+            <xsl:when test="contains($system-tiles, concat(' ', atom:id, ' '))">System collection</xsl:when>
+            <xsl:when test="starts-with(atom:id, 'urn:genre:')">Genre</xsl:when>
+            <xsl:when test="starts-with(atom:id, 'urn:author:')">Auteur</xsl:when>
+            <xsl:otherwise>Collection</xsl:otherwise>
+        </xsl:choose>
+    </xsl:template>
+
     <xsl:template name="tile-mosaic">
         <xsl:if test="atom:link[@rel='urn:pyopds:mosaic-cover']">
             <div class="tile-mosaic" aria-hidden="true">

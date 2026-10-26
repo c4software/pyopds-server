@@ -1,5 +1,5 @@
 // Helpers shared by the static pages (reading.js, clippings.js, loaded with defer before them) and the
-// catalog scripts (loaded before static/catalog/): dates, library paths in URLs, JSON calls of the web UI
+// catalog scripts (loaded before static/catalog/): dates (absolute and relative), library paths in URLs, JSON calls of the web UI
 // endpoints and the lucide icons refresh of the Alpine components.
 (function () {
     'use strict';
@@ -9,6 +9,25 @@
     /** "12 oct. 2026" from unix seconds ('' when missing). */
     function formatDate(seconds) {
         return seconds ? dateFormat.format(new Date(seconds * 1000)) : '';
+    }
+
+    const relativeFormat = new Intl.RelativeTimeFormat('fr', { numeric: 'auto' });
+    const RELATIVE_UNITS = [['year', 31536000], ['month', 2592000], ['week', 604800], ['day', 86400], ['hour', 3600], ['minute', 60]];
+
+    /** "il y a 3 jours" from unix seconds ('' when missing). */
+    function relativeTime(seconds) {
+        if (!seconds) return '';
+        const diff = seconds - Date.now() / 1000;
+        for (const [unit, size] of RELATIVE_UNITS) {
+            if (Math.abs(diff) >= size) return relativeFormat.format(Math.round(diff / size), unit);
+        }
+        return "à l'instant";
+    }
+
+    /** Caption of a clipping (static/partials/clipping.html, catalog book sheet): book when given, chapter, page, date. */
+    function clippingCaption(clip, book) {
+        const page = clip.page ? 'p. ' + clip.page : '';
+        return [book, clip.chapter, page, formatDate(clip.created_at)].filter(Boolean).join(' · ');
     }
 
     /** A library path (relative to LIBRARY_DIR) for an URL, its '/' kept. */
@@ -28,23 +47,27 @@
     }
 
     /**
-     * JSON answer of a web UI or sync API endpoint (session cookie); `body` is sent as JSON. A failure, or an
-     * expired session (401, or the sign-in page answering instead: 200), throws an Error whose `status` is
-     * the HTTP status and message the server's one when given.
+     * JSON answer of a web UI or sync API endpoint (session cookie); `body` is sent as JSON, `options.keepalive`
+     * lets the request leave while the page closes. No content (204) gives null. A failure, or an expired
+     * session (401, or the sign-in page answering instead: 200), throws an Error whose `status` is the HTTP
+     * status, `data` the JSON error body and message the server's one when given.
      */
-    async function fetchJson(url, method, body) {
+    async function fetchJson(url, method, body, options) {
         const response = await fetch(url, {
             method: method || 'GET',
             headers: body ? { 'Accept': 'application/json', 'Content-Type': 'application/json' } : { 'Accept': 'application/json' },
             body: body ? JSON.stringify(body) : undefined,
             cache: 'no-store',
             credentials: 'same-origin',
+            keepalive: Boolean(options && options.keepalive),
         });
+        if (response.status === 204) return null;
         const isJson = (response.headers.get('Content-Type') || '').indexOf('application/json') === 0;
         if (!response.ok || !isJson) {
             const data = isJson ? await response.json().catch(function () { return null; }) : null;
             const error = new Error((data && data.message) || 'Erreur ' + response.status);
             error.status = response.status;
+            error.data = data;
             throw error;
         }
         return response.json();
@@ -72,7 +95,7 @@
     }
 
     window.PageKit = {
-        formatDate: formatDate, encodePath: encodePath, libraryLinks: libraryLinks, fetchJson: fetchJson, signedOut: signedOut,
+        formatDate: formatDate, relativeTime: relativeTime, clippingCaption: clippingCaption, encodePath: encodePath, libraryLinks: libraryLinks, fetchJson: fetchJson, signedOut: signedOut,
         icons: icons, features: features,
     };
 })();

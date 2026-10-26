@@ -56,14 +56,7 @@
             if (body.new_session) state.newSession = false;
             state.sending = true;
             try {
-                const response = await fetch('/webui/reader/session', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-                    body: JSON.stringify(body),
-                    credentials: 'same-origin',
-                    keepalive: Boolean(keepalive),
-                });
-                if (!response.ok) throw new Error(String(response.status));
+                await window.PageKit.fetchJson('/webui/reader/session', 'POST', body, { keepalive: keepalive });
             } catch (e) {
                 // Kept for the next upload
                 state.seconds += body.seconds;

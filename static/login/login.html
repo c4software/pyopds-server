@@ -4,17 +4,10 @@
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>Connexion</title>
-    <!--#include app -->
-    <script src="/static/shared/theme.js"></script>
-    <link rel="stylesheet" href="/static/tailwind.css"/>
-    <script src="/static/vendor/lucide.min.js"></script>
+    <!--#include page-head -->
     <link rel="stylesheet" href="/static/reading/reading.css"/>
-    <!-- Component registered on alpine:init, so before Alpine (deferred scripts run in order) -->
-    <script src="/static/shared/account.js" defer></script>
-    <script src="/static/shared/page-kit.js" defer></script>
-    <script src="/static/shared/nav.js" defer></script>
     <script src="/static/login/login.js" defer></script>
-    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.17.4/dist/cdn.min.js" defer></script>
+    <!--#include alpine -->
 </head>
 <!-- `login` component (static/login/login.js). The static texts and the plain form post (POST /login, `next`) also work without JavaScript. -->
 <body x-data="login" class="bg-slate-50 font-sans dark:bg-slate-900 text-slate-800 dark:text-slate-200 min-h-screen">

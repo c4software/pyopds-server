@@ -27,28 +27,27 @@
     }
 
     async function createAccount(user, password) {
-        const response = await fetch('/users/create', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({ username: user, password: window.SyncAccount.md5(password) }),
-        });
-        if (response.status === 201) return null;
-        const data = await response.json().catch(function () { return null; });
-        if (data && data.code === 2002) return 'Ce nom d\'utilisateur est déjà pris.';
-        if (data && /disabled/i.test(data.message || '')) return 'La création de comptes est désactivée sur ce serveur.';
-        return 'Nom d\'utilisateur invalide (lettres, chiffres et . _ @ + - uniquement).';
+        try {
+            await window.PageKit.fetchJson('/users/create', 'POST', { username: user, password: window.SyncAccount.md5(password) });
+            return null;
+        } catch (e) {
+            if (!e.status) throw e;
+            const data = e.data;
+            if (data && data.code === 2002) return 'Ce nom d\'utilisateur est déjà pris.';
+            if (data && /disabled/i.test(data.message || '')) return 'La création de comptes est désactivée sur ce serveur.';
+            return 'Nom d\'utilisateur invalide (lettres, chiffres et . _ @ + - uniquement).';
+        }
     }
 
     async function openSession(user, password) {
-        const response = await fetch('/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({ username: user, password: password }),
-            credentials: 'same-origin',
-        });
-        if (response.status === 401) return 'Utilisateur ou mot de passe incorrect.';
-        if (!response.ok) return 'Connexion impossible (erreur ' + response.status + ').';
-        return null;
+        try {
+            await window.PageKit.fetchJson('/login', 'POST', { username: user, password: password });
+            return null;
+        } catch (e) {
+            if (!e.status) throw e;
+            if (e.status === 401) return 'Utilisateur ou mot de passe incorrect.';
+            return 'Connexion impossible (erreur ' + e.status + ').';
+        }
     }
 
     document.addEventListener('alpine:init', function () {
@@ -70,7 +69,7 @@
                     this.registrationOpen = document.getElementById('account-section').dataset.registration === 'open';
                     this.signUp = this.registrationOpen && params.get('signup') === '1';
                     if (params.get('error')) this.error = 'Utilisateur ou mot de passe incorrect.';
-                    this.$nextTick(function () { window.lucide.createIcons(); });
+                    window.PageKit.icons(this);
                 },
 
                 toggleMode() {

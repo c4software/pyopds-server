@@ -1,0 +1,8 @@
+<!-- Cover thumbnail of a book in the static pages ("#include book-thumb" with item and error): the `item` view model's
+     cover URL ('' without one) and broken flag, `error` called when the image fails; a book icon instead. -->
+<template x-if="{{item}}.cover && !{{item}}.broken">
+    <img class="book-thumb" alt="" loading="lazy" :src="{{item}}.cover" @error="{{error}}"/>
+</template>
+<template x-if="!{{item}}.cover || {{item}}.broken">
+    <div class="book-thumb flex items-center justify-center text-slate-400 dark:text-slate-500"><i data-lucide="book" class="w-5 h-5"></i></div>
+</template>

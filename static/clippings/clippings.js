@@ -7,12 +7,11 @@
     const EXPORT_URL = '/webui/clippings/export';
 
     function clipView(clip, index) {
-        const page = clip.page ? 'p. ' + clip.page : '';
         return {
             key: clip.id || String(index),
             text: clip.text,
             note: clip.note || '',
-            caption: [clip.chapter, page, window.PageKit.formatDate(clip.created_at)].filter(Boolean).join(' · '),
+            caption: window.PageKit.clippingCaption(clip),
             haystack: [clip.text, clip.note, clip.chapter].join('\n').toLowerCase(),
         };
     }
@@ -25,6 +24,7 @@
             title: book.title,
             author: book.author || '',
             links: links,
+            cover: links ? links.cover : '',
             broken: false,
             exportUrl: book.path ? EXPORT_URL + '?path=' + encodeURIComponent(book.path) : '',
             bookHaystack: [book.title, book.author].join('\n').toLowerCase(),

@@ -12,8 +12,8 @@
     let count = null;
     let exportLink = null;
     let template = null;
-    // Book shown by the sheet: answers for an earlier book are ignored
-    let current = null;
+    // Book shown by the sheet (PyOPDS.bookSheet.follow)
+    let shownPath = null;
 
     function item(clip) {
         const node = template.content.firstElementChild.cloneNode(true);
@@ -21,20 +21,18 @@
         field('text').textContent = clip.text;
         field('note').textContent = clip.note || '';
         field('note').hidden = !clip.note;
-        const page = clip.page ? 'p. ' + clip.page : '';
-        field('caption').textContent = [clip.chapter, page, window.PageKit.formatDate(clip.created_at)].filter(Boolean).join(' · ');
+        field('caption').textContent = window.PageKit.clippingCaption(clip);
         return node;
     }
 
     async function show(path) {
         block.hidden = true;
         list.replaceChildren();
-        current = window.SyncAccount.sessionUser() ? path : null;
-        if (!current) return;
+        if (!path) return;
         try {
             const data = await window.PageKit.fetchJson('/webui/clippings?path=' + encodeURIComponent(path));
             const clips = data.groups.length ? data.groups[0].clippings : [];
-            if (path !== current || !clips.length) return;
+            if (path !== shownPath() || !clips.length) return;
             list.replaceChildren.apply(list, clips.map(item));
             count.textContent = String(clips.length);
             exportLink.href = '/webui/clippings/export?path=' + encodeURIComponent(path);
@@ -51,11 +49,8 @@
         count = document.getElementById('book-dialog-clippings-count');
         exportLink = document.getElementById('book-dialog-clippings-export');
         template = document.getElementById('book-dialog-clipping-template');
-        const dialog = document.getElementById('book-dialog');
-        if (!block || !list || !count || !exportLink || !template || !dialog) return;
-        dialog.addEventListener('book-sheet:open', function (event) {
-            show(event.detail.path);
-        });
+        if (!block || !list || !count || !exportLink || !template) return;
+        shownPath = PyOPDS.bookSheet.follow(show);
     }
 
     PyOPDS.bookClippings = { init: init };

@@ -4,17 +4,10 @@
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>Lecture et statistiques</title>
-    <!--#include app -->
-    <script src="/static/shared/theme.js"></script>
-    <link rel="stylesheet" href="/static/tailwind.css"/>
-    <script src="/static/vendor/lucide.min.js"></script>
+    <!--#include page-head -->
     <link rel="stylesheet" href="/static/reading/reading.css"/>
-    <!-- Components registered on alpine:init, so before Alpine (deferred scripts run in order) -->
-    <script src="/static/shared/account.js" defer></script>
-    <script src="/static/shared/page-kit.js" defer></script>
-    <script src="/static/shared/nav.js" defer></script>
     <script src="/static/reading/reading.js" defer></script>
-    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.17.4/dist/cdn.min.js" defer></script>
+    <!--#include alpine -->
 </head>
 <!-- Templates of the `reading` component (static/reading/reading.js). Icons: <i data-lucide> placeholders, replaced by
      lucide.createIcons() after each render; never put an Alpine directive on them except a static :data-lucide. -->
@@ -22,8 +15,7 @@
     <!--#include header title="Lecture" -->
 
     <main x-show="ready" x-cloak class="flex p-4 sm:p-6 max-w-6xl mx-auto flex-col gap-8">
-        <p x-show="loading" class="text-sm text-slate-500 dark:text-slate-400">Chargement…</p>
-        <p x-show="error" x-text="error" class="text-sm text-red-600 dark:text-red-400"></p>
+        <!--#include load-status -->
 
         <div x-show="kpis.length" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <template x-for="kpi in kpis" :key="kpi.label">
@@ -99,12 +91,7 @@
                 <div :class="section.grid">
                     <template x-for="book in section.books" :key="book.key">
                         <article class="card p-3 flex gap-3">
-                            <template x-if="book.cover && !book.broken">
-                                <img class="book-thumb" alt="" loading="lazy" :src="book.cover" @error="coverError(book)"/>
-                            </template>
-                            <template x-if="!book.cover || book.broken">
-                                <div class="book-thumb flex items-center justify-center text-slate-400 dark:text-slate-500"><i data-lucide="book" class="w-5 h-5"></i></div>
-                            </template>
+                            <!--#include book-thumb item="book" error="coverError(book)" -->
                             <div class="min-w-0 flex-1">
                                 <div class="font-medium text-sm leading-snug" x-text="book.title"></div>
                                 <div x-show="book.author" class="text-xs text-slate-500 dark:text-slate-400 truncate" x-text="book.author"></div>

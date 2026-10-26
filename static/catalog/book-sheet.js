@@ -146,7 +146,7 @@
             return false;
         }
         fillBookDialog(link);
-        // Other features of the sheet (read-status.js, book-clippings.js) follow the opened book
+        // Other features of the sheet follow the opened book (follow)
         bookDialog.dispatchEvent(new CustomEvent('book-sheet:open', { detail: { link: link, path: bookPath(link) } }));
         bookDialog.showModal();
         document.documentElement.style.overflow = 'hidden';
@@ -160,6 +160,22 @@
             history.replaceState(null, '', '#book=' + encodeURIComponent(id));
         }
         return true;
+    }
+
+    /**
+     * Follow the books opened by the sheet for the signed-in reader (read-status.js, book-clippings.js):
+     * onOpen(path) on each opened sheet, path null when signed out. Returns the getter of the book shown
+     * now (answers for an earlier book are ignored), null without the sheet.
+     */
+    function follow(onOpen) {
+        const dialog = document.getElementById('book-dialog');
+        if (!dialog) return null;
+        let current = null;
+        dialog.addEventListener('book-sheet:open', function (event) {
+            current = window.SyncAccount.sessionUser() ? event.detail.path : null;
+            onOpen(current);
+        });
+        return function () { return current; };
     }
 
     /** Intercept plain clicks on the books, wire the dialog and open the sheet of a #book= link. */
@@ -214,5 +230,5 @@
         }
     }
 
-    PyOPDS.bookSheet = { init: init, open: open };
+    PyOPDS.bookSheet = { init: init, open: open, follow: follow };
 })();

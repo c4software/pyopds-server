@@ -1,0 +1,10 @@
+<!-- Start of the <head> of the static pages ("#include page-head", include_partials of controllers/catalog/webui.py):
+     installable app, dark mode before the first render, styles, icons and the shared scripts. The page then adds its
+     styles and scripts (deferred: its Alpine components registered on alpine:init) and ends with "#include alpine". -->
+    <!--#include app -->
+    <script src="/static/shared/theme.js"></script>
+    <link rel="stylesheet" href="/static/tailwind.css"/>
+    <script src="/static/vendor/lucide.min.js"></script>
+    <script src="/static/shared/account.js" defer></script>
+    <script src="/static/shared/page-kit.js" defer></script>
+    <script src="/static/shared/nav.js" defer></script>

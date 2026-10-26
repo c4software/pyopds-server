@@ -107,15 +107,8 @@
             metadata: { filename: info.filename, title: info.title, authors: info.author },
         };
         try {
-            const response = await fetch('/api/v1/progress', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-                body: JSON.stringify(body),
-                credentials: 'same-origin',
-                keepalive: Boolean(keepalive),
-            });
-            if (!response.ok) return null;
-            return (await response.json()).timestamp || null;
+            const data = await window.PageKit.fetchJson('/api/v1/progress', 'PUT', body, { keepalive: keepalive });
+            return data.timestamp || null;
         } catch (e) {
             return null;
         }
