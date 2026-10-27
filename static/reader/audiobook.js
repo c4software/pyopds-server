@@ -49,6 +49,8 @@
         window.Alpine.store('audiobook', {
             available: false,
             state: 'idle',
+            // Player shown, the reading not started yet (it starts with its play button)
+            open: false,
             panel: false,
             path: '',
             // Book's voice and tone ('' : the defaults of the server), as edited in the panel
@@ -63,13 +65,16 @@
             rate: loadRate(),
             rates: RATES,
 
-            get active() { return this.state !== 'idle'; },
+            get active() { return this.open || this.state !== 'idle'; },
             get running() { return this.state === 'playing' || this.state === 'loading'; },
 
-            /** The bottom bar button: start at the page shown, or pause / resume. */
+            /** The bottom bar button shows the player; its play button starts at the page shown, then pauses / resumes. */
             toggle() {
                 if (!narration) return;
-                if (this.state === 'idle') narration.start();
+                if (!this.active) {
+                    this.open = true;
+                    refreshIcons();
+                } else if (this.state === 'idle') narration.start();
                 else if (this.running) narration.pause();
                 else narration.resume();
             },
@@ -143,6 +148,8 @@
             location: hooks.location,
             onState: function (state) {
                 audiobook.state = state;
+                // Stopped, finished or failed: the player closes
+                if (state === 'idle') audiobook.open = false;
                 refreshIcons();
             },
             // The player closes: « Voix et ton » stays at hand (a voice removed from the server, a wrong tone…)

@@ -17,7 +17,7 @@ Optional and off by default: it needs an OpenAI-compatible text-to-speech server
 
 ## Listening
 
-- **Start**: « Écouter » (headphones) in the bottom bar of the web reader reads from the page shown. The button only appears for a signed-in reader when a speech server is configured.
+- **Start**: « Écouter » (headphones) in the bottom bar of the web reader shows the player; its play button reads from the page shown (from the first sentence starting on it), nothing starts by itself. The button only appears for a signed-in reader when a speech server is configured.
 - **Player**: a floating bar while reading (also on the phone's lock screen, Media Session): pause / resume, hear the sentence again, next sentence, « Voix et ton », stop.
 - **Following**: the sentence read is underlined and the pages turn with it, chapter after chapter. The reading position and the statistics move with the listening, like a reading: continue on KoReader or a CrossPoint reader where the audio stopped.
 - **Voix et ton** (per book, kept by the server for each reader): the **voice** (the cloned voices of the settings first, then those of the model, or typed) and the **reading tone**, a free prompt (« voix grave et posée, ton de conteur, lecture lente »). Empty: the defaults of the settings; a voice no longer offered (removed from the settings or the server) falls back to the default voice. A change applies from the sentence read. The **speed** (0.8× to 1.5×) is kept in the browser.

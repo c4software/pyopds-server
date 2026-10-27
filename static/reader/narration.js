@@ -107,12 +107,34 @@
         return { add: add, close: close };
     }
 
-    /** First block of a TTS: the one of the starting point in its chapter, else the chapter's first. */
+    /** Range of a sentence of the current block of a TTS (its highlight callback is not called). */
+    function markRange(tts, mark) {
+        const highlight = tts.highlight;
+        let range = null;
+        tts.highlight = function (r) { range = r; };
+        try {
+            tts.setMark(mark);
+        } finally {
+            tts.highlight = highlight;
+        }
+        return range;
+    }
+
+    /**
+     * First block of a TTS: from the first sentence starting on the page of the starting point, else the
+     * chapter's first. foliate reads the whole block when none of its sentences starts after the point (the
+     * page opens on the last sentence of a paragraph begun on the previous one): the next block then.
+     */
     function begin(tts, doc, start) {
         if (start) {
             try {
                 const range = start.anchor(doc);
-                if (range) return tts.from(range);
+                if (range) {
+                    const ssml = tts.from(range);
+                    const first = ssml ? sentences(ssml)[0] : null;
+                    const at = first && first.mark !== null ? markRange(tts, first.mark) : null;
+                    return at && at.compareBoundaryPoints(Range.START_TO_START, range) < 0 ? tts.next() : ssml;
+                }
             } catch (e) { /* point not found in this document: the chapter's start */ }
         }
         return tts.start();
@@ -432,11 +454,9 @@
             setState('paused');
         }
 
+        /** Go on after a pause (nothing when stopped: the reading starts only from the player). */
         function resume() {
-            if (state === 'idle') {
-                startAt(null);
-                return;
-            }
+            if (state === 'idle') return;
             paused = false;
             // An audio is loaded: played now; else the one being prepared plays when it comes
             if (!stopPlaying) {
