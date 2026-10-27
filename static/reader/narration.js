@@ -22,6 +22,11 @@
     const MARK_KEY = 'pyopds-narration';
     const MARK_WIDTH = 2;
     const LETTER_RE = /[\p{L}\p{N}]/u;
+    // Word cut at the end of a line (fixed-layout books converted from a PDF: "cer", "-", "veau", one line per
+    // element, each line a sentence for the segmenter): the start of the word, its hyphen, the rest of the word
+    const WORD_START_RE = /\p{L}$/u;
+    const CUT_WORD_RE = /\p{L}-$/u;
+    const WORD_END_RE = /^\p{Ll}/u;
 
     let modules = null;
 
@@ -53,9 +58,20 @@
             }
         };
         walk(doc.documentElement);
-        return list
-            .map(function (s) { return { mark: s.mark, text: s.text.replace(/­/g, '').replace(/\s+/g, ' ').trim() }; })
+        return joinCutWords(list.map(function (s) { return { mark: s.mark, text: s.text.replace(/­/g, '').replace(/\s+/g, ' ').trim() }; }))
             .filter(function (s) { return LETTER_RE.test(s.text); });
+    }
+
+    /** Sentences with the words cut at the end of a line read whole: "cer" + "-" + "veau va" → "cerveau va". */
+    function joinCutWords(list) {
+        const joined = [];
+        list.forEach(function (sentence) {
+            const last = joined[joined.length - 1];
+            if (last && sentence.text === '-' && WORD_START_RE.test(last.text)) last.text += '-';
+            else if (last && CUT_WORD_RE.test(last.text) && WORD_END_RE.test(sentence.text)) last.text = last.text.slice(0, -1) + sentence.text;
+            else joined.push(Object.assign({}, sentence));
+        });
+        return joined;
     }
 
     /** Pieces of at most `max` characters of a text, cut between words. */
@@ -504,5 +520,5 @@
         };
     }
 
-    PyReader.narration = { create: create, sentences: sentences, requestBuilder: requestBuilder };
+    PyReader.narration = { create: create, sentences: sentences, joinCutWords: joinCutWords, requestBuilder: requestBuilder };
 })();

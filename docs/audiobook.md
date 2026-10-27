@@ -25,7 +25,7 @@ Optional and off by default: it needs an OpenAI-compatible text-to-speech server
 
 ## How it works
 
-1. foliate-js's TTS module (`static/vendor/foliate/tts.js`, vendored unchanged) splits each chapter into blocks (paragraphs, titles) and sentences, starting from the place shown.
+1. foliate-js's TTS module (`static/vendor/foliate/tts.js`, vendored unchanged) splits each chapter into blocks (paragraphs, titles) and sentences, starting from the place shown. The words cut at the end of a line (fixed-layout books converted from a PDF, one element per line: « cer », « - », « veau ») are read whole.
 2. The sentences of several paragraphs are joined into one request, so that the voice keeps the same tone across them; line breaks between paragraphs are kept, as pauses. The requests grow: about **200 characters** for the first one, so that the sound starts within seconds, then **500**, then up to **`max_chars`** (1,000 by default). A chapter always ends its request.
 3. Each request goes to `POST /webui/audiobook/speech` with the book's voice and tone; the server relays it to the speech server and answers the audio. One request is played while the **next two** are prepared, one at a time per reader, and at most `concurrency` requests reach the speech server for all the readers.
 4. While a request plays, the sentences are underlined in turn (their place in the audio is estimated from their place in the text); « next sentence » and « hear the sentence again » move inside the audio.
