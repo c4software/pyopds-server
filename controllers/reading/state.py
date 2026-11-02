@@ -52,6 +52,11 @@ class ReadingState:
         """Books with a given reading signal ('reading', 'read', 'paused', 'dnf'), most recent first."""
         return [book for book in self.books if book['signal'] == signal]
 
+    @property
+    def in_progress(self) -> list[dict]:
+        """Books of the « En cours » shelf: those being read, then the paused ones, most recent first."""
+        return self.with_signal('reading') + self.with_signal('paused')
+
 
 class ReadingStateService:
     """Compute and cache the reading state of a sync user.

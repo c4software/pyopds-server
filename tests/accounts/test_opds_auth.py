@@ -407,6 +407,14 @@ class TestOPDSAuthAndRecommendations(unittest.TestCase):
         # Volume 2 already opened: volume 3 comes next
         self._push_progress('shelves', 'saga2.epub', 0.1)
         self.assertEqual(titles(feed('/opds/series-next')), ['Saga 3'])
+        # Paused book: still listed, after those being read, with its badge
+        self._push_progress('shelves', 'hyperion.epub', 0.42, status='paused')
+        reading = feed('/opds/reading')
+        self.assertEqual(titles(reading), ['Saga 2', 'Hyperion'])
+        active, paused = reading.findall('atom:entry', self.ns)
+        self.assertIn('En pause · Lu à 42 %', paused.find('atom:summary', self.ns).text)
+        self.assertEqual(paused.findtext('{urn:pyopds:metadata}badge'), 'En pause')
+        self.assertIsNone(active.find('{urn:pyopds:metadata}badge'))
 
         # « Masquer les livres lus »: facets of the lists, remembered for the next lists
         books = feed('/opds/books?page=1')

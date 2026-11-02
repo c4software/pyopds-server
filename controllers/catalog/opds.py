@@ -334,7 +334,8 @@ class OPDSFeedGenerator:
         Links are (rel, href, type) tuples, with optional fourth and fifth items: the link title and a
         dict of extra attributes. Entries may
         carry optional book metadata: 'summary' (text), 'categories' ([(term, label)]), 'issued'
-        (year, dc:issued), 'series' ((name, index)) and 'rating' (0-5).
+        (year, dc:issued), 'series' ((name, index)), 'rating' (0-5) and 'badge' (short state shown on the
+        cover by the web view).
         """
         feed = ET.Element(
             'feed',
@@ -385,6 +386,9 @@ class OPDSFeedGenerator:
 
             if entry_data.get('rating'):
                 ET.SubElement(entry, 'pyopds:rating').text = f"{entry_data['rating']:g}"
+
+            if entry_data.get('badge'):
+                ET.SubElement(entry, 'pyopds:badge').text = entry_data['badge']
 
             if entry_data.get('summary'):
                 ET.SubElement(entry, 'summary', {'type': 'text'}).text = entry_data['summary']

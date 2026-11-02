@@ -1,6 +1,7 @@
 """Personal OPDS feeds of the signed-in reader, built from the reading sync.
 
-- « En cours » (/opds/reading): library books being read, most recently synced first.
+- « En cours » (/opds/reading): library books being read, then the paused ones (with a badge), most
+  recently synced first.
 - « Suite de vos séries » (/opds/series-next): the next library volume of each series the reader
   read or started.
 - « Masquer les livres lus »: facet of the book lists (opds:facetGroup « Livres lus »), remembered
@@ -19,6 +20,7 @@ from controllers.reading.state import ReadingState, ReadingStateService
 FACET_REL = 'http://opds-spec.org/facet'
 HIDE_READ_PREFERENCE = 'hide_read'
 READ_FACET_GROUP = 'Livres lus'
+PAUSED_LABEL = 'En pause'
 
 
 def _user(request_handler) -> str | None:
@@ -117,12 +119,15 @@ class ReaderFeedsController(OPDSController):
         self._send_xml_response(xml, 'acquisition')
 
     def show_reading(self) -> None:
-        """GET /opds/reading: library books being read by the signed-in reader, most recent first."""
-        books = self._in_library(_state(self.request.opds_user).with_signal('reading'))
+        """GET /opds/reading: library books the signed-in reader is reading, then those paused."""
+        books = self._in_library(_state(self.request.opds_user).in_progress)
         entries = self._create_book_entries(self._book_list(books))
         for entry, book in zip(entries, books):
-            if book.get('percentage'):
-                prepend_summary(entry, f"Lu à {round(book['percentage'] * 100)} %")
+            progress = f"Lu à {round(book['percentage'] * 100)} %" if book.get('percentage') else None
+            if book['signal'] == 'paused':
+                entry['badge'] = PAUSED_LABEL
+                progress = ' · '.join(filter(None, (PAUSED_LABEL, progress)))
+            prepend_summary(entry, progress)
         subtitle = None if entries else 'Aucun livre de la bibliothèque en cours de lecture.'
         self._send_feed('En cours', 'urn:reading', '/opds/reading', entries, subtitle)
 
@@ -153,7 +158,7 @@ def root_entries(request_handler) -> list[dict]:
     if user:
         try:
             state = _state(user)
-            reading = [book['path'] for book in state.with_signal('reading')]
+            reading = [book['path'] for book in state.in_progress]
             series = [item['path'] for item in series_continuations(state)]
         except Exception:
             # The tiles are a bonus: never break the root catalog because of them

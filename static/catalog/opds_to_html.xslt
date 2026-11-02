@@ -393,14 +393,20 @@
                             </xsl:attribute>
                         </img>
                         
-                        <!-- Volume badge of a series book -->
+                        <!-- Volume of a series book, state given by the feed (« En pause ») -->
                         <xsl:if test="pyopds:series/@index">
-                            <span class="absolute top-1.5 right-1.5 z-10 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none bg-slate-900/70 text-white shadow-sm backdrop-blur-sm">
-                                <xsl:attribute name="title">
-                                    <xsl:value-of select="concat('Tome ', pyopds:series/@index, ' · ', pyopds:series)"/>
-                                </xsl:attribute>
-                                <xsl:value-of select="concat('T', pyopds:series/@index)"/>
-                            </span>
+                            <xsl:call-template name="cover-badge">
+                                <xsl:with-param name="side" select="'right-1.5'"/>
+                                <xsl:with-param name="text" select="concat('T', pyopds:series/@index)"/>
+                                <xsl:with-param name="title" select="concat('Tome ', pyopds:series/@index, ' · ', pyopds:series)"/>
+                            </xsl:call-template>
+                        </xsl:if>
+                        <xsl:if test="pyopds:badge">
+                            <xsl:call-template name="cover-badge">
+                                <xsl:with-param name="side" select="'left-1.5'"/>
+                                <xsl:with-param name="text" select="pyopds:badge"/>
+                                <xsl:with-param name="title" select="pyopds:badge"/>
+                            </xsl:call-template>
                         </xsl:if>
                         <div class="book-cover-fallback absolute inset-0 flex flex-col">
                             <div class="absolute top-0 left-0 w-3 h-full bg-black/10 rounded-l-sm dark:bg-black/20" style="border-right: 1px solid rgba(0,0,0,0.1);"></div>
@@ -413,6 +419,16 @@
                 </a>
             </xsl:otherwise>
         </xsl:choose>
+    </xsl:template>
+
+    <!-- Small label over a book cover, in a top corner (`side`: literal Tailwind class) -->
+    <xsl:template name="cover-badge">
+        <xsl:param name="side"/>
+        <xsl:param name="text"/>
+        <xsl:param name="title"/>
+        <span class="absolute top-1.5 {$side} z-10 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none bg-slate-900/70 text-white shadow-sm backdrop-blur-sm" title="{$title}">
+            <xsl:value-of select="$text"/>
+        </span>
     </xsl:template>
 
     <!-- Background of a navigation tile: covers listed by the feed, animated by setupTileMosaics -->
