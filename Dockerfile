@@ -24,6 +24,11 @@ CMD ["watchfiles", "python server.py", "controllers", "routes.py", "server.py", 
 # Production image: Python standard library only
 FROM python:3.12-slim
 
+# Debian security fixes not yet in the python image (zlib, for example)
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY routes.py /app/routes.py
